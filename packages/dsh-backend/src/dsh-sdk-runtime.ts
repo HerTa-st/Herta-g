@@ -300,16 +300,22 @@ export class DshSdkRuntime implements BackendRuntime {
 }
 
 function composeEnv(launch: DshLaunchOptions): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    DSH_HOME: normalize(launch.dshHome),
-  };
-  if (launch.personaPrefix !== undefined && launch.personaPrefix.length > 0) {
-    env.DSH_SYSTEM_PROMPT = launch.personaPrefix;
-  }
+  const env: NodeJS.ProcessEnv = { ...process.env };
   for (const [key, value] of Object.entries(launch.env ?? {})) {
     if (value === undefined) delete env[key];
     else env[key] = value;
+  }
+  // Herta OWNS the harness home, so the resolution above (HERTA_DSH_HOME,
+  // else `<home>/.herta/dsh-home`) is applied LAST and wins over the ambient
+  // layer. The caller hands us `process.env` as the extra environment, and a
+  // host that is itself DSH — or any operator who exported DSH_HOME — would
+  // otherwise clobber the child's home with their own. The child then looks
+  // for Herta's profile in a foreign home and dies on the first brief with
+  // `profile "<name>" does not exist`, which reads like a missing install.
+  // The persona is Herta's launch parameter for the same reason.
+  env.DSH_HOME = normalize(launch.dshHome);
+  if (launch.personaPrefix !== undefined && launch.personaPrefix.length > 0) {
+    env.DSH_SYSTEM_PROMPT = launch.personaPrefix;
   }
   return env;
 }

@@ -233,6 +233,30 @@ describe("DshSdkRuntime.runBrief", () => {
     expect(launch?.env.PATH).toBe(process.env.PATH);
   });
 
+  it("keeps Herta's own home when the caller's env carries a foreign DSH_HOME", async () => {
+    // Found live 2026-09-18: launched from a host that is itself DSH, the extra
+    // environment carries that host's DSH_HOME. Applying it AFTER the resolved
+    // home sent the child looking for Herta's profile inside the host's home,
+    // and the first brief died with `profile "herta-dsh" does not exist` —
+    // which reads like a missing install rather than a clobbered variable.
+    const harness = fakeHarness();
+    const { runtime, created } = makeRuntime(harness, {
+      launch: {
+        env: {
+          DSH_HOME: "C:/someone-elses/.dsh",
+          DSH_SYSTEM_PROMPT: "foreign persona",
+        },
+      },
+    });
+
+    await runtime.runBrief(BRIEF, {});
+
+    expect(created[0]?.launch.env.DSH_HOME).toBe(
+      normalize("C:/ws/.herta/dsh-home"),
+    );
+    expect(created[0]?.launch.env.DSH_SYSTEM_PROMPT).toBe("你是黑塔。");
+  });
+
   it("omits DSH_SYSTEM_PROMPT when no persona is configured", async () => {
     const harness = fakeHarness();
     const { runtime, created } = makeRuntime(harness, {
