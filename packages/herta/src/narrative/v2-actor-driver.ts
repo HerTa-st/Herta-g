@@ -1,6 +1,6 @@
 import type {
   AgentEvent,
-  CodingAgentRuntime,
+  BackendRuntime,
   CompletionProviderAdapter,
   EventBus,
   ProviderAdapter,
@@ -85,7 +85,7 @@ export interface V2ActorDriverDeps {
    *  `@herta/herta`'s narrative/actor-prompt. */
   readonly staticPrefix: StaticHertaPrefix;
   readonly bus: EventBus<AgentEvent>;
-  readonly runtimeFactory: () => CodingAgentRuntime;
+  readonly runtimeFactory: () => BackendRuntime;
   /**
    * Optional persister. If set, every block appended by `runTurn` is pushed
    * synchronously to the persister via `appendBlock(block)`. Survives across

@@ -11,7 +11,18 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RepoContextSnapshot, TerminalRecord } from "@herta/core";
+import type {
+  BackendRuntime,
+  RepoContextSnapshot,
+  SystemBlock,
+  TerminalRecord,
+} from "@herta/core";
+import {
+  type DshBackendHandle,
+  type DshBackendSetupInput,
+  DshSdkRuntime,
+  type DshSessionEvent,
+} from "@herta/dsh-backend";
 import type { OpeningChoice } from "@herta/herta";
 import type { RepoContextOutcome } from "@herta/tools";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -326,6 +337,9 @@ async function mkStubSession(
     // The history reader behind the viewer's log tab (ADR 0059 §6).
     logDescriber?: SessionInternalDeps["logDescriber"];
     branchesDescriber?: SessionInternalDeps["branchesDescriber"];
+    // The mounted DSH backend (HERTA_BACKEND=dsh). Omitted = the REAL mount,
+    // which reads process.env; tests that inject one bypass the env gate.
+    setupDshBackend?: SessionInternalDeps["setupDshBackend"];
   },
 ): Promise<{
   session: SessionImpl;
@@ -418,6 +432,9 @@ async function mkStubSession(
       branchesDescriber: extra?.branchesDescriber ?? (async () => null),
       ...(extra?.easterEggNow !== undefined
         ? { easterEggNow: extra.easterEggNow }
+        : {}),
+      ...(extra?.setupDshBackend !== undefined
+        ? { setupDshBackend: extra.setupDshBackend }
         : {}),
     },
   });
@@ -2777,5 +2794,254 @@ describe("Session — a transient probe answer (ADR 0058 §7.6)", () => {
     expect(calls).toBe(after);
     expect(session.repo).toEqual(sample);
     await cleanup();
+  });
+});
+
+describe("Session — mounted DSH backend (HERTA_BACKEND=dsh)", () => {
+  const savedEnv = { ...process.env };
+  afterEach(() => {
+    process.env = { ...savedEnv };
+  });
+
+  /** A handle whose factory records that the stack asked for it, and whose
+   *  close() counts reaps. Nothing is ever spawned: the runtime factory it
+   *  returns is only called on a 板砖 dispatch, and these sessions run none. */
+  function mkFakeMount(closed: { count: number }): {
+    handle: DshBackendHandle;
+    factoryCalls: { wsHolder: { readonly current: string } }[];
+  } {
+    const factoryCalls: { wsHolder: { readonly current: string } }[] = [];
+    let reaped = false;
+    const handle: DshBackendHandle = {
+      makeRuntimeFactory: (deps) => {
+        factoryCalls.push(deps);
+        return () => ({}) as BackendRuntime;
+      },
+      // Mirrors the real handle's contract (mount.ts): close() is idempotent.
+      // close() of the SESSION is not, so this is what keeps a second
+      // session.close() — quit hold plus an explicit one — from double-reaping.
+      close: async () => {
+        if (reaped) return;
+        reaped = true;
+        closed.count += 1;
+      },
+    };
+    return {
+      handle,
+      factoryCalls,
+    };
+  }
+
+  it("stays un-mounted (no warning) when the gate is off", async () => {
+    // The REAL mount: HERTA_BACKEND unset is the default state of every
+    // existing user, so this also pins that nothing changes for them.
+    delete process.env.HERTA_BACKEND;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { session, cleanup } = await mkStubSession(mkConfig());
+    expect(warn).not.toHaveBeenCalled();
+    // The session came up on Herta's own backend, i.e. the un-mounted path is
+    // still fully functional.
+    expect(session.backendWorkspace).toBeTruthy();
+    await cleanup();
+    warn.mockRestore();
+  });
+
+  it("warns once and falls back when the gate is on but no CLI is installed", async () => {
+    process.env.HERTA_BACKEND = "dsh";
+    process.env.HERTA_DSH_BIN = join(tmpdir(), "no-such-dsh-tree", "bin.js");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { session, cleanup } = await mkStubSession(mkConfig());
+    // A silent fall back would be worse than a warning: the operator asked for
+    // the harness and would never learn the 板砖 ran on the other backend.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain(
+      "no DeepSeek Harness CLI was found",
+    );
+    // ...and the session still came up.
+    expect(session.sessionId).toBeTruthy();
+    await cleanup();
+    warn.mockRestore();
+  });
+
+  it("mounts with the effective workspace and the live key, and reaches the stack", async () => {
+    const closed = { count: 0 };
+    const mount = mkFakeMount(closed);
+    const seen: DshBackendSetupInput[] = [];
+    const cfg = mkConfig();
+    const { session, cleanup } = await mkStubSession(
+      cfg,
+      undefined,
+      1,
+      undefined,
+      {
+        deepSeekKey: () => "sk-live",
+        setupDshBackend: (input) => {
+          seen.push(input);
+          return mount.handle;
+        },
+      },
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.workspaceRoot).toBe(cfg.workspaceRoot);
+    // The live getter, not the static config key: a key entered in Settings
+    // must reach the harness child the same way it reaches the providers.
+    expect(seen[0]?.apiKey).toBe("sk-live");
+    // createBackendStack reads the factory EAGERLY at build time, so a recorded
+    // call proves the mount replaced the in-process runtime rather than just
+    // being set up beside it.
+    expect(mount.factoryCalls).toHaveLength(1);
+    expect(mount.factoryCalls[0]?.wsHolder.current).toBe(cfg.workspaceRoot);
+    // The holder is LIVE, not a snapshot: the mount resolves the workspace per
+    // dispatch, which is what lets a /workspace switch rotate the harness child
+    // (the sandbox root is the child's cwd and cannot be retargeted in place).
+    await session.setWorkspace(cfg.transcriptDir);
+    expect(mount.factoryCalls[0]?.wsHolder.current).toBe(cfg.transcriptDir);
+    await cleanup();
+  });
+
+  it("reaps the harness child on close, exactly once", async () => {
+    const closed = { count: 0 };
+    const mount = mkFakeMount(closed);
+    const { session, cleanup } = await mkStubSession(
+      mkConfig(),
+      undefined,
+      1,
+      undefined,
+      {
+        setupDshBackend: () => mount.handle,
+      },
+    );
+    expect(closed.count).toBe(0);
+    await session.close();
+    expect(closed.count).toBe(1);
+    // Idempotent: the host may close a session twice (quit hold + explicit).
+    await session.close();
+    expect(closed.count).toBe(1);
+    await cleanup();
+  });
+
+  it("close() is a no-op when nothing was mounted", async () => {
+    delete process.env.HERTA_BACKEND;
+    const { session, cleanup } = await mkStubSession(mkConfig());
+    await expect(session.close()).resolves.toBeUndefined();
+    await cleanup();
+  });
+
+  /** The two harness notifications one shell command produces, in the shapes a
+   *  live `sdk-minimal` run emits: `tool/call` names the tool, and the
+   *  `tool/result` that closes it carries only the call id. */
+  function harnessShellCall(callId: string): DshSessionEvent[] {
+    return [
+      {
+        type: "tool/call",
+        seq: 7,
+        time: 1,
+        data: {
+          callId,
+          name: "pwsh",
+          arguments: JSON.stringify({ command: "git status --short" }),
+        },
+      },
+      {
+        type: "tool/result",
+        seq: 8,
+        time: 2,
+        data: {
+          message: {
+            source: { kind: "tool", callId },
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: callId,
+                content: [{ type: "text", text: " M a.ts" }],
+                isError: false,
+              },
+            ],
+          },
+        },
+      },
+      {
+        type: "turn/end",
+        seq: 9,
+        time: 3,
+        data: { reason: { kind: "completed" } },
+      },
+    ];
+  }
+
+  it("projects a mounted harness's commands onto the record instead of the noop-marker", async () => {
+    // The live-turn regression behind `差分协处理器 · 无产出`. A harness
+    // narrates nothing through the report — it says what it ran as bus events
+    // — so a mount that never published was indistinguishable from a
+    // delegation that did nothing: the user watched commands execute and the
+    // record called the turn empty. The runtime below is the real one, so this
+    // covers the notification path that dropped them, not just the projection.
+    const handle: DshBackendHandle = {
+      makeRuntimeFactory: (deps) => () =>
+        new DshSdkRuntime({
+          launch: {
+            command: "node",
+            args: ["dsh-bin.js", "--profile", "herta-dsh"],
+            cwd: deps.wsHolder.current,
+            dshHome: deps.wsHolder.current,
+          },
+          bus: deps.bus,
+          // A port that narrates one shell command and settles. No subprocess
+          // and no JSON-RPC, because the seam under test is downstream of both.
+          createHarness: () => ({
+            start: async () => undefined,
+            run: async (_input, options) => {
+              for (const event of harnessShellCall("call_1")) {
+                options?.onNotification?.({ params: { event } });
+              }
+              return {};
+            },
+            close: async () => undefined,
+          }),
+        }),
+      close: async () => undefined,
+    };
+    const { session, cleanup } = await mkStubSession(
+      mkConfig(),
+      undefined,
+      // The bridge's verdict, plus the beat and closing speech the actor turn
+      // may add after it — unused scripts are never consumed.
+      4,
+      undefined,
+      {
+        actorSpeech: "@板砖 看一眼仓库状态",
+        setupDshBackend: () => handle,
+      },
+    );
+
+    const blocks: RecordEvent[] = [];
+    const consumer = (async () => {
+      for await (const event of session.subscribeRecord()) blocks.push(event);
+    })();
+    await session.submitText("看一眼仓库状态");
+    await cleanup();
+    await consumer;
+
+    const system = blocks
+      .flatMap((event) => (event.kind === "block" ? [event.block] : []))
+      .filter((block): block is SystemBlock => block.kind === "system");
+    // One row per run, and its `Running` verb is itself the proof of the name
+    // mapping: `workflowLabel("pwsh")` hits `default: null`, so an unmapped
+    // call projects nothing at all.
+    const operationRows = system.filter((block) =>
+      block.body.startsWith("Running "),
+    );
+    const doneMarkers = system.filter((block) => block.role === "done-marker");
+    expect(doneMarkers.length).toBeGreaterThan(0);
+    expect(operationRows).toHaveLength(doneMarkers.length);
+    for (const row of operationRows) {
+      expect(row.label).toBe("差分协处理器");
+      expect(row.body).toBe("Running git status --short");
+    }
+    // The symptom itself. A done-marker rather than a noop-marker also proves
+    // the run ended normally, so the marker assertion cannot pass vacuously.
+    expect(system.filter((block) => block.role === "noop-marker")).toHaveLength(
+      0,
+    );
   });
 });

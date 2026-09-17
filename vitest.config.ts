@@ -15,7 +15,7 @@ export default defineConfig({
         test: {
           name: "node",
           include: [
-            "packages/{app-server,cli,core,herta,knowledge,memory,providers,tools}/src/**/*.test.ts",
+            "packages/{app-server,cli,core,dsh-backend,herta,knowledge,memory,providers,tools}/src/**/*.test.ts",
           ],
           passWithNoTests: true,
         },

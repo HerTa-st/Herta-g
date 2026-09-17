@@ -40,6 +40,7 @@ export {
   type BackgroundProcess,
 } from "./backend/background-host.js";
 export {
+  type BackendRuntime,
   CodingAgentRuntime,
   type CodingAgentRuntimeDeps,
   type RepoSnapshot,

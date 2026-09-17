@@ -1,0 +1,32 @@
+{
+  "name": "@herta/dsh-backend",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@herta/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-sdk-client": "^0.0.1-rc.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-sdk-client": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "vitest": "^3.2.6"
+  }
+}

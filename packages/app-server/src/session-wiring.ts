@@ -30,6 +30,7 @@ import {
   type AskResolver,
   BackendContextBuilder,
   type BackendContract,
+  type BackendRuntime,
   CodingAgentRuntime,
   type CompletionProviderAdapter,
   dreamDirFor,
@@ -256,6 +257,28 @@ export interface BackendStackOpts {
   /** The steer source (ADR 0063) every dispatch's runtime drains at its
    *  loop head — the session's `SteerChannel`. Absent (the CLI): no steer. */
   readonly pendingUserInput?: () => readonly string[];
+  /** Replaces the whole per-dispatch backend with an out-of-process harness.
+   *  A harness brings its own tool set, so swapping only `backendProvider`
+   *  would double every write; this replaces the runtime instead.
+   *
+   *  Note what that gives up: a mounted harness does not consult Herta's
+   *  `RulePermissionEngine`, so Herta's approval prompts do not cover the
+   *  commands it runs — enforcement moves to the harness's own sandbox policy.
+   *  Mount accordingly, and prefer an explicit opt-in over a default.
+   *
+   *  Returns `null` when no harness is available; the stack then silently keeps
+   *  its own in-process runtime rather than failing to start. */
+  readonly makeRuntimeFactory?: (deps: {
+    /** Read fresh per dispatch, so a mid-session workspace change is honoured. */
+    readonly wsHolder: { readonly current: string };
+    /**
+     * The shared session bus. A mounted harness needs it to republish its tool
+     * calls as Herta's own `tool.call.*` events — the bridge narrates the
+     * record from this bus, so a harness mounted without it runs invisibly and
+     * every dispatch reads as `无产出`.
+     */
+    readonly bus: EventBus<AgentEvent>;
+  }) => (() => BackendRuntime) | null;
 }
 
 export interface BackendStack {
@@ -273,7 +296,7 @@ export interface BackendStack {
   readonly memory: FileMemoryManager;
   /** Per-invocation `CodingAgentRuntime` (per ADR 0007): each `@板砖`
    *  dispatch gets a fresh one, reading the workspace holder at call time. */
-  readonly runtimeFactory: () => CodingAgentRuntime;
+  readonly runtimeFactory: () => BackendRuntime;
 }
 
 export function createBackendStack(opts: BackendStackOpts): BackendStack {
@@ -357,7 +380,7 @@ export function createBackendStack(opts: BackendStackOpts): BackendStack {
     registerRunCommandRule(permissions);
   }
 
-  const runtimeFactory = (): CodingAgentRuntime =>
+  const defaultRuntimeFactory = (): BackendRuntime =>
     new CodingAgentRuntime({
       sessionId: randomUUID(),
       provider: opts.backendProvider,
@@ -392,6 +415,16 @@ export function createBackendStack(opts: BackendStackOpts): BackendStack {
         ? { pendingUserInput: opts.pendingUserInput }
         : {}),
     });
+
+  // A mounted harness replaces the whole runtime rather than the provider: it
+  // brings its own tools, so keeping Herta's too would double every write. It
+  // needs the bus for the same reason the in-process runtime does: the bridge
+  // narrates from bus events, not from the returned report.
+  const mounted =
+    opts.makeRuntimeFactory === undefined
+      ? null
+      : opts.makeRuntimeFactory({ wsHolder, bus });
+  const runtimeFactory = mounted ?? defaultRuntimeFactory;
 
   return {
     contract,

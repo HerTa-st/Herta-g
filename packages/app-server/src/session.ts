@@ -33,6 +33,11 @@ import {
   type WorkspaceTrust,
 } from "@herta/core";
 import {
+  type DshBackendHandle,
+  type DshBackendSetupInput,
+  setupDshBackend,
+} from "@herta/dsh-backend";
+import {
   type MetaThinkCorpus,
   type OpeningChoice,
   type PromptLang,
@@ -256,6 +261,12 @@ export interface SessionInternalDeps {
   /** Clock (ms) for the easter-egg per-session hourly throttle. Defaults to
    *  `Date.now`; tests inject a controllable clock. */
   readonly easterEggNow?: () => number;
+  /** Seam for the DSH backend mount (see `setupDshBackend`). Defaults to the
+   *  real one, which reads `process.env`; tests inject a fake so the GUI's
+   *  mount and reap are covered without a `@deepseek-ai/dsh` install. */
+  readonly setupDshBackend?: (
+    input: DshBackendSetupInput,
+  ) => DshBackendHandle | undefined;
 }
 
 /**
@@ -399,6 +410,12 @@ export class SessionImpl implements Session {
   // detect the no-key case; the providers were built with the same getter.
   private readonly deepSeekKey: () => string;
 
+  // The mounted DSH backend (HERTA_BACKEND=dsh), when the env gate is on.
+  // undefined = Herta's own in-process backend. Held so close() can reap the
+  // harness subprocess: a desktop session starts and stops with the app, and
+  // an orphaned harness child would keep its sandbox alive behind the GUI.
+  private readonly dsh: DshBackendHandle | undefined;
+
   // Per-turn abort tracking. Set at the start of submitText; cleared in
   // finally. interrupt() aborts this controller; close() calls interrupt()
   // before tearing down the projector.
@@ -480,6 +497,8 @@ export class SessionImpl implements Session {
     voice: SessionVoice;
     openingLeadMs: number | undefined;
     deepSeekKey: () => string;
+    /** The mounted DSH backend, when HERTA_BACKEND=dsh. */
+    dsh?: DshBackendHandle;
     lang: PromptLang;
     lastTurnEnd?: LastTurnEnd;
     pendingContractNote: string | null;
@@ -516,6 +535,7 @@ export class SessionImpl implements Session {
     this.voice = opts.voice;
     this.openingLeadMs = opts.openingLeadMs;
     this.deepSeekKey = opts.deepSeekKey;
+    this.dsh = opts.dsh;
     this.lang = opts.lang;
     this.pendingContractNote = opts.pendingContractNote;
     this.attachments = new SessionAttachments({
@@ -1488,6 +1508,13 @@ export class SessionImpl implements Session {
     // subscriber queues, potentially losing the failed event).
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    // The mounted harness child, once no dispatch can be running (the in-flight
+    // turn above has settled, and the driver serializes 板砖 dispatches). Reaped
+    // here rather than at process exit so a closed session — or a GUI quit —
+    // cannot leave a harness sandbox alive behind it. Idempotent and a no-op
+    // when the env gate was off.
+    await this.dsh?.close();
+
     this.projector.close();
     // V2RecordPersister has no explicit close — it appends synchronously.
   }
@@ -1578,6 +1605,22 @@ export class SessionImpl implements Session {
     // The steer channel (ADR 0063) exists before the stack: the runtime
     // factory closes over its `drain`, and every dispatch reads it.
     const steer = new SteerChannel();
+    // Optional DeepSeek Harness backend (HERTA_BACKEND=dsh), the SAME env gate
+    // the CLI uses: the whole per-dispatch runtime is replaced, because a
+    // harness brings its own tools — swapping only `backendProvider` would
+    // double every write. Off unless asked for: a mounted harness does not
+    // consult Herta's RulePermissionEngine, so Herta's approval prompts do not
+    // cover the commands the backend runs (see dsh-backend/README.md).
+    //
+    // The handle outlives this call because only the session knows when it is
+    // done with the child (close() reaps it) — the CLI can wrap its one repl()
+    // in try/finally, a desktop session cannot.
+    const dsh = (deps.setupDshBackend ?? setupDshBackend)({
+      workspaceRoot: wsHolder.current,
+      apiKey: deepSeekKey(),
+      env: process.env,
+      warn: (message) => console.warn(message.trimEnd()),
+    });
     const backend = createBackendStack({
       wsHolder,
       workspaceRoot,
@@ -1602,6 +1645,11 @@ export class SessionImpl implements Session {
           : deps.providerOverrides === undefined
             ? defaultDigestModel(apiKey, baseUrl)
             : null,
+      // Off unless HERTA_BACKEND=dsh: then every 板砖 dispatch runs against the
+      // harness child the mount above owns.
+      ...(dsh === undefined
+        ? {}
+        : { makeRuntimeFactory: dsh.makeRuntimeFactory }),
       makeAsk: ({ cache, rules }) => {
         overlayResolver = new OverlayAskResolver({
           cache,
@@ -1882,6 +1930,7 @@ export class SessionImpl implements Session {
       // D3: opening-stream lead beat; undefined → the driver's OPENING_LEAD_MS.
       openingLeadMs: deps.openingLeadMs,
       deepSeekKey,
+      ...(dsh === undefined ? {} : { dsh }),
       lang,
       // ADR 0044: NEW sessions only — a resumed record already carried the
       // note when it was new (and the machine state may have changed since).

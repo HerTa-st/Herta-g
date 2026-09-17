@@ -70,6 +70,41 @@ describe("main", () => {
   });
 });
 
+describe("main — mounted DSH backend", () => {
+  // The mount is opt-in through the environment, so the only way to prove the
+  // real wiring is to drive `main` itself. The REPL is not exercised here; a
+  // broken harness must announce itself on stderr and still let the session
+  // start, because the alternative — silently running a different backend —
+  // would make the report contract a lie.
+  it("warns and keeps the in-process backend when the harness cannot be resolved", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "herta-main-dsh-"));
+    try {
+      process.env.DEEPSEEK_API_KEY = "test-key";
+      process.env.HERTA_BACKEND = "dsh";
+      process.env.HERTA_DSH_BIN = join(tmp, "no-such-tree", "bin.js");
+      const out = new MockWritable();
+      const err = new MockWritable();
+      const stdin = new MockReadable();
+      stdin.end();
+
+      const code = await main([], {
+        stdout: out,
+        stderr: err,
+        stdin,
+        cwd: tmp,
+        homedir: join(tmp, "home"),
+      });
+
+      expect(code).toBe(0);
+      expect(err.full()).toContain("no DeepSeek Harness CLI was found");
+    } finally {
+      delete process.env.HERTA_BACKEND;
+      delete process.env.HERTA_DSH_BIN;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("main — --lang flag", () => {
   it("--help mentions --lang", async () => {
     const out = new MockWritable();

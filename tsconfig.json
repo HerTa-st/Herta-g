@@ -7,6 +7,7 @@
     { "path": "packages/providers" },
     { "path": "packages/herta" },
     { "path": "packages/knowledge" },
+    { "path": "packages/dsh-backend" },
     { "path": "packages/cli" },
     { "path": "packages/app-server" }
   ]

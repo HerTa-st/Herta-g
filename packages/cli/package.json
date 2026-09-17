@@ -16,6 +16,7 @@
   "dependencies": {
     "@herta/app-server": "workspace:*",
     "@herta/core": "workspace:*",
+    "@herta/dsh-backend": "workspace:*",
     "@herta/herta": "workspace:*",
     "@herta/tools": "workspace:*",
     "@herta/providers": "workspace:*"

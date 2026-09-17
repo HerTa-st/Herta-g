@@ -270,6 +270,7 @@ linux:
   syncDesktopName: true
 
 nsis:
+  include: build/dsh-backend.nsh
   # Pinned to the dash form electron-updater's latest.yml references. The
   # default (`Herta Setup <ver>.exe`, spaces) forces a manual rename at upload
   # time; forget it once and GitHub serves `Herta.Setup...exe` while the feed

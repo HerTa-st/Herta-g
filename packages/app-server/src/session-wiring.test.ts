@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AskResolver } from "@herta/core";
+import type { AskResolver, BackendRuntime } from "@herta/core";
 import { FakeProvider } from "@herta/core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -273,5 +273,81 @@ describe("createBackendStack", () => {
         ).not.toContain("# 主机环境");
       }
     });
+  });
+});
+
+// The out-of-process harness seam (HERTA_BACKEND=dsh). The stack's only job
+// here is to hand the mount to every dispatch, or fall back when there is
+// none — the runtime's own behaviour belongs to @herta/dsh-backend.
+describe("createBackendStack — mounted backend harness", () => {
+  const mkInput = (root: string) => ({
+    wsHolder: { current: root },
+    workspaceRoot: root,
+    lang: "zh" as const,
+    wantMinimal: false,
+    backendProvider: new FakeProvider({ turns: [] }),
+    backendModel: "deepseek-v4-pro",
+    digestModel: null,
+    makeAsk: () => noAsk,
+  });
+
+  it("keeps the in-process runtime when no harness is offered", () => {
+    const stack = createBackendStack(mkInput(mkWorkspace()));
+    expect(stack.runtimeFactory().constructor.name).toBe("CodingAgentRuntime");
+  });
+
+  it("falls back when the harness reports itself unavailable", () => {
+    // `null` is the "asked for, but no dsh install on this machine" answer:
+    // the session must still start on Herta's own backend.
+    const stack = createBackendStack({
+      ...mkInput(mkWorkspace()),
+      makeRuntimeFactory: () => null,
+    });
+    expect(stack.runtimeFactory().constructor.name).toBe("CodingAgentRuntime");
+  });
+
+  it("returns the mounted runtime and passes the LIVE workspace holder through", () => {
+    const root = mkWorkspace();
+    const wsHolder = { current: root };
+    const mounted = { tag: "harness" } as unknown as BackendRuntime;
+    let seen: { readonly current: string } | null = null;
+    const stack = createBackendStack({
+      ...mkInput(root),
+      wsHolder,
+      makeRuntimeFactory: (deps) => {
+        seen = deps.wsHolder;
+        return () => mounted;
+      },
+    });
+    expect(stack.runtimeFactory()).toBe(mounted);
+    // The holder itself, not a copy of its path: the harness roots its sandbox
+    // at its own cwd, so a mount that captured the path once could never be
+    // retargeted by `/workspace set` — it would have to be rebuilt instead.
+    expect(seen).toBe(wsHolder);
+  });
+
+  it("hands the mount the bus the bridge drains", () => {
+    // A harness runs out of process, so its tool calls arrive as JSON-RPC
+    // notifications. Only a runtime that republishes them onto this bus can be
+    // narrated: mount it without one and the record shows `无产出` for a turn
+    // that ran commands.
+    const mounted = { tag: "harness" } as unknown as BackendRuntime;
+    let seenBus: unknown;
+    const stack = createBackendStack({
+      ...mkInput(mkWorkspace()),
+      makeRuntimeFactory: (deps) => {
+        seenBus = deps.bus;
+        return () => mounted;
+      },
+    });
+    expect(stack.runtimeFactory()).toBe(mounted);
+    expect(seenBus).toBe(stack.bus);
+  });
+
+  it("mints a fresh in-process runtime per dispatch, and one mount for all of them", () => {
+    // ADR 0007: the in-process runtime is per-invocation. The harness is the
+    // exception — it owns a subprocess, so it is memoized by its own setup.
+    const stack = createBackendStack(mkInput(mkWorkspace()));
+    expect(stack.runtimeFactory()).not.toBe(stack.runtimeFactory());
   });
 });

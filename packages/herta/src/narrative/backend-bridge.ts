@@ -12,7 +12,7 @@ import type {
   AgentError,
   AgentEvent,
   AgentExecutionReport,
-  CodingAgentRuntime,
+  BackendRuntime,
   EventBus,
   EvidenceSection,
   RunCommandData,
@@ -52,7 +52,7 @@ export interface BanzhuanBridgeDeps {
   readonly bus: EventBus<AgentEvent>;
   /** Factory that constructs a fresh `CodingAgentRuntime` per invocation
    *  (the actor doesn't share runtime state across calls per ADR 0007). */
-  readonly runtimeFactory: () => CodingAgentRuntime;
+  readonly runtimeFactory: () => BackendRuntime;
   /** The session's interaction language (ADR 0016). Passed through to the
    *  backend so an EN session drives the backend prompt in English; absent
    *  → the backend defaults to Chinese (byte-identical to before). */

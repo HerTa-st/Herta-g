@@ -159,6 +159,26 @@ export interface RunBriefOptions {
   lang?: "zh" | "en";
 }
 
+/**
+ * The seam a backend must satisfy to be driven by the actor layer.
+ *
+ * `CodingAgentRuntime` is the in-process backend Herta ships with; an
+ * out-of-process harness (e.g. DeepSeek Harness over its SDK) implements
+ * this instead, so the app-server can swap backends without the actor,
+ * the permission engine or the bridge contracts knowing which one runs.
+ *
+ * Contract, in the same spirit as `HertaToAgentBrief`/`AgentExecutionReport`:
+ * the runtime never speaks to the user and never role-plays Herta. It is
+ * handed a brief and returns a structured report — the report has no
+ * prose-summary field on purpose, so the actor cannot echo backend voice.
+ */
+export interface BackendRuntime {
+  runBrief(
+    brief: HertaToAgentBrief,
+    opts?: RunBriefOptions,
+  ): Promise<AgentExecutionReport>;
+}
+
 interface PendingPermission {
   tool: string;
   risk: RiskLevel;
@@ -171,7 +191,7 @@ interface PendingPermission {
  * is reset on every `runBrief` call. The runtime never speaks to the user
  * and never role-plays Herta — it returns a structured `AgentExecutionReport`.
  */
-export class CodingAgentRuntime {
+export class CodingAgentRuntime implements BackendRuntime {
   private readonly deps: CodingAgentRuntimeDeps;
   private briefInFlight = false;
 

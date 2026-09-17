@@ -16,6 +16,7 @@ import {
   resolveEffectiveWorkspace,
   SessionFileError,
 } from "@herta/core";
+import { setupDshBackend } from "@herta/dsh-backend";
 import { type PromptLang, V2ActorDriver } from "@herta/herta";
 import { resolveDeepSeekKey } from "@herta/providers";
 import { canonicalWorkspaceRoot } from "@herta/tools";
@@ -252,6 +253,15 @@ export async function main(
   // exists on this machine (owner flip 2026-08-17, parity with the GUI); the
   // standard 15-tool set otherwise, or with HERTA_BACKEND_CONTRACT=standard.
   // The CLI takes the knob from the environment like its model knobs.
+  const dsh = setupDshBackend({
+    workspaceRoot,
+    apiKey,
+    env: process.env,
+    warn: (message) => {
+      stderr.write(message);
+    },
+    homedir: deps?.homedir ?? homedir(),
+  });
   const backend = createBackendStack({
     wsHolder,
     workspaceRoot,
@@ -266,6 +276,13 @@ export async function main(
     // The digest tool's side model (ADR 0043) — the same flash sidecar the
     // GUI host builds.
     digestModel: defaultDigestModel(apiKey, baseUrl),
+    // Optional DeepSeek Harness backend (HERTA_BACKEND=dsh): the whole runtime
+    // is replaced, because a harness brings its own tools. Off unless asked
+    // for — with it on, Herta's approval prompts no longer cover the commands
+    // the backend runs; the harness's own sandbox policy decides instead.
+    ...(dsh === undefined
+      ? {}
+      : { makeRuntimeFactory: dsh.makeRuntimeFactory }),
     makeAsk: ({ cache, rules }) =>
       new CachingAskResolver(
         new CliAskResolver(stdin as NodeJS.ReadStream, stdout, style),
@@ -418,23 +435,30 @@ export async function main(
     persister.appendBlock(actor.seedBlock);
   }
 
-  await repl({
-    actor: driver,
-    tools: actorTools,
-    input,
-    renderer: v2Renderer,
-    out: stdout,
-    style,
-    lang,
-    approvalCache,
-    commandRules,
-    transcriptDir,
-    currentWorkspaceRoot: workspaceRoot,
-    workspaceHolder: wsHolder,
-    persister,
-    home: deps?.homedir ?? homedir(),
-    sessionId: actorSessionId,
-  });
+  // A mounted harness owns a subprocess; the seam has no `close()`, so the
+  // host has to reap it on the way out — including when the REPL throws,
+  // which would otherwise leave the child running after the CLI exits.
+  try {
+    await repl({
+      actor: driver,
+      tools: actorTools,
+      input,
+      renderer: v2Renderer,
+      out: stdout,
+      style,
+      lang,
+      approvalCache,
+      commandRules,
+      transcriptDir,
+      currentWorkspaceRoot: workspaceRoot,
+      workspaceHolder: wsHolder,
+      persister,
+      home: deps?.homedir ?? homedir(),
+      sessionId: actorSessionId,
+    });
+  } finally {
+    await dsh?.close();
+  }
 
   return 0;
 }

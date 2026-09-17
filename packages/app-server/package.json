@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@herta/core": "workspace:*",
+    "@herta/dsh-backend": "workspace:*",
     "@herta/herta": "workspace:*",
     "@herta/knowledge": "workspace:*",
     "@herta/memory": "workspace:*",

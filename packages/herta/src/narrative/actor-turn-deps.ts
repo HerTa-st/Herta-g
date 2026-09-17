@@ -8,7 +8,7 @@
 
 import type {
   AgentEvent,
-  CodingAgentRuntime,
+  BackendRuntime,
   CompletionProviderAdapter,
   EventBus,
   ProviderAdapter,
@@ -33,7 +33,7 @@ export interface ActorTurnDeps {
   /** Shared bus — backend events flow through here for projection. */
   readonly bus: EventBus<AgentEvent>;
   /** Factory that creates a fresh CodingAgentRuntime per `@板砖` invocation. */
-  readonly runtimeFactory: () => CodingAgentRuntime;
+  readonly runtimeFactory: () => BackendRuntime;
   /** Outer abort signal; passed through to provider and backend. */
   readonly signal?: AbortSignal;
   /**

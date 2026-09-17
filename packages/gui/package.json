@@ -17,15 +17,16 @@
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run",
     "checkvoice": "node scripts/check-voice-payload.mjs",
+    "stage-dsh": "node scripts/stage-dsh-backend.mjs",
     "checksigning": "node scripts/check-signing-env.mjs",
     "stagetts": "node scripts/stage-tts.mjs",
     "checktts": "node scripts/check-tts-payload.mjs",
     "notices": "node scripts/third-party-notices.mjs",
     "checknotices": "node scripts/third-party-notices.mjs --check",
-    "dist": "node scripts/check-voice-payload.mjs && node scripts/stage-tts.mjs --win && node scripts/check-tts-payload.mjs && electron-vite build && node scripts/third-party-notices.mjs --check && npx electron-builder --win",
+    "dist": "node scripts/check-voice-payload.mjs && node scripts/stage-tts.mjs --win && node scripts/stage-dsh-backend.mjs && node scripts/check-tts-payload.mjs && electron-vite build && node scripts/third-party-notices.mjs --check && npx electron-builder --win",
     "dist:mac": "node scripts/check-voice-payload.mjs && node scripts/stage-tts.mjs --mac && node scripts/check-tts-payload.mjs && electron-vite build && node scripts/third-party-notices.mjs --check && npx electron-builder --mac",
     "dist:linux": "node scripts/check-voice-payload.mjs --warn && node scripts/stage-tts.mjs && node scripts/check-tts-payload.mjs && electron-vite build && node scripts/third-party-notices.mjs --check && npx electron-builder --linux",
-    "dist:release": "node scripts/check-voice-payload.mjs && node scripts/check-signing-env.mjs win && node scripts/stage-tts.mjs --win && node scripts/check-tts-payload.mjs && electron-vite build && node scripts/third-party-notices.mjs --check && npx electron-builder --win -c.win.forceCodeSigning=true",
+    "dist:release": "node scripts/check-voice-payload.mjs && node scripts/check-signing-env.mjs win && node scripts/stage-tts.mjs --win && node scripts/stage-dsh-backend.mjs && node scripts/check-tts-payload.mjs && electron-vite build && node scripts/third-party-notices.mjs --check && npx electron-builder --win -c.win.forceCodeSigning=true",
     "dist:release:mac": "node scripts/check-voice-payload.mjs && node scripts/check-signing-env.mjs mac && node scripts/stage-tts.mjs --mac && node scripts/check-tts-payload.mjs && electron-vite build && node scripts/third-party-notices.mjs --check && npx electron-builder --mac -c.mac.hardenedRuntime=true -c.mac.notarize=true"
   },
   "dependencies": {

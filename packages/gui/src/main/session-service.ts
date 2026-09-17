@@ -1262,6 +1262,7 @@ export function createSessionService(
         app.isPackaged ? undefined : process.env.HERTA_DEEPSEEK_BASE_URL,
         speech,
       );
+      configureBundledDshBackend();
       host = createSessionHost(config);
       // Launch lands on the connect screen (接入黑塔空间站) rather than
       // auto-resuming the latest session: the user explicitly opens one from the
@@ -1381,6 +1382,36 @@ export function createSessionService(
     backendWorkspace: (): string | null =>
       host?.activeSession?.backendWorkspace ?? null,
   };
+}
+
+function configureBundledDshBackend(): void {
+  if (!app.isPackaged || process.env.HERTA_BACKEND !== "dsh") return;
+  if (process.env.HERTA_DSH_BIN !== undefined) return;
+
+  const root = join(process.resourcesPath, "dsh-backend");
+  const cliBin = join(
+    root,
+    "cli",
+    "node_modules",
+    "@deepseek-ai",
+    "dsh",
+    "lib",
+    "bin.js",
+  );
+  const sdkEntry = join(
+    root,
+    "sdk",
+    "node_modules",
+    "@deepseek-ai",
+    "dsh-sdk-client",
+    "lib",
+    "index.js",
+  );
+  if (!existsSync(cliBin) || !existsSync(sdkEntry)) return;
+  process.env.HERTA_DSH_BIN = cliBin;
+  if (process.env.HERTA_DSH_SDK === undefined) {
+    process.env.HERTA_DSH_SDK = sdkEntry;
+  }
 }
 
 /**
