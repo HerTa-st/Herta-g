@@ -34,13 +34,20 @@ import { mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const dash = process.argv.indexOf("--");
-const [OUT, LABEL, EXPECT] = process.argv.slice(2, dash < 0 ? undefined : dash);
+const [OUT, LABEL, EXPECT, ...OPTIONS] = process.argv.slice(
+  2,
+  dash < 0 ? undefined : dash,
+);
 const COMMAND = dash < 0 ? [] : process.argv.slice(dash + 1);
 if (!OUT || !LABEL || !EXPECT || COMMAND.length === 0) {
   throw new Error(
-    "usage: opening-probe.mjs <outDir> <label> <drawn|kept|any|none> -- <command…>",
+    "usage: opening-probe.mjs <outDir> <label> <drawn|kept|any|none> [--frames=report] -- <command…>",
   );
 }
+/** `--frames=report`: record and report the frames, judge none. For a
+ *  surface too slow to screencast: Linux under Xvfb at scale 2 composited
+ *  ONE frame per opening (2026-09-28) — nothing to judge a flash by. */
+const JUDGE_FRAMES = !OPTIONS.includes("--frames=report");
 mkdirSync(OUT, { recursive: true });
 const PORT = 9223;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -340,8 +347,13 @@ if (painted !== undefined && revealed !== undefined && ended !== undefined) {
   const level = hold.reduce((m, f) => Math.max(m, inkOf(f)), 0);
   const start = hold.find((f) => inkOf(f) >= level / 2);
   const to = Math.round(revealed + (ended - revealed) * 0.25);
+  // Reported either way; a problem only when frames are judged.
+  const flag = (why) => {
+    if (JUDGE_FRAMES) problems.push(why);
+    else (report.unjudged ??= []).push(why);
+  };
   if (level < 0.003 || start === undefined) {
-    problems.push(
+    flag(
       `no glyphs in any frame of the opening (${hold.length} frames before the reveal, best ink ${level.toFixed(4)})`,
     );
   } else {
@@ -355,7 +367,7 @@ if (painted !== undefined && revealed !== undefined && ended !== undefined) {
       blank: blank.map((f) => f.at),
     };
     if (blank.length > 0) {
-      problems.push(
+      flag(
         `${blank.length} of ${judged.length} frames of the opening lost the figure (at ${blank.map((f) => f.at).join(", ")} ms)`,
       );
     }
@@ -400,6 +412,11 @@ const at = (name) => marks.get(name)?.at ?? "–";
 console.log(
   `opening ${LABEL}: dpr ${report.dpr} · theme ${report.theme} · drawn on ${how?.host ?? "?"} from sheet ${how?.sheet ?? "?"} · marks painted ${at("app-painted")} / opening ${at("opening-painted")} / revealed ${at("revealed")} / interactive ${at("interactive")} ms · frames ${frames.length} recorded, ${judged.length} judged, ${report.judged?.blank.length ?? "–"} blank, longest gap ${report.longestGap?.ms ?? "–"} ms · ink at ${report.screen?.at ?? "–"} ms ${report.screen?.inkRatio?.toFixed(4) ?? "–"}`,
 );
+if (!JUDGE_FRAMES) {
+  console.log(
+    `opening ${LABEL}: frames reported, not judged${report.unjudged ? ` — ${report.unjudged.join("; ")}` : ""}`,
+  );
+}
 if (problems.length === 0) {
   console.log(`OPENING PROBE ${LABEL}: PASS`);
 } else {

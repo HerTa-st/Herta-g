@@ -149,9 +149,11 @@ jobs:
       # third at a device scale of 2 draws one of its own. Each must finish the
       # opening, drawn on the worker from the sheet, with glyphs on screen.
       # The scale-2 screen is 2048x1536 — 1024x768 at scale 2, the window the
-      # Mac runner's display clamps to. At 2880x1800 the software-rendered
-      # Xvfb starved the window of frames for a second (the first run,
-      # 2026-09-28): the screenshot landed on the connect screen.
+      # Mac runner's display clamps to. Its frames are REPORTED, not judged:
+      # this software-rendered surface composites about one frame per
+      # opening (2026-09-28), too few to tell a flash from a slow compositor.
+      # Its marks — the worker, a dpr-2 sheet, the opening to its end, no
+      # exception — still fail the job. The Mac judges scale 2's frames.
       - name: the opening — worker, glyph sheet, the kept sheet, scale 2
         timeout-minutes: 8
         run: |
@@ -165,7 +167,7 @@ jobs:
             xvfb-run -a -s "-screen 0 1440x900x24" "$IMG" || FAIL=1
           node packages/gui/scripts/opening-probe.mjs /tmp/shots second kept -- \
             xvfb-run -a -s "-screen 0 1440x900x24" "$IMG" || FAIL=1
-          node packages/gui/scripts/opening-probe.mjs /tmp/shots scale2 drawn -- \
+          node packages/gui/scripts/opening-probe.mjs /tmp/shots scale2 drawn --frames=report -- \
             xvfb-run -a -s "-screen 0 2048x1536x24" "$IMG" --force-device-scale-factor=2 || FAIL=1
           pkill -f "/tmp/.mount_" 2>/dev/null || true
           if [ "$FAIL" -ne 0 ]; then echo "::error::the opening probe failed inside the AppImage (see above)"; exit 1; fi
