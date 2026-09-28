@@ -2,6 +2,7 @@ import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { listProcesses, processTree } from "../process-reap.js";
 import { removeTmpDir } from "../testing/tmp-workspace.js";
 import { findBash } from "./find-bash.js";
 import { PersistentShell } from "./persistent-shell.js";
@@ -26,6 +27,111 @@ afterEach(async () => {
 });
 
 d("PersistentShell (real bash)", () => {
+  it.skipIf(process.platform !== "win32")(
+    "says its own Windows pid — the shell under the launcher, above what it runs (ADR 0071 §1.6)",
+    async () => {
+      const said: number[] = [];
+      const own = new PersistentShell({
+        bashPath: BASH as string,
+        workspaceRoot: ws,
+        onShellPid: (pid) => said.push(pid),
+      });
+      try {
+        const r = await own.run(
+          "sleep 30 >/dev/null 2>&1 & cat /proc/$!/winpid",
+          { timeoutMs: 10_000 },
+        );
+        // The protocol line never reaches a command's output.
+        expect(r.output).not.toContain("__HERTA_PD_");
+        const sleeper = Number(r.output.trim());
+        expect(said).toHaveLength(1);
+        const rows = await listProcesses();
+        const shellRow = rows.find((row) => row.pid === said[0]);
+        expect(shellRow).toBeDefined();
+        // Windows' parent ids do not lead from the shell to the command
+        // (Cygwin's fork/exec); MSYS's process group does.
+        expect(said[0]).not.toBe(sleeper);
+        expect(
+          processTree(rows, {
+            pid: said[0] as number,
+            startedAt: shellRow?.startedAt as number,
+          }),
+        ).toContain(said[0]);
+      } finally {
+        await own.kill();
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "kill() ends a job the shell backgrounded, on Windows too (2026-09-28)",
+    async () => {
+      // `taskkill /T` from the launcher never reached it: the job's Windows
+      // parent is a forked bash that exited on exec. A dev server started
+      // with `&` outlived every brief.
+      const r = await shell.run(
+        "sleep 45 >/dev/null 2>&1 & cat /proc/$!/winpid",
+        { timeoutMs: 10_000 },
+      );
+      const job = Number(r.output.trim());
+      const alive = (pid: number): boolean => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      expect(alive(job)).toBe(true);
+      try {
+        await shell.kill();
+        const until = Date.now() + 5_000;
+        while (alive(job) && Date.now() < until) {
+          await new Promise((res) => setTimeout(res, 100));
+        }
+        expect(alive(job)).toBe(false);
+      } finally {
+        if (alive(job)) process.kill(job);
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "kill() also ends what a shell that exited on its own left in its group",
+    async () => {
+      // `nohup`: a plain `&` job dies with the shell's exit; this one does
+      // not, and only the group still leads to it.
+      const r = await shell.run(
+        "nohup sleep 45 >/dev/null 2>&1 & cat /proc/$!/winpid",
+        { timeoutMs: 10_000 },
+      );
+      const job = Number(r.output.trim());
+      const exited = await shell.run("exit 1", { timeoutMs: 10_000 });
+      expect(exited.shellExited).toBe(true);
+      const alive = (pid: number): boolean => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      try {
+        expect(alive(job)).toBe(true);
+        expect(shell.isRunning()).toBe(true);
+        await shell.kill();
+        const until = Date.now() + 5_000;
+        while (alive(job) && Date.now() < until) {
+          await new Promise((res) => setTimeout(res, 100));
+        }
+        expect(alive(job)).toBe(false);
+        expect(shell.isRunning()).toBe(false);
+      } finally {
+        if (alive(job)) process.kill(job);
+      }
+    },
+  );
+
   it.skipIf(process.platform === "win32")(
     "a job backgrounded before the shell EXITED is still counted and killed at brief end (2026-09-23)",
     async () => {

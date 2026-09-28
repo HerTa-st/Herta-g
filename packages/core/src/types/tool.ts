@@ -121,6 +121,9 @@ export interface ToolCallJournal {
     pid: number;
     command: string;
     role: "foreground" | "background" | "shell";
+    /** An MSYS shell's process group and the `ps` that lists it — how a
+     *  relaunch reaches what the shell started (ADR 0071 §1.6). */
+    msys?: { pgid: number; ps: string };
   }): void;
   /** When a recorded process ended (best effort). */
   recordExit(pid: number): void;

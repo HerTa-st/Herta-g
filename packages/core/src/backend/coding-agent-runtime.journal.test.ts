@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InMemoryEventBus } from "../event-bus.js";
 import { NoopMemoryManager } from "../memory-manager.js";
@@ -15,6 +15,7 @@ import { CodingAgentRuntime } from "./coding-agent-runtime.js";
 import {
   dispatchJournalPath,
   readDispatchJournal,
+  readJournalIndex,
 } from "./dispatch-journal.js";
 
 let root: string;
@@ -44,6 +45,8 @@ function scripted(calls: Array<{ id: string; tool: string }>): FakeProvider {
 function runtimeWith(provider: FakeProvider, journalPath: string) {
   const tools = new InMemoryToolRegistry();
   const ran: string[] = [];
+  /** The open index as each tool saw it while it ran. */
+  const indexDuringRun: string[][] = [];
   const tool = (name: string, readOnly: boolean) => ({
     name,
     ...(readOnly ? { readOnly: true } : {}),
@@ -54,6 +57,7 @@ function runtimeWith(provider: FakeProvider, journalPath: string) {
     }),
     run: async (): Promise<ToolResult> => {
       ran.push(name);
+      indexDuringRun.push(await readJournalIndex(dirname(journalPath)));
       return { ok: true, summary: `${name} ok` };
     },
   });
@@ -72,7 +76,7 @@ function runtimeWith(provider: FakeProvider, journalPath: string) {
     journalPath,
     contract: "minimal",
   });
-  return { runtime, ran };
+  return { runtime, ran, indexDuringRun };
 }
 
 describe("a run keeps its journal (ADR 0071 §1.1)", () => {
@@ -109,6 +113,31 @@ describe("a run keeps its journal (ADR 0071 §1.1)", () => {
     });
     expect(entries[2]).toEqual({ kind: "dispatch", callIds: ["c1"] });
     expect(entries.at(-1)).toEqual({ kind: "end", status: report.status });
+  });
+
+  it("names its workspace and process, is listed in the open index while it runs, and unlisted at its end", async () => {
+    const path = dispatchJournalPath(join(root, "sessions"), "sess");
+    const { runtime, indexDuringRun } = runtimeWith(
+      scripted([
+        { id: "c1", tool: "look" },
+        { id: "c2", tool: "change" },
+      ]),
+      path,
+    );
+    await runtime.runBrief({ taskId: "task-1" });
+    const entries = (await readDispatchJournal(path)) ?? [];
+    expect(entries[0]).toMatchObject({
+      kind: "start",
+      workspaceRoot: join(root, "ws"),
+      host: { pid: process.pid },
+    });
+    // A read-only dispatch says so; a mutating one does not.
+    expect(entries.filter((e) => e.kind === "dispatch")).toEqual([
+      { kind: "dispatch", callIds: ["c1"], readOnly: true },
+      { kind: "dispatch", callIds: ["c2"] },
+    ]);
+    expect(indexDuringRun).toEqual([["sess.jsonl"], ["sess.jsonl"]]);
+    expect(await readJournalIndex(dirname(path))).toEqual([]);
   });
 
   it("fails closed: with no journal, a mutating call does not run and says why; a read still runs", async () => {

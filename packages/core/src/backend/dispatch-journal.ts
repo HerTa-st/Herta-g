@@ -1,5 +1,6 @@
 import { type FileHandle, mkdir, open, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { writeFileAtomic } from "../atomic-write.js";
 import type { HertaToAgentBrief } from "../bridge/types.js";
 import type { ToolCallJournal, ToolResult } from "../types/tool.js";
 import type { Message } from "../types/transcript.js";
@@ -28,7 +29,12 @@ export function dispatchJournalPath(
   transcriptDir: string,
   sessionId: string,
 ): string {
-  return join(transcriptDir, "journal", `${sessionId}.jsonl`);
+  return join(dispatchJournalDir(transcriptDir), `${sessionId}.jsonl`);
+}
+
+/** The folder holding every session's journal, and the open index. */
+export function dispatchJournalDir(transcriptDir: string): string {
+  return join(transcriptDir, "journal");
 }
 
 /** Every input of the backend frame a run was built from, so a resumed run
@@ -54,20 +60,49 @@ export interface JournalStartEntry {
   /** The session record's length when the run was dispatched — the seal's
    *  second gate (ADR 0071 §1.2). */
   readonly recordLength?: number;
+  /** The run's workspace; the seal names the files it wrote relative to it. */
+  readonly workspaceRoot?: string;
+  /** The process that ran it. A run whose process is still alive is not
+   *  sealed or reaped by another (a second app sharing the sessions). */
+  readonly host?: JournalHost;
   readonly brief: HertaToAgentBrief;
   readonly frame: JournalFrameInputs;
 }
 
+/** A process and when it started (epoch ms), for an identity check. */
+export interface JournalHost {
+  readonly pid: number;
+  readonly startedAt: number;
+}
+
+/** This process, as a journal names it. */
+export function currentJournalHost(): JournalHost {
+  return {
+    pid: process.pid,
+    startedAt: Math.round(Date.now() - process.uptime() * 1000),
+  };
+}
+
 /** How a process a call started relates to the call. */
 export type JournalSpawnRole = "foreground" | "background" | "shell";
+
+/** What a relaunch found for a process a run left behind (ADR 0071 §1.6):
+ *  still running and ended, already gone, or not confirmably the same
+ *  process — so left alone. */
+export type JournalProcessFate = "ended" | "gone" | "unverified";
 
 export type DispatchJournalEntry =
   | JournalStartEntry
   /** One transcript append: a steer, an assistant message with its calls,
    *  a tool result as the model saw it. */
   | { readonly kind: "message"; readonly message: Message }
-  /** These calls passed their permission gate and are about to run. */
-  | { readonly kind: "dispatch"; readonly callIds: readonly string[] }
+  /** These calls passed their permission gate and are about to run.
+   *  `readOnly` when every one of them is a read-only tool. */
+  | {
+      readonly kind: "dispatch";
+      readonly callIds: readonly string[];
+      readonly readOnly?: true;
+    }
   /** A writer is about to replace a file (the path is absolute). */
   | {
       readonly kind: "write";
@@ -85,8 +120,18 @@ export type DispatchJournalEntry =
       readonly startedAt: number;
       readonly command: string;
       readonly role: JournalSpawnRole;
+      /** An MSYS shell's process group and the `ps` that lists it: Cygwin's
+       *  fork/exec leaves a command's Windows parent dead, so only MSYS's
+       *  own table leads from the shell to what it started. */
+      readonly msys?: { readonly pgid: number; readonly ps: string };
     }
   | { readonly kind: "exit"; readonly pid: number }
+  /** A relaunch checked a process the run left behind (ADR 0071 §1.6). */
+  | {
+      readonly kind: "reap";
+      readonly pid: number;
+      readonly fate: JournalProcessFate;
+    }
   /** The harness's result for a call that had none (ADR 0071 §1.3). */
   | {
       readonly kind: "closer";
@@ -94,7 +139,13 @@ export type DispatchJournalEntry =
       readonly outcome: string;
       readonly result: ToolResult;
     }
-  | { readonly kind: "resume"; readonly at: string }
+  /** A sealed run continued (ADR 0071 §1.5); `recordLength` as on
+   *  `start`. */
+  | {
+      readonly kind: "resume";
+      readonly at: string;
+      readonly recordLength?: number;
+    }
   | {
       readonly kind: "end";
       readonly status: string;
@@ -108,6 +159,7 @@ const KINDS: ReadonlySet<string> = new Set([
   "write",
   "spawn",
   "exit",
+  "reap",
   "closer",
   "resume",
   "end",
@@ -132,14 +184,31 @@ export function journalUnavailableResult(reason: string): ToolResult {
   };
 }
 
+/** Journals a run in THIS process holds open. A live one belongs to a run
+ *  still unwinding — a session reopened before its close settled — and is
+ *  neither sealed nor reaped (ADR 0071 §1.2). */
+const LIVE = new Set<string>();
+
 export class DispatchJournal {
   private handle: FileHandle | null;
   private tail: Promise<void> = Promise.resolve();
   private failure: Error | null = null;
+  private readonly key: string | null;
 
-  private constructor(handle: FileHandle | null, failure: Error | null) {
+  private constructor(
+    handle: FileHandle | null,
+    failure: Error | null,
+    key: string | null = null,
+  ) {
     this.handle = handle;
     this.failure = failure;
+    this.key = key;
+    if (key !== null) LIVE.add(key);
+  }
+
+  /** True while a journal at `path` is open in this process. */
+  static isLive(path: string): boolean {
+    return LIVE.has(liveKey(path));
   }
 
   /**
@@ -156,12 +225,35 @@ export class DispatchJournal {
     try {
       await mkdir(dirname(path), { recursive: true });
       handle = await open(path, "w");
-      const journal = new DispatchJournal(handle, null);
+      const journal = new DispatchJournal(handle, null, liveKey(path));
       await journal.appendDurable(start);
       await syncDirectory(dirname(path));
       return journal;
     } catch (err) {
+      if (handle !== null) LIVE.delete(liveKey(path));
       await handle?.close().catch(() => undefined);
+      return new DispatchJournal(null, asError(err));
+    }
+  }
+
+  /**
+   * Open an existing journal to append to it: a seal's closers, a reaper's
+   * findings, a continued run. Only a continued run is `live` — a seal or a
+   * reaper appending does not make the run a running one. Never rejects; a
+   * journal that cannot be opened comes back failed, like `begin`'s.
+   */
+  static async reopen(
+    path: string,
+    opts: { readonly live?: boolean } = {},
+  ): Promise<DispatchJournal> {
+    try {
+      const handle = await open(path, "a");
+      return new DispatchJournal(
+        handle,
+        null,
+        opts.live === true ? liveKey(path) : null,
+      );
+    } catch (err) {
       return new DispatchJournal(null, asError(err));
     }
   }
@@ -204,6 +296,7 @@ export class DispatchJournal {
           startedAt: Date.now(),
           command: s.command,
           role: s.role,
+          ...(s.msys !== undefined ? { msys: s.msys } : {}),
         }).catch(() => undefined);
       },
       recordExit: (pid) => {
@@ -218,6 +311,7 @@ export class DispatchJournal {
     const handle = this.handle;
     this.handle = null;
     await handle?.close().catch(() => undefined);
+    if (this.key !== null) LIVE.delete(this.key);
   }
 
   private enqueue(entry: DispatchJournalEntry, sync: boolean): Promise<void> {
@@ -276,6 +370,61 @@ export function parseDispatchJournal(text: string): DispatchJournalEntry[] {
     }
   }
   return entries;
+}
+
+/**
+ * The index of journals whose run may have left processes behind (ADR 0071
+ * §1.6): `open.json` beside the journals, a list of their file names. A run
+ * is listed when it starts and unlisted when it ends normally — its own
+ * cleanup stopped its processes. A run the app exited during stays listed
+ * (the seal does not unlist it) until the launch reaper has checked its
+ * processes. So a relaunch reads a handful of journals, not every session's.
+ */
+export function openJournalIndexPath(journalDir: string): string {
+  return join(journalDir, "open.json");
+}
+
+let indexChain: Promise<void> = Promise.resolve();
+
+/** Add a journal to, or drop it from, its folder's index. Serialized in
+ *  this process; never rejects (the index is a hint the reaper reads, and a
+ *  missed entry costs an orphan, not a wrong result). */
+export function markJournalOpen(path: string, open: boolean): Promise<void> {
+  const run = async (): Promise<void> => {
+    const index = openJournalIndexPath(dirname(path));
+    const name = basename(path);
+    const names = new Set(await readJournalIndex(dirname(path)));
+    if (open === names.has(name)) return;
+    if (open) names.add(name);
+    else names.delete(name);
+    await mkdir(dirname(index), { recursive: true });
+    await writeFileAtomic(index, `${JSON.stringify([...names])}\n`);
+  };
+  const next = indexChain.then(run, run);
+  indexChain = next.catch(() => undefined);
+  return next.catch(() => undefined);
+}
+
+/** The journal file names the index lists ([] when there is none). */
+export async function readJournalIndex(journalDir: string): Promise<string[]> {
+  try {
+    const value: unknown = JSON.parse(
+      await readFile(openJournalIndexPath(journalDir), "utf8"),
+    );
+    return Array.isArray(value)
+      ? value.filter(
+          (n): n is string =>
+            typeof n === "string" && n.endsWith(".jsonl") && basename(n) === n,
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function liveKey(path: string): string {
+  const full = resolve(path);
+  return process.platform === "win32" ? full.toLowerCase() : full;
 }
 
 /** A new file's directory entry is durable only once its directory is

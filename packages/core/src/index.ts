@@ -55,17 +55,33 @@ export {
   fitMessagesToBudget,
 } from "./backend/context-budget.js";
 export {
+  currentJournalHost,
   DISPATCH_JOURNAL_VERSION,
   DispatchJournal,
   type DispatchJournalEntry,
+  dispatchJournalDir,
   dispatchJournalPath,
   type JournalFrameInputs,
+  type JournalHost,
+  type JournalProcessFate,
   type JournalSpawnRole,
   type JournalStartEntry,
   journalUnavailableResult,
+  markJournalOpen,
+  openJournalIndexPath,
   parseDispatchJournal,
   readDispatchJournal,
+  readJournalIndex,
 } from "./backend/dispatch-journal.js";
+export {
+  type OpenDispatch,
+  openDispatch,
+  planSeal,
+  processLine,
+  type SealedCall,
+  type SealedProcess,
+  type SealPlan,
+} from "./backend/journal-seal.js";
 export {
   type RenderScopedMemoryOptions,
   renderScopedMemory,
@@ -212,6 +228,8 @@ export type * from "./types/events.js";
 export type * from "./types/prompt.js";
 export type * from "./types/provider.js";
 export {
+  type CutoffOutcome,
+  type CutoffStep,
   type DoneMarkerSummary,
   type EvidenceSection,
   type HertaBlock,

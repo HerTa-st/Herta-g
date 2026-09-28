@@ -10,6 +10,8 @@
 import type {
   AgentEvent,
   AgentExecutionReport,
+  CutoffOutcome,
+  CutoffStep,
   DigestDocumentData,
   DoneMarkerSummary,
   EvidenceSection,
@@ -184,6 +186,13 @@ export function sanitizeSection(s: EvidenceSection): EvidenceSection {
         source: cleanBody(s.source),
         path: cleanBody(s.path),
         text: cleanBody(s.text),
+      };
+    case "cutoff":
+      // A step names a model-written command or path; the outcome is a
+      // harness literal.
+      return {
+        ...s,
+        steps: s.steps.map((c) => ({ ...c, step: cleanBody(c.step) })),
       };
     case "error":
       return { ...s, message: cleanBody(s.message) };
@@ -740,6 +749,7 @@ const CN_MARKER_LABELS = (stateWord: string): MarkerSummaryLabels => ({
   commit: (sha) => `提交 ${sha}`,
   pushed: (ref) => `推送 ${ref}`,
   aborted: "运行异常中止",
+  crashed: "应用意外退出",
 });
 
 const STATUS_WORD: Record<string, string> = {
@@ -1086,4 +1096,73 @@ export function buildBridgeFailureMarker(err: unknown): SystemBlock {
     evidenceDetail: `↳ 错误: ${message}`,
     evidence: [{ kind: "error", message }],
   };
+}
+
+/** The CN word for each cut-off step's outcome (the GUI zh catalog pins the
+ *  same words as `evidence.cutoff.*`). */
+const CUTOFF_WORD: Record<CutoffOutcome, string> = {
+  not_started: "未开始",
+  read_interrupted: "读取中断",
+  write_applied: "已写入",
+  write_not_applied: "未写入",
+  write_changed_since: "之后被改动",
+  state_not_applied: "未生效",
+  outcome_unknown: "结果未知",
+};
+
+/** What the crash marker is built from — the seal's plan, reduced to what
+ *  the record shows. */
+export interface CrashMarkerInput {
+  readonly steps: readonly CutoffStep[];
+  readonly changedFiles: readonly string[];
+  readonly openTodos: readonly string[];
+}
+
+/**
+ * The done-marker the harness writes when a session opens on a run the app
+ * exited during (ADR 0071 §1.2): state 中断, `crashed`, and in its detail
+ * each step that had no result with the outcome the seal decided, the files
+ * the run changed, and its unfinished todos — so the next dispatch's
+ * `workingHistory` and Herta read what happened, and rewind's changed-file
+ * warning still fires. Sanitized here: it is built outside the bridge.
+ */
+export function buildCrashMarker(input: CrashMarkerInput): SystemBlock {
+  const markerSummary: DoneMarkerSummary = {
+    kind: "done",
+    state: "interrupted",
+    fileCount: input.changedFiles.length,
+    riskCount: 0,
+    crashed: true,
+  };
+  const body = composeMarkerSummary(markerSummary, CN_MARKER_LABELS("中断"));
+  const detailParts: string[] = [];
+  const sections: EvidenceSection[] = [];
+  if (input.steps.length > 0) {
+    const steps = input.steps.slice(0, 8);
+    detailParts.push(
+      `↳ 中断时: ${steps.map((s) => `${s.step} — ${CUTOFF_WORD[s.outcome]}`).join("; ")}`,
+    );
+    sections.push({ kind: "cutoff", steps });
+  }
+  if (input.changedFiles.length > 0) {
+    const paths = input.changedFiles.slice(0, 20);
+    detailParts.push(`↳ 改动文件: ${paths.join(", ")}`);
+    sections.push({ kind: "files", paths });
+  }
+  if (input.openTodos.length > 0) {
+    const items = input.openTodos.slice(0, 5);
+    detailParts.push(`↳ 待办: ${items.join("; ")}`);
+    sections.push({ kind: "todos", items });
+  }
+  return sanitizeSystemBlock({
+    kind: "system",
+    label: "差分协处理器",
+    body,
+    role: "done-marker",
+    markerSummary,
+    ...(detailParts.length > 0
+      ? { evidenceDetail: detailParts.join("\n") }
+      : {}),
+    ...(sections.length > 0 ? { evidence: sections } : {}),
+  });
 }

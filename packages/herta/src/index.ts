@@ -22,6 +22,8 @@ export {
   invokeBanzhuanBridge,
 } from "./narrative/backend-bridge.js";
 export {
+  buildCrashMarker,
+  type CrashMarkerInput,
   projectBackendEvent,
   sanitizeSystemBlock,
 } from "./narrative/backend-record-projection.js";

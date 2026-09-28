@@ -57,6 +57,7 @@ import {
 } from "@herta/tools";
 import { type ImageCaptioner, migrateAttachments } from "./attachments.js";
 import { BusActorStreamingSink } from "./bus-streaming-sink.js";
+import { dropWithdrawnJournal } from "./dispatch-recovery.js";
 import { OverlayAskResolver } from "./overlay-ask-resolver.js";
 import { recordTail } from "./record-window.js";
 import {
@@ -1076,6 +1077,12 @@ export class SessionImpl implements Session {
       result.withdrawn,
       this._record,
     );
+    // A withdrawn dispatch's journal goes with it, so the run is never
+    // sealed or continued (ADR 0071 §1.1). Best effort, like the GC above.
+    await dropWithdrawnJournal(
+      dispatchJournalPath(this.transcriptDir, this.sessionId),
+      this._record.length,
+    ).catch(() => undefined);
     return {
       ok: true,
       userText: result.userText,

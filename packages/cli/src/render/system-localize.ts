@@ -55,6 +55,7 @@ function composeMarkerSummaryEN(m: DoneMarkerSummary): string {
     commit: (sha) => `committed ${sha}`,
     pushed: (ref) => `pushed ${ref}`,
     aborted: "run aborted",
+    crashed: "the app exited unexpectedly",
   });
 }
 

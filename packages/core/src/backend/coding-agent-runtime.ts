@@ -25,8 +25,10 @@ import { runBackendTurnLoop } from "./backend-turn-loop.js";
 import { BackgroundHost } from "./background-host.js";
 import type { BackendPromptBudget } from "./context-budget.js";
 import {
+  currentJournalHost,
   DISPATCH_JOURNAL_VERSION,
   DispatchJournal,
+  markJournalOpen,
 } from "./dispatch-journal.js";
 import { renderScopedMemory } from "./scoped-memory.js";
 
@@ -545,6 +547,8 @@ export class CodingAgentRuntime {
           ...(opts.recordLength !== undefined
             ? { recordLength: opts.recordLength }
             : {}),
+          workspaceRoot: this.deps.workspaceRoot,
+          host: currentJournalHost(),
           brief,
           frame: {
             userMessages: handle.userMessages,
@@ -557,6 +561,9 @@ export class CodingAgentRuntime {
             ...(repoContext !== null ? { repoContext } : {}),
           },
         });
+        if (!journal.failed) {
+          await markJournalOpen(this.deps.journalPath, true);
+        }
       }
       const turnDepsWithJournal =
         journal !== undefined ? { ...turnDeps, journal } : turnDeps;
@@ -716,6 +723,11 @@ export class CodingAgentRuntime {
       // open does not take it for a run the app died in (ADR 0071 §1.2).
       if (journal !== undefined) {
         await journal.append({ kind: "end", status: report.status });
+        // Its processes were stopped above (`bg.stopAll`): nothing for a
+        // relaunch to reap (ADR 0071 §1.6).
+        if (this.deps.journalPath !== undefined) {
+          await markJournalOpen(this.deps.journalPath, false);
+        }
       }
       return report;
     } finally {

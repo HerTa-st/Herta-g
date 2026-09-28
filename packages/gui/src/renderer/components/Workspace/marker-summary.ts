@@ -50,5 +50,8 @@ export function composeMarkerSummary(summary: ActivitySummary, t: TFn): string {
     // Abnormal termination (bridge-failure marker): composes the canonical
     // body's 运行异常中止 segment instead of a fabricated risk count.
     aborted: t("record.marker.aborted"),
+    // A run the app exited during, sealed when its session opened (ADR 0071
+    // §1.2).
+    crashed: t("record.marker.crashed"),
   });
 }

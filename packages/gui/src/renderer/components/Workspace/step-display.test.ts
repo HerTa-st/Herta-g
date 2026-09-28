@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MessageKey } from "../../i18n/keys.js";
+import { en } from "../../i18n/messages/en.js";
+import { zh } from "../../i18n/messages/zh.js";
 import type { SystemBlock } from "./group-record.js";
 import {
   latestOpStep,
@@ -789,6 +791,37 @@ describe("stepDisplayDetail — the evidence pane localizes (2026-08-01)", () =>
           key === "activity.verb.digesting" ? "摘要" : tEn(key),
       ),
     ).toBe("摘要 x");
+  });
+
+  it("the crash marker's cut-off steps: the outcome words translate, the steps stay verbatim (ADR 0071 §1.2)", () => {
+    const tCat =
+      (cat: Record<MessageKey, string>) =>
+      (key: MessageKey): string =>
+        cat[key];
+    // The canonical detail exactly as the seal writes it (pinned by the
+    // app-server's dispatch-recovery test).
+    const marker: SystemBlock = {
+      kind: "system",
+      label: "差分协处理器",
+      body: "中断 · 1 个文件 · 应用意外退出",
+      role: "done-marker",
+      evidenceDetail:
+        "↳ 中断时: edit_file a.ts — 已写入; run_command npm test — 未开始\n↳ 改动文件: a.ts",
+      evidence: [
+        {
+          kind: "cutoff",
+          steps: [
+            { step: "edit_file a.ts", outcome: "write_applied" },
+            { step: "run_command npm test", outcome: "not_started" },
+          ],
+        },
+        { kind: "files", paths: ["a.ts"] },
+      ],
+    };
+    expect(stepDisplayDetail(marker, tCat(zh))).toBe(marker.evidenceDetail);
+    expect(stepDisplayDetail(marker, tCat(en))).toBe(
+      "↳ when the app exited: edit_file a.ts — written; run_command npm test — not started\n↳ changed files: a.ts",
+    );
   });
 
   it("falls back to the canonical string for records without sections", () => {

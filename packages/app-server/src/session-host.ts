@@ -5,6 +5,8 @@ import { isAbsolute, join } from "node:path";
 import {
   defaultWorkspaceFor,
   deleteSessionFiles,
+  dispatchJournalDir,
+  dispatchJournalPath,
   dreamDirFor,
   ensureHertaGitignore,
   readSessionFile,
@@ -26,6 +28,10 @@ import {
   runDreamPass,
 } from "@herta/knowledge";
 import { reportProviderUsage } from "@herta/providers";
+import {
+  reapOrphanedDispatches,
+  sealOpenDispatch,
+} from "./dispatch-recovery.js";
 import { DreamTrigger } from "./dream-trigger.js";
 import { SessionImpl } from "./session.js";
 import {
@@ -348,6 +354,23 @@ class SessionHostImpl implements SessionHost {
     this.keyHolder.current = key;
   }
 
+  async reapOrphanedProcesses(): Promise<void> {
+    try {
+      const reaped = await reapOrphanedDispatches(
+        dispatchJournalDir(this.config.transcriptDir),
+      );
+      if (reaped.fates.length > 0) {
+        console.log(
+          `[herta] processes left by interrupted runs: ${reaped.fates
+            .map((f) => `${f.pid} ${f.fate}`)
+            .join(", ")}`,
+        );
+      }
+    } catch (err) {
+      console.error("[herta] reaping interrupted runs failed:", err);
+    }
+  }
+
   createSession(opts: CreateSessionOpts): Promise<Session> {
     return this.serializeLifecycle(() => this.createSessionInner(opts));
   }
@@ -415,8 +438,30 @@ class SessionHostImpl implements SessionHost {
     // Closing can flush an interrupted turn's blocks into this same file, so
     // a self-reopen re-reads to resume from the final on-disk record.
     if (reopeningActive) loaded = readSessionFile(sessionFile);
-    const { meta, record, latestWorkspaceSet, lastTurnEnd } = loaded;
+    const { meta, latestWorkspaceSet } = loaded;
+    let { record, lastTurnEnd } = loaded;
     const persister = V2RecordPersister.forResume({ sessionFile });
+    // A 板砖 run the app exited during is sealed first, before anything
+    // else reads the record: its open steps decided and closed, a 中断
+    // marker and `turn_end interrupted` written (ADR 0071 §1.2). The
+    // marker ends the dispatch for every reader, and the turn_end keeps the
+    // regenerate path off a turn that did not lose a reply.
+    try {
+      const sealed = await sealOpenDispatch({
+        journalPath: dispatchJournalPath(
+          this.config.transcriptDir,
+          opts.sessionId,
+        ),
+        record,
+        persister,
+      });
+      if (sealed !== null) {
+        record = sealed.record;
+        lastTurnEnd = sealed.lastTurnEnd;
+      }
+    } catch (err) {
+      console.error("[herta] sealing an interrupted run failed:", err);
+    }
     // Recover the effective backend workspace in precedence order (latest
     // workspace_set → header backendWorkspace → legacy workspaceRoot). It is
     // "default" only when it equals the managed sandbox for this session.

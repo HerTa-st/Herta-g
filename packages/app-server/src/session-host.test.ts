@@ -9,6 +9,8 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  dispatchJournalDir,
+  dispatchJournalPath,
   readSessionFile,
   V2RecordPersister,
   writeSessionTitle,
@@ -158,6 +160,86 @@ describe("openSession — load pre-existing JSONL", () => {
       at: "2026-06-18T09:30:00.000Z",
     });
 
+    await host.closeActiveSession();
+  });
+
+  it("seals a 板砖 run the app exited during, once (ADR 0071 §1.2)", async () => {
+    const cfg = mkConfig();
+    const sessionId = "test-session-crashed";
+    const persister = V2RecordPersister.forNewSession({
+      sessionId,
+      workspaceRoot: cfg.workspaceRoot,
+      startedAt: new Date(),
+      transcriptDir: cfg.transcriptDir,
+    });
+    persister.appendBlock({ kind: "user", text: "run the tests" });
+    persister.appendBlock({
+      kind: "herta",
+      surface: "speech",
+      text: "@板砖 run the tests",
+    });
+    persister.appendBlock({
+      kind: "system",
+      label: "差分协处理器",
+      body: "Running npm test",
+    });
+    const journalPath = dispatchJournalPath(cfg.transcriptDir, sessionId);
+    mkdirSync(dispatchJournalDir(cfg.transcriptDir), { recursive: true });
+    writeFileSync(
+      journalPath,
+      `${[
+        {
+          kind: "start",
+          v: 1,
+          taskId: "t1",
+          at: "2026-09-28T10:00:00.000Z",
+          recordLength: 2,
+          workspaceRoot: cfg.workspaceRoot,
+          brief: { taskId: "t1" },
+          frame: {
+            userMessages: [{ text: "run the tests" }],
+            omittedUserMessages: 0,
+            scopedRepoInstructions: "",
+            scopedMemory: "",
+            recentDialogue: "",
+            workingHistory: "",
+            lang: "zh",
+          },
+        },
+        {
+          kind: "message",
+          message: {
+            role: "assistant",
+            text: "",
+            ts: "2026-09-28T10:00:01.000Z",
+            toolCalls: [
+              { id: "c1", tool: "run_command", input: { command: "npm test" } },
+            ],
+          },
+        },
+        { kind: "dispatch", callIds: ["c1"] },
+      ]
+        .map((e) => JSON.stringify(e))
+        .join("\n")}\n`,
+    );
+
+    const host = createSessionHost(cfg);
+    const session = await host.openSession({ sessionId });
+    expect(session.record).toHaveLength(4);
+    expect(session.record.at(-1)).toMatchObject({
+      role: "done-marker",
+      body: "中断 · 应用意外退出",
+      evidenceDetail: "↳ 中断时: run_command npm test — 结果未知",
+    });
+    await host.closeActiveSession();
+
+    // Reopened: sealed once, nothing more.
+    const again = await host.openSession({ sessionId });
+    expect(again.record).toHaveLength(4);
+    expect(
+      readSessionFile(join(cfg.transcriptDir, `${sessionId}.jsonl`))
+        .lastTurnEnd,
+    ).toEqual({ outcome: "interrupted", atBlockCount: 4 });
     await host.closeActiveSession();
   });
 

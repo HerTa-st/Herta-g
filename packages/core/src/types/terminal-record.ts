@@ -142,6 +142,35 @@ export interface DoneMarkerSummary {
    *  instead of fabricating a synthetic risk count. Absent on ordinary
    *  completion markers. */
   readonly aborted?: true;
+  /** Set (only ever `true`) on the marker the harness wrote for a run the
+   *  app exited during, when its session next opened (ADR 0071 §1.2;
+   *  canonical segment `应用意外退出`, state `interrupted`). */
+  readonly crashed?: true;
+}
+
+/** How a step the app exited during ended, as far as the harness can tell
+ *  (ADR 0071 §1.3). */
+export type CutoffOutcome =
+  /** Never dispatched: it waited for approval, or was queued behind another. */
+  | "not_started"
+  /** A read-only step cut short: no side effect. */
+  | "read_interrupted"
+  /** The file holds the written content. */
+  | "write_applied"
+  /** The file is as it was (or still absent). */
+  | "write_not_applied"
+  /** The file is neither: it was changed after the app exited. */
+  | "write_changed_since"
+  /** Harness state (todos, findings): rebuilt from finished steps. */
+  | "state_not_applied"
+  /** A command, or anything else with side effects: it may have partly run. */
+  | "outcome_unknown";
+
+/** One step of the crash marker's `cutoff` section. */
+export interface CutoffStep {
+  /** The tool and its target: `edit_file src/a.ts`, `run_command npm test`. */
+  readonly step: string;
+  readonly outcome: CutoffOutcome;
 }
 
 /**
@@ -560,6 +589,14 @@ export type EvidenceSection =
       readonly path: string;
       readonly chunks: number;
       readonly text: string;
+    }
+  | {
+      /** The crash marker's open steps (`↳ 中断时:`), ADR 0071 §1.2: each
+       *  step that had no result when the app exited, with the outcome the
+       *  harness decided for it. Structured, so a renderer localizes the
+       *  outcome words; the steps themselves are verbatim. */
+      readonly kind: "cutoff";
+      readonly steps: readonly CutoffStep[];
     }
   | {
       /** The done-marker's conclusions (`↳ 结论:`) — the backend's own cited

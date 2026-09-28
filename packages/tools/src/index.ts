@@ -50,6 +50,12 @@ export {
   shellPathsFor,
   shellWorkspaceHint,
 } from "./bash/index.js";
+export {
+  listMsysProcesses,
+  type MsysGroup,
+  type MsysRow,
+  msysGroupWinpids,
+} from "./bash/msys-processes.js";
 export type { BashInput } from "./bash/schema.js";
 // Exported for the attachment ingest (ADR 0033): the denylist must apply to
 // the SOURCE file at the door, because safeStoredName's hash suffix means the
@@ -150,6 +156,14 @@ export type { MemorySaveInput } from "./memory-save/schema.js";
 // a test rather than a shared assumption.
 export type { ResolveSafePathOpts, SafePathResult } from "./path-safety.js";
 export { resolveSafePath } from "./path-safety.js";
+export {
+  killProcesses,
+  listProcesses,
+  type ProcessRow,
+  processTree,
+  SAME_PROCESS_WINDOW_MS,
+  sameProcessStart,
+} from "./process-reap.js";
 export type { ReadFileData } from "./read-file/index.js";
 export { readFileTool } from "./read-file/index.js";
 export type { ReadFileInput } from "./read-file/schema.js";

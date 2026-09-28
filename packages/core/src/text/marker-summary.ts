@@ -28,6 +28,10 @@ export interface MarkerSummaryLabels {
   /** Abnormal-termination word (run aborted / 运行异常中止) — appended only
    *  on the bridge-failure marker (`aborted: true`). */
   readonly aborted: string;
+  /** The app-exit word (app exited unexpectedly / 应用意外退出) — appended
+   *  only on the marker a session's next open wrote for a run the app
+   *  exited during (`crashed: true`, ADR 0071 §1.2). */
+  readonly crashed: string;
 }
 
 /**
@@ -66,5 +70,6 @@ export function composeMarkerSummary(
   // Abnormal termination (bridge-failure marker): the twin of the canonical
   // 运行异常中止 segment — composed, never fabricated as a risk count.
   if (m.aborted === true) parts.push(labels.aborted);
+  if (m.crashed === true) parts.push(labels.crashed);
   return parts.join(" · ");
 }

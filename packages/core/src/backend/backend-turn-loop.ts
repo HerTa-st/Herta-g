@@ -591,6 +591,7 @@ export async function* runBackendTurnLoop(
             await journal.append({
               kind: "dispatch",
               callIds: allowed.map((c) => c.id),
+              readOnly: true,
             });
           }
           // An AbortError from any concurrent tool rejects the whole
@@ -681,12 +682,18 @@ export async function* runBackendTurnLoop(
         // anything not read-only, so a crash from here on reads as "may have
         // run". A mutating call the journal cannot record does not run.
         if (journal !== undefined) {
-          const entry = { kind: "dispatch", callIds: [call.id] } as const;
           if (deps.tools.get(call.tool)?.readOnly === true) {
-            await journal.append(entry);
+            await journal.append({
+              kind: "dispatch",
+              callIds: [call.id],
+              readOnly: true,
+            });
           } else {
             try {
-              await journal.appendDurable(entry);
+              await journal.appendDurable({
+                kind: "dispatch",
+                callIds: [call.id],
+              });
             } catch (err) {
               const refused = journalUnavailableResult(errorMessage(err));
               yield* emit({

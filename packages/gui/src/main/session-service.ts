@@ -1309,6 +1309,11 @@ export function createSessionService(
       // future "resume last" affordance.
       console.log("[herta] launch: connect screen (no auto-resume)");
       send(EVT.reset, { noSession: true });
+      // Commands a 板砖 run left running when the app last exited are ended
+      // now, each only if it is still that process (ADR 0071 §1.6). The index
+      // it reads is empty unless a run was cut off, so this costs a file read;
+      // the process query it may spawn runs off this thread.
+      void host.reapOrphanedProcesses();
     } catch (err) {
       console.error("[herta] session bootstrap failed:", err);
       host = null;

@@ -512,6 +512,11 @@ export interface SessionHost {
    *  activity for the dream trigger, and a running pass steps aside at its
    *  next episode. Optional: a host without a dream trigger omits it. */
   noteUserActivity?(): void;
+  /** End the processes 板砖 runs left running when the app exited (ADR 0071
+   *  §1.6): only a process still running as the one the run started (same
+   *  pid, same start time), and each outcome goes into its run's journal.
+   *  Call once after launch, off the startup path. Never rejects. */
+  reapOrphanedProcesses(): Promise<void>;
   readonly activeSession: Session | null;
 }
 

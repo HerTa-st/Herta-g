@@ -3,6 +3,11 @@ import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { type BackgroundProcess, isPathInside } from "@herta/core";
 import { childProcessEnv } from "../child-env.js";
+import {
+  listMsysProcesses,
+  type MsysGroup,
+  msysGroupWinpids,
+} from "./msys-processes.js";
 import { type ShellPaths, shellPathsFor } from "./shell-paths.js";
 
 /**
@@ -56,6 +61,13 @@ export interface PersistentShellOpts {
    *  after a crash ends a shell still running (ADR 0071 §1.6). */
   onSpawn?: (pid: number) => void;
   onExit?: (pid: number) => void;
+  /** Windows (MSYS bash): the shell's OWN Windows pid and its MSYS process
+   *  group, as it reports them. The pid `onSpawn` sees is a launcher — a
+   *  scoop shim, Git for Windows' `bin\bash.exe` — and when the app dies
+   *  those launchers die with it while the real shell and the command under
+   *  it run on; with the launcher's record alone a relaunch could not reach
+   *  them (seen live, 2026-09-28). Called once per spawn, shortly after it. */
+  onShellPid?: (pid: number, group: MsysGroup & { ps: string }) => void;
 }
 
 /** BackgroundHost id under which the shell registers (internal). */
@@ -63,10 +75,11 @@ export const SHELL_BG_ID = "shell";
 
 const DEFAULT_MAX_OUTPUT = 1_048_576;
 const KILL_GRACE_MS = 3_000;
-/** Every protocol marker's length: `__HERTA_SH_` / `__HERTA_WS_` (11) +
- *  12 hex digits + `__` (2). `onData` keeps one less than this as its tail. */
+/** Every protocol marker's length: `__HERTA_SH_` / `__HERTA_WS_` /
+ *  `__HERTA_PD_` (11) + 12 hex digits + `__` (2). `onData` keeps one less
+ *  than this as its tail. */
 const MARKER_LEN = 25;
-const markerFor = (kind: "SH" | "WS"): string =>
+const markerFor = (kind: "SH" | "WS" | "PD"): string =>
   `__HERTA_${kind}_${randomBytes(6).toString("hex")}__`;
 /** How long `taskkill /T` may take to fell the shell's process tree. */
 const TASKKILL_TIMEOUT_MS = 15_000;
@@ -92,6 +105,18 @@ export class PersistentShell implements BackgroundProcess {
   private shellWs: string | null = null;
   /** Set while a spawned shell still owes its workspace line. */
   private wsMarker: string | null = null;
+  /** Set while a spawned shell still owes its own-pid line (Windows, an
+   *  MSYS bash). */
+  private pidMarker: string | null = null;
+  /** Windows: MSYS's `ps`, as the shell names it — how a kill reaches what
+   *  the shell started (see msys-processes.ts). Learned from the shell,
+   *  because the bash found may be a package manager's shim anywhere. */
+  private msysPs: string | null = null;
+  /** The running shell's MSYS group, once it has said it. */
+  private shellGroup: MsysGroup | null = null;
+  /** MSYS groups of shells that exited on their own: a job they backgrounded
+   *  may still run there (the Windows twin of `exitedGroups`). */
+  private exitedMsysGroups: MsysGroup[] = [];
   private child: ChildProcess | null = null;
   /** POSIX process groups (= pids) of shells that have exited; a job they
    *  backgrounded may still run in one. See `isRunning`. */
@@ -106,12 +131,15 @@ export class PersistentShell implements BackgroundProcess {
   private currentCwd: string;
   private spawnCount = 0;
   private readonly opts: Required<
-    Omit<PersistentShellOpts, "env" | "onSpawn" | "onExit">
+    Omit<PersistentShellOpts, "env" | "onSpawn" | "onExit" | "onShellPid">
   > & {
     env: Record<string, string>;
   };
   private readonly onSpawn: ((pid: number) => void) | undefined;
   private readonly onExit: ((pid: number) => void) | undefined;
+  private readonly onShellPid:
+    | ((pid: number, group: MsysGroup & { ps: string }) => void)
+    | undefined;
 
   constructor(opts: PersistentShellOpts) {
     this.opts = {
@@ -122,6 +150,7 @@ export class PersistentShell implements BackgroundProcess {
     };
     this.onSpawn = opts.onSpawn;
     this.onExit = opts.onExit;
+    this.onShellPid = opts.onShellPid;
     this.argv = [opts.bashPath];
     this.paths = shellPathsFor(opts.bashPath);
     this.currentCwd = this.opts.workspaceRoot;
@@ -160,7 +189,10 @@ export class PersistentShell implements BackgroundProcess {
   isRunning(): boolean {
     if (this.shellAlive()) return true;
     this.pruneGroups();
-    return this.exitedGroups.size > 0;
+    // Windows: whether an exited shell's MSYS group still has members takes
+    // a `ps` to know; answer yes and let `kill` find out (the shell is an
+    // internal entry, so a yes costs no report line).
+    return this.exitedGroups.size > 0 || this.exitedMsysGroups.length > 0;
   }
 
   /** Forget every remembered group with no member left, so an id is never
@@ -183,12 +215,34 @@ export class PersistentShell implements BackgroundProcess {
       }
     }
     this.exitedGroups.clear();
+    // Windows: what the shell started, read from MSYS BEFORE the tree kill
+    // (the table is how they are found; the kill below cannot reach them).
+    const groups = [
+      ...this.exitedMsysGroups,
+      ...(child !== null && this.shellGroup !== null ? [this.shellGroup] : []),
+    ];
+    this.exitedMsysGroups = [];
+    this.shellGroup = null;
+    const members = await this.msysMembers(groups);
+    if (child !== null) await killTree(child);
+    if (members.length > 0) await killWinpids(members);
     if (child === null) return;
-    await killTree(child);
     // Only a waiter still bound to THIS child fails; a fresh shell may
     // already be serving the next command by the time the kill settles.
     if (this.waiter?.child === child)
       this.failWaiter({ shellExited: true, timedOut: false });
+  }
+
+  /** The Windows pids of these MSYS groups' members; [] when there is no
+   *  MSYS `ps` or it cannot be read. */
+  private async msysMembers(groups: readonly MsysGroup[]): Promise<number[]> {
+    if (groups.length === 0 || this.msysPs === null) return [];
+    try {
+      const rows = await listMsysProcesses(this.msysPs);
+      return [...new Set(groups.flatMap((g) => msysGroupWinpids(rows, g)))];
+    } catch {
+      return [];
+    }
   }
 
   private spawnShell(): void {
@@ -269,6 +323,12 @@ export class PersistentShell implements BackgroundProcess {
       ) {
         this.exitedGroups.add(child.pid);
       }
+      // Windows: the same for an MSYS group — whether it has members left
+      // is for `kill` to read.
+      if (ownExit && isWin && this.shellGroup !== null) {
+        this.exitedMsysGroups.push(this.shellGroup);
+        this.shellGroup = null;
+      }
       if (this.waiter?.child === child)
         this.failWaiter({ shellExited: true, timedOut: false });
     });
@@ -290,10 +350,20 @@ export class PersistentShell implements BackgroundProcess {
     // command has run.
     const wsMarker = this.shellWs === null ? markerFor("WS") : null;
     this.wsMarker = wsMarker;
+    // Windows: the shell says its own Windows pid, its MSYS pid (its group;
+    // see msys-processes.ts) and where its `ps` is. An MSYS bash has all
+    // three; anything else prints blanks there, and nothing is taken.
+    const pidMarker = isWin ? markerFor("PD") : null;
+    this.pidMarker = pidMarker;
+    this.shellGroup = null;
     child.stdin?.write(
       `exec 2>&1\nset +o history\n__herta_ws="$(pwd)"\n${
         wsMarker !== null
           ? `printf '%s:%s\\n' '${wsMarker}' "$__herta_ws"\n`
+          : ""
+      }${
+        pidMarker !== null
+          ? `printf '%s:%s:%s:%s\\n' '${pidMarker}' "$(cat /proc/$$/winpid 2>/dev/null)" "$$" "$(cygpath -w /usr/bin/ps.exe 2>/dev/null)"\n`
           : ""
       }`,
     );
@@ -314,6 +384,30 @@ export class PersistentShell implements BackgroundProcess {
     if (spelled.startsWith("/")) this.shellWs = spelled;
     this.buf = this.buf.slice(0, at) + this.buf.slice(end + 1);
     this.wsMarker = null;
+  }
+
+  /** Lift the shell's own `<marker>:<winpid>:<msys pid>:<ps path>` line out
+   *  of the buffer, remember its group and `ps`, and pass them on. Protocol,
+   *  like the workspace line. */
+  private takePidLine(): void {
+    const marker = this.pidMarker;
+    if (marker === null) return;
+    const at = this.buf.indexOf(marker);
+    if (at === -1) return;
+    const end = this.buf.indexOf("\n", at);
+    if (end === -1) return;
+    const said = this.buf.slice(at + marker.length + 1, end).trim();
+    this.buf = this.buf.slice(0, at) + this.buf.slice(end + 1);
+    this.pidMarker = null;
+    // The ps path is the rest of the line: it carries a drive colon.
+    const m = /^(\d+):(\d+):(.+\.exe)$/i.exec(said);
+    if (m === null) return;
+    const group = { pgid: Number(m[2]), winpid: Number(m[1]) };
+    if (group.winpid <= 0 || group.pgid <= 0) return;
+    const ps = m[3] as string;
+    this.msysPs = ps;
+    this.shellGroup = group;
+    this.onShellPid?.(group.winpid, { ...group, ps });
   }
 
   private failWaiter(how: { shellExited: boolean; timedOut: boolean }): void {
@@ -355,6 +449,7 @@ export class PersistentShell implements BackgroundProcess {
     const w = this.waiter;
     if (
       this.wsMarker !== null ||
+      this.pidMarker !== null ||
       this.markerSeen ||
       (w !== null && window.includes(w.marker))
     ) {
@@ -385,6 +480,7 @@ export class PersistentShell implements BackgroundProcess {
 
   private pump(): void {
     this.takeWorkspaceLine();
+    this.takePidLine();
     const w = this.waiter;
     if (w === null) {
       this.bound(null);
@@ -566,6 +662,19 @@ function groupAlive(group: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** End these Windows processes and what each started (`taskkill /T`);
+ *  one already gone is the outcome wanted. Bounded, never rejects. */
+function killWinpids(pids: readonly number[]): Promise<void> {
+  return new Promise<void>((settled) => {
+    execFile(
+      "taskkill",
+      ["/F", "/T", ...pids.flatMap((p) => ["/PID", String(p)])],
+      { windowsHide: true, timeout: TASKKILL_TIMEOUT_MS },
+      () => settled(),
+    );
+  });
 }
 
 async function killTree(child: ChildProcess): Promise<void> {

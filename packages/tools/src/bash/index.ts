@@ -165,6 +165,15 @@ export function bashTool(opts: BashToolOpts): HertaTool {
                     role: "shell",
                   }),
                 onExit: (pid: number) => journal.recordExit(pid),
+                // The real shell under the launcher: what a relaunch must
+                // find when the launcher died with the app (ADR 0071 §1.6).
+                onShellPid: (pid, group) =>
+                  journal.recordSpawn({
+                    pid,
+                    command: "bash (persistent shell)",
+                    role: "shell",
+                    msys: { pgid: group.pgid, ps: group.ps },
+                  }),
               }
             : {}),
         });

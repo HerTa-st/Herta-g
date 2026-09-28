@@ -1,6 +1,22 @@
 import type { MessageKey } from "../../i18n/keys.js";
 import type { SystemBlock } from "./group-record.js";
 
+type CutoffOutcome = Extract<
+  NonNullable<SystemBlock["evidence"]>[number],
+  { kind: "cutoff" }
+>["steps"][number]["outcome"];
+
+/** The crash marker's outcome words (ADR 0071 §1.2), by outcome. */
+const CUTOFF_KEY: Record<CutoffOutcome, MessageKey> = {
+  not_started: "evidence.cutoff.notStarted",
+  read_interrupted: "evidence.cutoff.readInterrupted",
+  write_applied: "evidence.cutoff.writeApplied",
+  write_not_applied: "evidence.cutoff.writeNotApplied",
+  write_changed_since: "evidence.cutoff.writeChangedSince",
+  state_not_applied: "evidence.cutoff.stateNotApplied",
+  outcome_unknown: "evidence.cutoff.outcomeUnknown",
+};
+
 /**
  * Shorten a filename from the MIDDLE for display (owner 2026-08-10: a long
  * name wrapped the attachment row onto three lines).
@@ -344,6 +360,12 @@ export function stepDisplayDetail(
           return `↳ ${t("evidence.error")}: ${s.message}`;
         case "hint":
           return `↳ ${t("evidence.hint")}: ${s.text}`;
+        case "cutoff":
+          // The steps are verbatim (a command, a path); only the outcome
+          // words are the harness's, so they translate.
+          return `↳ ${t("evidence.cutoff")}: ${s.steps
+            .map((c) => `${c.step} — ${t(CUTOFF_KEY[c.outcome])}`)
+            .join("; ")}`;
         default:
           // A section kind this renderer predates: fall back rather than drop
           // evidence on the floor.
