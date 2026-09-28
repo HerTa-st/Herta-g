@@ -326,7 +326,7 @@ export function registerSettingsHandlers(deps: SettingsIpcDeps): void {
       bundle: st?.bundle ?? false,
       runtime: st?.runtime ?? false,
       failed: st?.failed ?? false,
-      model: voice.voiceModel?.state() ?? {
+      model: (await voice.voiceModel?.state()) ?? {
         phase: "absent",
         receivedBytes: 0,
         totalBytes: TTS_ARCHIVE_BYTES,

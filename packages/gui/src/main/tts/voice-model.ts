@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
-import { mkdir, open, rename, rm } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createGunzip } from "node:zlib";
 import { errorMessage, isAbortError } from "@herta/core";
 import { verifyBundle } from "./bundle-verify.js";
 import { extractTar } from "./tar-extract.js";
-import { ttsBundleComplete } from "./tts-path.js";
+import { ttsBundleCompleteAsync } from "./tts-path.js";
 
 /**
  * The voice model as a DOWNLOAD (ADR 0061): the user asks for it in
@@ -227,7 +227,7 @@ export async function downloadVoiceModel(
     // ── 3. verify every file against the manifest it came with ────────────
     const verdict = await verifyBundle(paths.installing, opts.bundleId);
     if (!verdict.ok) throw new VoiceModelError("verify", verdict.reason);
-    if (!ttsBundleComplete(paths.installing)) {
+    if (!(await ttsBundleCompleteAsync(paths.installing))) {
       throw new VoiceModelError("verify", "bundle incomplete");
     }
 
@@ -280,7 +280,10 @@ export interface VoiceModelServiceOptions {
 }
 
 export interface VoiceModelService {
-  state(): VoiceModelState;
+  /** Async like every file check here: the service runs on the app's main
+   *  thread, where a synchronous look at the bundle held it for the whole
+   *  manifest's stats at every Settings read (ADR 0068). */
+  state(): Promise<VoiceModelState>;
   /** The sweep of a crashed install's leftovers, started when the service
    *  was made (ADR 0061 §4.4); a download waits for it. */
   sweep(): Promise<void>;
@@ -308,9 +311,18 @@ export function createVoiceModelService(
   // used to wait for the next download to sweep them, which nobody may
   // ever start (ADR 0061 §4.4). Swept when the service is made; a download
   // waits for the sweep so the two never race for the same paths.
+  const present = (p: string): Promise<boolean> =>
+    stat(p).then(
+      () => true,
+      () => false,
+    );
   const swept: Promise<void> = (async () => {
     try {
-      if (!existsSync(paths.installing) && !existsSync(paths.download)) return;
+      const leftovers = await Promise.all([
+        present(paths.installing),
+        present(paths.download),
+      ]);
+      if (!leftovers.some(Boolean)) return;
       await rm(paths.download, { force: true }).catch(() => undefined);
       await rmRetry(paths.installing).catch(() => undefined);
       log(`voice model leftovers swept under ${opts.root}`);
@@ -326,9 +338,11 @@ export function createVoiceModelService(
     unpackedBytes: opts.archive.unpackedBytes,
   });
 
-  const state = (): VoiceModelState => {
+  const state = async (): Promise<VoiceModelState> => {
     if (live !== null) return live;
-    if (ttsBundleComplete(paths.final)) return base("ready");
+    if (await ttsBundleCompleteAsync(paths.final)) return base("ready");
+    // A download may have started while the bundle was being looked at.
+    if (live !== null) return live;
     return lastError !== null
       ? { ...base("failed"), error: lastError }
       : base("absent");
@@ -337,6 +351,15 @@ export function createVoiceModelService(
   const run = async (): Promise<VoiceModelState> => {
     const ac = new AbortController();
     controller = ac;
+    // A bundle already in place has nothing to fetch and nothing to
+    // announce. The look is async, so it runs inside the download's own
+    // slot: a second download() meanwhile joins this one, and a remove()
+    // meanwhile aborts it before anything is fetched.
+    if ((await ttsBundleCompleteAsync(paths.final)) || ac.signal.aborted) {
+      controller = null;
+      inFlight = null;
+      return state();
+    }
     lastError = null;
     live = base("downloading");
     opts.onChange(live);
@@ -375,7 +398,7 @@ export function createVoiceModelService(
       controller = null;
       inFlight = null;
     }
-    const s = state();
+    const s = await state();
     opts.onChange(s);
     opts.afterChange?.();
     return s;
@@ -386,8 +409,6 @@ export function createVoiceModelService(
     sweep: () => swept,
     download(): Promise<VoiceModelState> {
       if (inFlight !== null) return inFlight;
-      const s = state();
-      if (s.phase === "ready") return Promise.resolve(s);
       inFlight = run();
       return inFlight;
     },
@@ -408,7 +429,7 @@ export function createVoiceModelService(
         log(`voice model removal failed: ${String(err)}`);
         lastError = "disk";
       }
-      const s = state();
+      const s = await state();
       opts.onChange(s);
       opts.afterChange?.();
       return s;

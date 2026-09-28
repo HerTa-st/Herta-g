@@ -299,7 +299,7 @@ describe("createVoiceModelService", () => {
         },
       },
     );
-    expect(svc.state().phase).toBe("absent");
+    expect((await svc.state()).phase).toBe("absent");
     const end = await svc.download();
     expect(end.phase).toBe("ready");
     expect(changes[0]?.phase).toBe("downloading");
@@ -328,7 +328,7 @@ describe("createVoiceModelService", () => {
     const first = await svc.download();
     expect(first.phase).toBe("failed");
     expect(first.error).toBe("http");
-    expect(svc.state().phase).toBe("failed");
+    expect((await svc.state()).phase).toBe("failed");
     const second = await svc.download();
     expect(second.phase).toBe("ready");
   });
@@ -355,6 +355,25 @@ describe("createVoiceModelService", () => {
     const [a, b] = await Promise.all([svc.download(), svc.download()]);
     expect(a.phase).toBe("ready");
     expect(b.phase).toBe("ready");
+  });
+
+  // The bundle is looked at asynchronously now (the service runs on the
+  // app's main thread, ADR 0068), inside the download's own slot: a remove
+  // that lands during that look stops the download before any fetch.
+  it("a remove during download()'s first look fetches nothing", async () => {
+    const { gz, archive } = makeArchive();
+    let fetched = 0;
+    const fetch: FetchLike = (url, init) => {
+      fetched += 1;
+      return fetchOf(gz)(url, init);
+    };
+    const { svc, changes } = service(fetch, archive);
+    const started = svc.download();
+    const gone = await svc.remove();
+    expect((await started).phase).toBe("absent");
+    expect(gone.phase).toBe("absent");
+    expect(fetched).toBe(0);
+    expect(changes.some((c) => c.phase === "downloading")).toBe(false);
   });
 });
 
