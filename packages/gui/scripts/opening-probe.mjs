@@ -114,7 +114,17 @@ async function recordScreencast(cdp, origin, done, ms) {
       data: p.data,
     });
   });
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 80 });
+  // At CSS size: a scale-2 frame is four times the pixels, and on a
+  // software-rendered surface (Linux under Xvfb) the full-size screencast
+  // delivered ONE frame in the whole opening (2026-09-28). Ink is a ratio,
+  // so it reads the same at either size.
+  const view = await cdp.eval("[window.innerWidth, window.innerHeight]");
+  await cdp.send("Page.startScreencast", {
+    format: "jpeg",
+    quality: 80,
+    maxWidth: view[0],
+    maxHeight: view[1],
+  });
   const started = Date.now();
   let captured = false;
   while (Date.now() - started < ms && !(await done())) {
