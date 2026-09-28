@@ -96,6 +96,34 @@ export interface ToolContext {
    *  Optional so the many hand-built test contexts need not carry one; the
    *  turn loop always supplies it. */
   findings?: FindingsLedger;
+  /** This call's view of the run's journal (ADR 0071 §1.1). Absent when the
+   *  run keeps none (the CLI, tests). */
+  journal?: ToolCallJournal;
+}
+
+/**
+ * What a tool records in the run's journal (ADR 0071 §1.1), so a run the
+ * app died in can be sealed: a file write is decided by its hashes, and a
+ * process left running is ended at relaunch.
+ */
+export interface ToolCallJournal {
+  /** Before a file is replaced: the absolute path, its sha256 before (null
+   *  for a new file) and the sha256 it will have after. Durable before it
+   *  resolves; REJECTS when it could not be recorded — the tool must then
+   *  not write (answer `journalUnavailableResult`). */
+  recordWrite(w: {
+    path: string;
+    before: string | null;
+    after: string;
+  }): Promise<void>;
+  /** After a process started (best effort). */
+  recordSpawn(s: {
+    pid: number;
+    command: string;
+    role: "foreground" | "background" | "shell";
+  }): void;
+  /** When a recorded process ended (best effort). */
+  recordExit(pid: number): void;
 }
 
 export type ProgressFn = (event: { id: string; message: string }) => void;

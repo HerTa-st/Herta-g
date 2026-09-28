@@ -150,9 +150,23 @@ export function bashTool(opts: BashToolOpts): HertaTool {
 
       let shell = ctx.bg.getInternal(SHELL_BG_ID);
       if (!(shell instanceof PersistentShell)) {
+        // The shell lives for the brief; the run's journal learns each bash
+        // it starts (ADR 0071 §1.6).
+        const journal = ctx.journal;
         shell = new PersistentShell({
           bashPath: opts.bashPath,
           workspaceRoot: ctx.workspaceRoot,
+          ...(journal !== undefined
+            ? {
+                onSpawn: (pid: number) =>
+                  journal.recordSpawn({
+                    pid,
+                    command: "bash (persistent shell)",
+                    role: "shell",
+                  }),
+                onExit: (pid: number) => journal.recordExit(pid),
+              }
+            : {}),
         });
         ctx.bg.register(shell);
       }

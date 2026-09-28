@@ -55,6 +55,18 @@ export {
   fitMessagesToBudget,
 } from "./backend/context-budget.js";
 export {
+  DISPATCH_JOURNAL_VERSION,
+  DispatchJournal,
+  type DispatchJournalEntry,
+  dispatchJournalPath,
+  type JournalFrameInputs,
+  type JournalSpawnRole,
+  type JournalStartEntry,
+  journalUnavailableResult,
+  parseDispatchJournal,
+  readDispatchJournal,
+} from "./backend/dispatch-journal.js";
+export {
   type RenderScopedMemoryOptions,
   renderScopedMemory,
   SCOPED_MEMORY_MAX_CHARS,

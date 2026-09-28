@@ -10,6 +10,10 @@ export interface RunOptions {
    *  `childProcessEnv()` (process.env minus the AppImage launcher's entries).
    *  Callers must have vetted model-supplied keys through the env guard. */
   env?: NodeJS.ProcessEnv;
+  /** The started process's pid, once it has one — the run's journal records
+   *  it, so a relaunch can end a command the app died during (ADR 0071
+   *  §1.6). */
+  onSpawn?: (pid: number) => void;
 }
 
 /**
@@ -162,6 +166,8 @@ export async function runCommand(
       });
       return;
     }
+
+    if (child.pid !== undefined) options.onSpawn?.(child.pid);
 
     // Both platforms now route abort through killProcessTree — the `signal`
     // spawn option is gone, so this is the only path that stops a run.

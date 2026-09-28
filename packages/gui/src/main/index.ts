@@ -38,7 +38,11 @@ import { hideToTray } from "./hide-to-tray.js";
 import { installMode } from "./install-mode.js";
 import { applyLoginPath, launchLocaleEnv } from "./login-path.js";
 import { installChromiumFetch } from "./net-transport.js";
-import { quitDisposals, quitsWhenAllWindowsClosed } from "./quit-policy.js";
+import {
+  QUIT_HOLD_MS,
+  quitDisposals,
+  quitsWhenAllWindowsClosed,
+} from "./quit-policy.js";
 import { shouldReloadAfterCrash } from "./renderer-recovery.js";
 import {
   appWorkspaceRoot,
@@ -882,7 +886,7 @@ app.on("before-quit", (event) => {
   quitHeld = true;
   event.preventDefault();
   const timeout = new Promise<void>((resolve) => {
-    setTimeout(resolve, 3000);
+    setTimeout(resolve, QUIT_HOLD_MS);
   });
   const flushes = Promise.allSettled([
     pendingDispose ?? Promise.resolve(),

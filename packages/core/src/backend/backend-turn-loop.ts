@@ -33,6 +33,10 @@ import {
   fitMessagesToBudget,
 } from "./context-budget.js";
 import {
+  type DispatchJournal,
+  journalUnavailableResult,
+} from "./dispatch-journal.js";
+import {
   type ModelInferenceResult,
   streamModelInference,
 } from "./stream-model-inference.js";
@@ -68,6 +72,13 @@ export interface BackendTurnDeps {
    * Tests inject an instant resolver to skip wall-clock backoff.
    */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /**
+   * The run's journal (ADR 0071 §1.1). A call that passed its gate is
+   * recorded as dispatched before it runs — durably, and fail-closed, for
+   * anything not read-only — and each tool gets its per-call view. Absent
+   * (the CLI, tests): nothing is recorded.
+   */
+  journal?: DispatchJournal;
 }
 
 function defaultBackoffSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -471,6 +482,13 @@ export async function* runBackendTurnLoop(
         memory: deps.memory,
         ...(deps.findings !== undefined ? { findings: deps.findings } : {}),
       };
+      // Each call records through its own view of the journal (ADR 0071
+      // §1.1): a writer's `write`, a command's `spawn`, stamped with the call.
+      const journal = deps.journal;
+      const ctxFor = (call: ToolCallRequest): ToolContext =>
+        journal === undefined
+          ? toolCtx
+          : { ...toolCtx, journal: journal.forCall(call.id) };
       const progressFor =
         (callId: string) =>
         (progress: { id: string; message: string }): void => {
@@ -566,6 +584,15 @@ export async function* runBackendTurnLoop(
               inputSummary: headerFor(deps, call),
             });
           }
+          // A read-only batch: recorded as dispatched, not synced — a read
+          // interrupted by a crash is safe to redo (ADR 0071 §1.3). After
+          // the started events, as on the serial path below.
+          if (journal !== undefined && allowed.length > 0) {
+            await journal.append({
+              kind: "dispatch",
+              callIds: allowed.map((c) => c.id),
+            });
+          }
           // An AbortError from any concurrent tool rejects the whole
           // Promise.all → the outer catch classifies it `interrupted`;
           // sibling tools observe the same signal and stop themselves.
@@ -574,7 +601,7 @@ export async function* runBackendTurnLoop(
               try {
                 return await deps.tools.run(
                   call,
-                  toolCtx,
+                  ctxFor(call),
                   progressFor(call.id),
                 );
               } catch (err) {
@@ -637,6 +664,12 @@ export async function* runBackendTurnLoop(
           continue;
         }
 
+        // Started goes out in the same synchronous burst as the gate's
+        // `permission.resolved`, BEFORE the journal's awaited append: the
+        // bridge fires a beat held behind the prompt as soon as the prompt
+        // clears, and an await between the two let that beat land ahead of
+        // its own Writing row. The event carries no side effect; the run
+        // below is what the dispatch entry must precede.
         yield* emit({
           type: "tool.call.started",
           id: call.id,
@@ -644,9 +677,37 @@ export async function* runBackendTurnLoop(
           inputSummary: headerFor(deps, call),
         });
 
+        // Recorded as dispatched BEFORE it runs (ADR 0071 §1.1): durably for
+        // anything not read-only, so a crash from here on reads as "may have
+        // run". A mutating call the journal cannot record does not run.
+        if (journal !== undefined) {
+          const entry = { kind: "dispatch", callIds: [call.id] } as const;
+          if (deps.tools.get(call.tool)?.readOnly === true) {
+            await journal.append(entry);
+          } else {
+            try {
+              await journal.appendDurable(entry);
+            } catch (err) {
+              const refused = journalUnavailableResult(errorMessage(err));
+              yield* emit({
+                type: "tool.call.finished",
+                id: call.id,
+                tool: call.tool,
+                result: refused,
+              });
+              deps.transcript.appendTool(call.id, refused, deps.clock());
+              continue;
+            }
+          }
+        }
+
         let result: ToolResult;
         try {
-          result = await deps.tools.run(call, toolCtx, progressFor(call.id));
+          result = await deps.tools.run(
+            call,
+            ctxFor(call),
+            progressFor(call.id),
+          );
         } catch (err) {
           // An abort mid-tool (run_command's runner, the fs walkers — audit
           // M4) is an interrupt, not a tool failure: rethrow to the outer

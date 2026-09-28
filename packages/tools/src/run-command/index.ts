@@ -161,6 +161,17 @@ export function runCommandTool(): HertaTool {
         }
         ctx.bg.register(proc);
         const redactedBgArgv = argv.map((a) => redactSecrets(a));
+        // In the run's journal until it ends (ADR 0071 §1.6).
+        const bgPid = proc.pid;
+        if (bgPid !== undefined && ctx.journal !== undefined) {
+          const journal = ctx.journal;
+          journal.recordSpawn({
+            pid: bgPid,
+            command: redactedBgArgv.join(" "),
+            role: "background",
+          });
+          void proc.closed().then(() => journal.recordExit(bgPid));
+        }
         return {
           ok: true,
           data: {
@@ -185,13 +196,25 @@ export function runCommandTool(): HertaTool {
       }
 
       const effectiveTimeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      // The run's journal learns the pid (ADR 0071 §1.6): a relaunch after a
+      // crash ends a command still running.
+      let spawnedPid: number | undefined;
       const raw = await runCommand(execArgv, {
         cwd: safe.resolved,
         timeoutMs: effectiveTimeoutMs,
         signal: ctx.signal,
         maxBytesPerStream: MAX_BYTES_PER_STREAM,
         env: childEnv,
+        onSpawn: (pid) => {
+          spawnedPid = pid;
+          ctx.journal?.recordSpawn({
+            pid,
+            command: argv.map((a) => redactSecrets(a)).join(" "),
+            role: "foreground",
+          });
+        },
       });
+      if (spawnedPid !== undefined) ctx.journal?.recordExit(spawnedPid);
 
       if (raw.cause === "not_found") {
         // Do NOT steer toward shell wrappers here: the old text said "wrap

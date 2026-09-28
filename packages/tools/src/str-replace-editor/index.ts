@@ -14,6 +14,7 @@ import { PersistentShell, SHELL_BG_ID } from "../bash/persistent-shell.js";
 import { type ShellPaths, shellPathsFor } from "../bash/shell-paths.js";
 import { computeUnifiedDiff } from "../edit-file/engine.js";
 import { formatInputIssues } from "../input-issues.js";
+import { journalWrite } from "../journal-write.js";
 import { decodeUtf8, reattachBom } from "../text-sniff.js";
 import {
   countDiffLines,
@@ -272,6 +273,14 @@ export function strReplaceEditorTool(
           // absent — good
         }
         await mkdir(dirname(target.resolved), { recursive: true });
+        // In the run's journal first (ADR 0071): a new file, no hash before.
+        const refusedCreate = await journalWrite<StrReplaceEditorData>(
+          ctx,
+          target.resolved,
+          null,
+          input.file_text,
+        );
+        if (refusedCreate !== null) return withModelText(refusedCreate);
         const written = await atomicWrite(target.resolved, input.file_text);
         if (!written.ok) return fail("write_failed", written.message);
         ctx.reads.record(
@@ -358,6 +367,15 @@ export function strReplaceEditorTool(
       // bytes the edit never addressed. The ledger must hash what was actually
       // WRITTEN, or the next freshness check fails against our own write.
       const out = reattachBom(plan.after, decoded.bom);
+      // In the run's journal first (ADR 0071): a crash from here on is
+      // decided by the file's hash.
+      const refusedEdit = await journalWrite<StrReplaceEditorData>(
+        ctx,
+        target.resolved,
+        createHash("sha256").update(buf).digest("hex"),
+        out,
+      );
+      if (refusedEdit !== null) return withModelText(refusedEdit);
       const written = await atomicWrite(target.resolved, out);
       if (!written.ok) return fail("write_failed", written.message);
       ctx.reads.record(
@@ -378,6 +396,13 @@ export function strReplaceEditorTool(
       };
     },
   };
+}
+
+/** A refusal in this tool's shape: its model-visible text is the message. */
+function withModelText(
+  r: ToolResult<StrReplaceEditorData>,
+): ToolResult<StrReplaceEditorData> {
+  return r.error !== undefined ? { ...r, modelText: r.error.message } : r;
 }
 
 /** Core's atomic replace, answered as this tool's result shape. */

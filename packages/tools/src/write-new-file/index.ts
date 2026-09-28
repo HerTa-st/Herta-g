@@ -13,6 +13,7 @@ import {
 } from "@herta/core";
 import { errResult } from "../errors.js";
 import { formatInputIssues } from "../input-issues.js";
+import { journalWrite } from "../journal-write.js";
 import { resolveSafePath } from "../path-safety.js";
 import { writeNewFileInputSchema, writeNewFileJsonSchema } from "./schema.js";
 
@@ -112,6 +113,14 @@ export function writeNewFileTool(): HertaTool {
       }
 
       const contentBuf = Buffer.from(content, "utf-8");
+      // In the run's journal first (ADR 0071): a new file, so no hash before.
+      const refused = await journalWrite<WriteNewFileData>(
+        ctx,
+        safe.resolved,
+        null,
+        contentBuf,
+      );
+      if (refused !== null) return refused;
       // Atomic replace (core's helper: unique temp beside the target, rename
       // over it, the temp removed on failure). A busy file is retryable.
       try {

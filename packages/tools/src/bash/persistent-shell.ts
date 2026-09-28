@@ -51,6 +51,11 @@ export interface PersistentShellOpts {
   env?: Record<string, string>;
   /** Capture cap on merged output per command (default 1 MiB). */
   maxOutputBytes?: number;
+  /** Each bash this shell starts (a restart after a timeout starts another),
+   *  and each one's end — the run's journal records them, so a relaunch
+   *  after a crash ends a shell still running (ADR 0071 §1.6). */
+  onSpawn?: (pid: number) => void;
+  onExit?: (pid: number) => void;
 }
 
 /** BackgroundHost id under which the shell registers (internal). */
@@ -100,9 +105,13 @@ export class PersistentShell implements BackgroundProcess {
   private waiter: Waiter | null = null;
   private currentCwd: string;
   private spawnCount = 0;
-  private readonly opts: Required<Omit<PersistentShellOpts, "env">> & {
+  private readonly opts: Required<
+    Omit<PersistentShellOpts, "env" | "onSpawn" | "onExit">
+  > & {
     env: Record<string, string>;
   };
+  private readonly onSpawn: ((pid: number) => void) | undefined;
+  private readonly onExit: ((pid: number) => void) | undefined;
 
   constructor(opts: PersistentShellOpts) {
     this.opts = {
@@ -111,6 +120,8 @@ export class PersistentShell implements BackgroundProcess {
       env: opts.env ?? {},
       maxOutputBytes: opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT,
     };
+    this.onSpawn = opts.onSpawn;
+    this.onExit = opts.onExit;
     this.argv = [opts.bashPath];
     this.paths = shellPathsFor(opts.bashPath);
     this.currentCwd = this.opts.workspaceRoot;
@@ -218,6 +229,11 @@ export class PersistentShell implements BackgroundProcess {
       // POSIX: own process group so a tree kill takes background jobs too.
       detached: !isWin,
     });
+    const spawnedPid = child.pid;
+    if (spawnedPid !== undefined) {
+      this.onSpawn?.(spawnedPid);
+      child.once("exit", () => this.onExit?.(spawnedPid));
+    }
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     const onData = (chunk: string): void => {

@@ -546,6 +546,9 @@ async function invokeBanzhuanBridgeInner(
         recentDialogue,
         workingHistory,
         lang: deps.lang,
+        // The record as it stood at dispatch: the journal keeps it, so a seal
+        // after a crash can tell this run's rows apart (ADR 0071 §1.2).
+        recordLength: record.length,
       },
     );
   } catch (err) {

@@ -271,6 +271,9 @@ export interface BackendStackOpts {
   /** The steer source (ADR 0063) every dispatch's runtime drains at its
    *  loop head — the session's `SteerChannel`. Absent (the CLI): no steer. */
   readonly pendingUserInput?: () => readonly string[];
+  /** Where this session keeps its run journal (ADR 0071; see
+   *  `dispatchJournalPath`). Absent (the CLI): no journal is kept. */
+  readonly journalPath?: string;
   /** Whether the session already holds an attached document (a reopened
    *  record with attachment rows). Mounts `digest_document` at build; a
    *  session without one gets it from `mountDigestTool` when the first
@@ -482,6 +485,12 @@ export function createBackendStack(opts: BackendStackOpts): BackendStack {
       ...(opts.pendingUserInput !== undefined
         ? { pendingUserInput: opts.pendingUserInput }
         : {}),
+      // The run journal (ADR 0071): one per session, each dispatch replaces
+      // it; the contract rides along so a resumed run can tell it still fits.
+      ...(opts.journalPath !== undefined
+        ? { journalPath: opts.journalPath }
+        : {}),
+      contract,
     });
 
   return {

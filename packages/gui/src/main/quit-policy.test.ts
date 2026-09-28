@@ -1,5 +1,17 @@
+import { CLOSE_SETTLE_CAP_MS } from "@herta/app-server";
 import { describe, expect, it } from "vitest";
-import { quitDisposals, quitsWhenAllWindowsClosed } from "./quit-policy.js";
+import {
+  QUIT_HOLD_MS,
+  quitDisposals,
+  quitsWhenAllWindowsClosed,
+} from "./quit-policy.js";
+
+describe("QUIT_HOLD_MS (ADR 0071 §1.7)", () => {
+  it("outlasts close()'s wait for an interrupted turn to unwind", () => {
+    // 3 s against 5 s let a slow unwind lose the turn's ending on a quit.
+    expect(QUIT_HOLD_MS).toBeGreaterThan(CLOSE_SETTLE_CAP_MS);
+  });
+});
 
 describe("quitsWhenAllWindowsClosed", () => {
   it("quits on Windows and Linux whenever the last window closes", () => {

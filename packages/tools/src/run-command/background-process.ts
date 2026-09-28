@@ -72,6 +72,16 @@ export class SpawnedBackgroundProcess implements BackgroundProcess {
     });
   }
 
+  /** The child's pid, once spawned (the run's journal records it). */
+  get pid(): number | undefined {
+    return this.child.pid;
+  }
+
+  /** Resolves when the process has ended, however it ended. */
+  closed(): Promise<void> {
+    return this.closePromise;
+  }
+
   /** Did the process fail to spawn at all (bad binary)? */
   spawnFailed(): Promise<boolean> {
     return new Promise((resolve) => {

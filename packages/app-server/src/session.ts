@@ -18,6 +18,7 @@ import {
   type AgentEvent,
   type ApprovalOverlayState,
   defaultWorkspaceFor,
+  dispatchJournalPath,
   type EventBus,
   isAbortError,
   type LastTurnEnd,
@@ -277,6 +278,15 @@ function contractFallbackNote(lang: PromptLang): string {
     ? 'no bash found — the "minimal" tool contract is unavailable, running "standard" this session. Install Git for Windows (or set HERTA_BASH) and restart.'
     : "未检测到 bash：工具契约「极简」不可用，本次按「标准」运行。安装 Git for Windows（或设置 HERTA_BASH）后重启生效。";
 }
+
+/**
+ * How long `close()` waits for an interrupted turn to finish unwinding (the
+ * bridge's done-marker, the driver's persist) before it tears down anyway.
+ * A host's quit hold must outlast it (ADR 0071 §1.7): the desktop app held
+ * 3 s against this 5 s, so a slow unwind lost the turn's ending on a plain
+ * quit.
+ */
+export const CLOSE_SETTLE_CAP_MS = 5_000;
 
 // ── SessionImpl ─────────────────────────────────────────────────────────────
 
@@ -1521,7 +1531,7 @@ export class SessionImpl implements Session {
     if (inFlight !== null) {
       let timer: NodeJS.Timeout | undefined;
       const cap = new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, 5_000);
+        timer = setTimeout(resolve, CLOSE_SETTLE_CAP_MS);
       });
       try {
         await Promise.race([inFlight, cap]);
@@ -1641,6 +1651,8 @@ export class SessionImpl implements Session {
       workspaceRoot,
       lang,
       pendingUserInput: () => steer.drain(),
+      // The run journal beside the session's record (ADR 0071).
+      journalPath: dispatchJournalPath(config.transcriptDir, sessionId),
       // The contract the setting asks for (ADR 0040). `minimal` needs a bash
       // on this machine; without one the session runs `standard`. The
       // Settings row shows the detection result (the GUI's getBackendContract

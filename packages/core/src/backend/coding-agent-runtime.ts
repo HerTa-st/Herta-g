@@ -24,6 +24,10 @@ import type {
 import { runBackendTurnLoop } from "./backend-turn-loop.js";
 import { BackgroundHost } from "./background-host.js";
 import type { BackendPromptBudget } from "./context-budget.js";
+import {
+  DISPATCH_JOURNAL_VERSION,
+  DispatchJournal,
+} from "./dispatch-journal.js";
 import { renderScopedMemory } from "./scoped-memory.js";
 
 /**
@@ -112,6 +116,15 @@ export interface CodingAgentRuntimeDeps {
    * reaches the loop — the CLI and tests.
    */
   pendingUserInput?: () => readonly string[];
+  /**
+   * Where this session keeps its run journal (ADR 0071 §1.1; see
+   * `dispatchJournalPath`). Each dispatch replaces it. Absent (the CLI,
+   * tests): no journal is kept.
+   */
+  journalPath?: string;
+  /** The execution contract this stack runs (ADR 0040), recorded in the
+   *  journal so a resumed run can tell whether it still applies. */
+  contract?: string;
 }
 
 /** What the workspace's VCS looked like at one instant. */
@@ -157,6 +170,9 @@ export interface RunBriefOptions {
   /** The session's interaction language (ADR 0016). Threaded to the backend
    *  builder so an EN session gets an English backend prompt; absent → "zh". */
   lang?: "zh" | "en";
+  /** The session record's length when this run was dispatched, recorded in
+   *  the journal: the seal's second gate (ADR 0071 §1.2). */
+  recordLength?: number;
 }
 
 interface PendingPermission {
@@ -251,6 +267,9 @@ export class CodingAgentRuntime {
       });
     }
     this.briefInFlight = true;
+    // The run's journal (ADR 0071 §1.1), opened once the frame's inputs are
+    // known. Every transcript append reaches it through `onAppend`.
+    let journal: DispatchJournal | undefined;
     try {
       // Ensure the managed sandbox exists before any tool runs. A fresh
       // session whose first @板砖 action is read-only (e.g. `git status`)
@@ -258,7 +277,11 @@ export class CodingAgentRuntime {
       // get ENOENT. Idempotent.
       mkdirSync(this.deps.workspaceRoot, { recursive: true });
 
-      const transcript = new TranscriptStore();
+      const transcript = new TranscriptStore({
+        onAppend: (message) => {
+          void journal?.append({ kind: "message", message });
+        },
+      });
       const todos = new TodoStore();
       const reads = new ReadLedger();
       const bg = new BackgroundHost();
@@ -510,9 +533,41 @@ export class CodingAgentRuntime {
           : {}),
       };
 
+      if (this.deps.journalPath !== undefined) {
+        journal = await DispatchJournal.begin(this.deps.journalPath, {
+          kind: "start",
+          v: DISPATCH_JOURNAL_VERSION,
+          taskId: brief.taskId,
+          at: this.deps.clock().toISOString(),
+          ...(this.deps.contract !== undefined
+            ? { contract: this.deps.contract }
+            : {}),
+          ...(opts.recordLength !== undefined
+            ? { recordLength: opts.recordLength }
+            : {}),
+          brief,
+          frame: {
+            userMessages: handle.userMessages,
+            omittedUserMessages: handle.omittedUserMessages,
+            scopedRepoInstructions: handle.scopedRepoInstructions,
+            scopedMemory: handle.scopedMemory,
+            recentDialogue: handle.recentDialogue,
+            workingHistory: handle.workingHistory,
+            lang,
+            ...(repoContext !== null ? { repoContext } : {}),
+          },
+        });
+      }
+      const turnDepsWithJournal =
+        journal !== undefined ? { ...turnDeps, journal } : turnDeps;
+
       let stoppedBackground = 0;
       try {
-        for await (const event of runBackendTurnLoop(turnDeps, brief, handle)) {
+        for await (const event of runBackendTurnLoop(
+          turnDepsWithJournal,
+          brief,
+          handle,
+        )) {
           if (event.type === "turn.failed") {
             failed = true;
             // Keep the KIND, not just the fact (audit 2026-07-24, 1.4). The
@@ -656,8 +711,15 @@ export class CodingAgentRuntime {
         }
       }
 
-      return builder.build();
+      const report = builder.build();
+      // The run ended, whatever its status: the journal says so, so a later
+      // open does not take it for a run the app died in (ADR 0071 §1.2).
+      if (journal !== undefined) {
+        await journal.append({ kind: "end", status: report.status });
+      }
+      return report;
     } finally {
+      await journal?.close();
       this.briefInFlight = false;
     }
   }
