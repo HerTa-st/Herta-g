@@ -26,6 +26,6 @@ export const TTS_ARCHIVE_SHA256 =
 export const TTS_BUNDLE_BYTES = 115_897_197;
 
 /** Dev-only override of the archive's location (a local server for the lab,
- *  a staging host). Gated on `!app.isPackaged` by the caller, the same T1.3
+ *  a staging host). Gated on a non-installed app by the caller, the same T1.3
  *  rule as the update-feed override; the hash pin applies regardless. */
 export const TTS_ARCHIVE_URL_ENV = "HERTA_TTS_ARCHIVE_URL";

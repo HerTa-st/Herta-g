@@ -17,7 +17,8 @@ export interface UpdateServiceDeps {
   readonly updater: AppUpdater;
   /** Push a state snapshot to the renderer. */
   readonly send: (state: UpdateState) => void;
-  /** app.isPackaged — dev runs have no app-update.yml and must not check. */
+  /** An installed app (install-mode.ts) — dev runs have no app-update.yml
+   *  and must not check. */
   readonly isPackaged: boolean;
   /** Optional generic-provider override (HERTA_UPDATE_URL): points the feed
    *  at any static HTTP server. This is the end-to-end dry-run lever while

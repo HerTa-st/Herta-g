@@ -40,8 +40,8 @@ export const TTS_EFFECT = "terminal_textured";
  * dev only, the workspace's own `data/tts/<bundle id>` (the lab's install).
  * The installer carries no bundle (the owner's call on its size,
  * 2026-09-08), so a packaged app has exactly one place to look. Pure (the
- * caller injects `app.getPath("userData")` / `app.isPackaged`) so it
- * unit-tests without electron.
+ * caller injects `app.getPath("userData")` and the install mode,
+ * install-mode.ts) so it unit-tests without electron.
  */
 export function resolveTtsModelRoots(opts: {
   readonly userDataPath: string;

@@ -56,6 +56,7 @@ import {
   normalizeModelChoice,
   readAppSettings,
 } from "./app-settings.js";
+import { installMode } from "./install-mode.js";
 import {
   readDeepSeekKeyPlain,
   readMiniMaxKeyPlain,
@@ -233,11 +234,11 @@ export function resolveWorkspaceRoot(packagedUserDataDir?: string): string {
   );
 }
 
-/** `resolveWorkspaceRoot` with THIS process's packaged-ness applied — the
+/** `resolveWorkspaceRoot` with THIS process's install mode applied — the
  *  thin electron-aware wrapper (the pure fn stays unit-testable). */
 export function appWorkspaceRoot(): string {
   return resolveWorkspaceRoot(
-    app.isPackaged ? app.getPath("userData") : undefined,
+    installMode().installed ? app.getPath("userData") : undefined,
   );
 }
 
@@ -254,12 +255,12 @@ export async function buildConfig(
   // (kept out of this pure, unit-tested fn). Null when none is stored.
   secureKey: string | null = null,
   // Packaged-aware voice root override (resolveVoiceRoot), injected by the
-  // caller for the same purity reason as the key: `app.isPackaged` /
-  // `process.resourcesPath` need Electron. Absent → defaultDirsFor's dev
-  // layout (<cwd>/data/voice) stands.
+  // caller for the same purity reason as the key: the install mode needs
+  // Electron (install-mode.ts). Absent → defaultDirsFor's dev layout
+  // (<cwd>/data/voice) stands.
   voiceAssetsDir?: string,
   // Dev-only DeepSeek base-URL override (chaos/staging proxy). The CALLER
-  // gates this on `!app.isPackaged` before passing (same credential-safety
+  // gates this on an installed app before passing (same credential-safety
   // reasoning as HERTA_UPDATE_URL, audit T1.3: a packaged build honoring an
   // env-set base URL would send the API key to an arbitrary host).
   devBaseUrl?: string,
@@ -1163,15 +1164,15 @@ export function createSessionService(
         // a packaged app has only the first.
         modelRoots: resolveTtsModelRoots({
           userDataPath,
-          isPackaged: app.isPackaged,
+          isPackaged: installMode().installed,
           workspaceRoot,
         }),
         // electron.vite.config.ts emits the worker beside the main bundle;
         // it is a plain .cjs on purpose — a native addon cannot be bundled.
         workerPath: join(__dirname, "tts-worker.cjs"),
         sherpaPath: resolveSherpaEntry({
-          isPackaged: app.isPackaged,
-          resourcesPath: process.resourcesPath,
+          isPackaged: installMode().installed,
+          resourcesPath: installMode().resourcesPath,
           startDir: __dirname,
         }),
         enabled: () => realtimeVoiceEnabled,
@@ -1184,7 +1185,7 @@ export function createSessionService(
         // with its hash; a dev run may point it at a local server for the
         // lab — NEVER a packaged build (the T1.3 rule the update feed and
         // the DeepSeek base URL already follow).
-        const override = app.isPackaged
+        const override = installMode().installed
           ? undefined
           : process.env[TTS_ARCHIVE_URL_ENV];
         const synth = synthesizer;
@@ -1219,8 +1220,8 @@ export function createSessionService(
       const startupSettings = await readGlobalSettings(userDataPath);
       voiceEngine = startupSettings.voiceEngine ?? "local";
       const referencePath = resolveVoiceCloneReference({
-        isPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
+        isPackaged: installMode().installed,
+        resourcesPath: installMode().resourcesPath,
         workspaceRoot,
       });
       const fetchLike = minimaxFetch;
@@ -1278,14 +1279,16 @@ export function createSessionService(
         readDeepSeekKeyPlain(),
         // Packaged builds read the bundled clips; dev reads the workspace.
         resolveVoiceRoot({
-          isPackaged: app.isPackaged,
-          resourcesPath: process.resourcesPath,
+          isPackaged: installMode().installed,
+          resourcesPath: installMode().resourcesPath,
           workspaceRoot,
         }),
         // Dev-only chaos/staging feed: NEVER honored in a packaged build
         // (T1.3 pattern — an env-settable base URL in production would
         // redirect the API key to an arbitrary host).
-        app.isPackaged ? undefined : process.env.HERTA_DEEPSEEK_BASE_URL,
+        installMode().installed
+          ? undefined
+          : process.env.HERTA_DEEPSEEK_BASE_URL,
         speech,
       );
       dreamRunning = config.dream?.enabled === true;

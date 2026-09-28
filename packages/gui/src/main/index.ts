@@ -35,6 +35,7 @@ import {
 } from "./attachment-protocol.js";
 import { buildCsp } from "./csp.js";
 import { hideToTray } from "./hide-to-tray.js";
+import { installMode } from "./install-mode.js";
 import { applyLoginPath, launchLocaleEnv } from "./login-path.js";
 import { installChromiumFetch } from "./net-transport.js";
 import { quitDisposals, quitsWhenAllWindowsClosed } from "./quit-policy.js";
@@ -70,7 +71,7 @@ registerAssetScheme();
  * The dev-server URL — ONLY in a non-packaged build (audit 2026-08-05, S2).
  *
  * `ELECTRON_RENDERER_URL` was read straight from the environment with no
- * `app.isPackaged` gate, while the sibling update-feed override IS gated. A
+ * packaged-app gate, while the sibling update-feed override IS gated. A
  * packaged app launched with that variable set (a doctored shortcut, any
  * local process that can shape the environment) loaded an attacker-chosen
  * origin into the main window — and the preload attaches unconditionally, so
@@ -88,7 +89,7 @@ registerAssetScheme();
  * was not a blocker; the project rated the strictly weaker `HERTA_UPDATE_URL`
  * variant Tier 1, so the posture here matches that.
  */
-const devRendererUrl = app.isPackaged
+const devRendererUrl = installMode().installed
   ? undefined
   : process.env.ELECTRON_RENDERER_URL;
 
@@ -593,7 +594,7 @@ void app
     // send a transcript.
     {
       const csp = buildCsp({
-        isPackaged: app.isPackaged,
+        isPackaged: installMode().installed,
         indexHtmlPath: join(__dirname, "../renderer/index.html"),
         ...(devRendererUrl !== undefined ? { devOrigin: devRendererUrl } : {}),
       });
@@ -663,8 +664,8 @@ void app
     // when packaged, from the workspace's data/voice in dev (2026-07-06).
     registerVoiceProtocol(
       resolveVoiceRoot({
-        isPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
+        isPackaged: installMode().installed,
+        resourcesPath: installMode().resourcesPath,
         workspaceRoot: appWorkspaceRoot(),
       }),
     );
@@ -691,7 +692,7 @@ void app
     {
       const template = appMenuTemplate({
         platform: process.platform,
-        isPackaged: app.isPackaged,
+        isPackaged: installMode().installed,
         onOpenSettings: openSettingsFromMenu,
       });
       if (template !== null) {
@@ -764,7 +765,7 @@ function startBackgroundServices(): void {
     // point the feed anywhere — and the override also disables the
     // update-service dev gate, so autoInstallOnAppQuit would run whatever
     // that feed served.
-    const feedOverride = app.isPackaged
+    const feedOverride = installMode().installed
       ? undefined
       : process.env.HERTA_UPDATE_URL;
     // Lazy import keeps electron-updater out of the dev startup path.
@@ -776,7 +777,7 @@ function startBackgroundServices(): void {
         const settings = await readGlobalSettings(app.getPath("userData"));
         updateService = createUpdateService({
           updater: autoUpdater,
-          isPackaged: app.isPackaged,
+          isPackaged: installMode().installed,
           autoEnabled: settings.autoUpdate ?? true,
           ...(feedOverride !== undefined && feedOverride !== ""
             ? { feedUrlOverride: feedOverride }

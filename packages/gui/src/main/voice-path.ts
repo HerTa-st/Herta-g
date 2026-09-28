@@ -15,9 +15,8 @@ export function voiceRootFor(workspaceRoot: string): string {
  * not). A packaged app serves the bundled copy from its resources dir —
  * the upcoming packager config copies `data/voice` → `<resources>/voice`
  * (electron-builder `extraResources: [{ from: "data/voice", to: "voice" }]`).
- * Dev keeps reading straight from the workspace. Pure (caller injects
- * `app.isPackaged` / `process.resourcesPath`) so it unit-tests without
- * electron.
+ * Dev keeps reading straight from the workspace. Pure (caller injects the
+ * install mode, install-mode.ts) so it unit-tests without electron.
  */
 export function resolveVoiceRoot(opts: {
   readonly isPackaged: boolean;
