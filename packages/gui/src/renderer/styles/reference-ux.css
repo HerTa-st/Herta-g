@@ -613,6 +613,38 @@ button,
 .app.is-booting {
   opacity: 0;
 }
+/* The warm-up (2026-09-28, ADR 0068 §20). An opacity-0 layer is never
+   rastered, so the workbench's first raster used to land AT the reveal —
+   and its first raster compiles its GPU shader programs (~150 ms on the GPU
+   process's main thread; Electron keeps no disk cache of them, so every
+   launch pays). Nothing draws a frame meanwhile: the opening froze for
+   ~200 ms just as it began to dissolve. An opacity animation makes the
+   compositor raster the hidden workbench ahead (a 0 → 0 one is dropped as
+   a no-op, hence the blip), and the blip to 0.001 — which rounds to
+   nothing, under the splash's opaque stage — draws it once; the programs
+   stay compiled for the life of the GPU process, and the reveal only
+   re-rasters. It runs at mount, while the opening waits for its segment
+   and sheet: the first frame came ~80 ms later (median of 6), the reveal's
+   gap fell from ~235 to ~85 ms. Kept deliberately:
+   - the blip is short: opacity > 0 for the whole animation drew the app,
+     frosted panels and all, every frame (+0.7 s to the first frame);
+   - not after the first frame: the compile then froze the opening for
+     ~0.2 s at +0.2 s, just as the figure starts to fade in — a freeze
+     that ends past the fade shows the figure whole. */
+.app.is-booting {
+  animation: app-warm 300ms linear 1;
+}
+@keyframes app-warm {
+  0%,
+  45%,
+  55%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.001;
+  }
+}
 .app.sidebar-collapsed .sidebar {
   padding-left: 0;
   padding-right: 0;
