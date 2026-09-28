@@ -78,16 +78,24 @@ function scrollingFocuses(text: string, file: string): string[] {
  * lists) in a `// focus-scrolls: <reason>` comment on the line or up to two
  * above. `autoFocus` scrolls the same way and takes the same comment.
  */
+/** It reads every renderer source file: ~0.25 s alone, past the 5 s default
+ *  in a loaded full run (2026-09-28, a 650 s suite). */
+const SCAN_BOUND_MS = 30_000;
+
 describe("focus never scrolls the app by accident", () => {
-  it("every renderer focus passes preventScroll or says why it scrolls", () => {
-    const bad = sourceFiles(ROOT).flatMap((p) =>
-      scrollingFocuses(
-        readFileSync(p, "utf8"),
-        relative(ROOT, p).replaceAll("\\", "/"),
-      ),
-    );
-    expect(bad).toEqual([]);
-  });
+  it(
+    "every renderer focus passes preventScroll or says why it scrolls",
+    () => {
+      const bad = sourceFiles(ROOT).flatMap((p) =>
+        scrollingFocuses(
+          readFileSync(p, "utf8"),
+          relative(ROOT, p).replaceAll("\\", "/"),
+        ),
+      );
+      expect(bad).toEqual([]);
+    },
+    SCAN_BOUND_MS,
+  );
 
   it("the scan sees the shapes it guards (not vacuous)", () => {
     const sample = [

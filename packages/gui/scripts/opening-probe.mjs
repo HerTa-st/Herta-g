@@ -11,7 +11,9 @@
  *     origin is the expected one: `drawn` on a fresh profile, `kept` on the
  *     launch after (`any` accepts either, `none` expects text);
  *   - a screenshot 0.7 s into the opening holds glyphs: pixels far from the
- *     background's luminance, measured in the page from the capture;
+ *     background's luminance, measured in the page from the capture — and
+ *     the capture ended before the opening did (a starved window answers
+ *     with a later frame);
  *   - no uncaught exception in the page.
  *
  *   node opening-probe.mjs <outDir> <label> <drawn|kept|any|none> -- <command…>
@@ -172,10 +174,18 @@ try {
   if (await waitMark("opening-painted", 60_000)) {
     // Into the hold: the figure developed, the veil frosted.
     await sleep(700);
+    // When the capture was taken, in the page's own clock (the marks'): a
+    // window that gets no frames answers with the first frame it paints,
+    // which can be the connect screen after the opening — and the connect
+    // button alone passes the ink check (the first Linux run at scale 2,
+    // 2026-09-28). A capture that ends after the opening proves nothing.
+    const from = await cdp.eval("performance.now()");
     const shot = await cdp.send("Page.captureScreenshot", {
       format: "jpeg",
       quality: 85,
     });
+    const to = await cdp.eval("performance.now()");
+    report.capture = { from: Math.round(from), to: Math.round(to) };
     writeFileSync(
       join(OUT, `opening-${LABEL}.jpg`),
       Buffer.from(shot.data, "base64"),
@@ -245,7 +255,12 @@ if (how !== null) {
 } else if (marks.has("opening-painted")) {
   problems.push("the opening-painted mark carries no detail");
 }
-if (report.screen && report.screen.inkRatio < 0.003) {
+const ended = marks.get("interactive")?.at;
+if (report.capture && ended !== undefined && report.capture.to > ended) {
+  problems.push(
+    `the screenshot landed after the opening (taken ${report.capture.from}–${report.capture.to} ms, interactive at ${ended} ms)`,
+  );
+} else if (report.screen && report.screen.inkRatio < 0.003) {
   problems.push(
     `no glyphs on screen (ink ${report.screen.inkRatio.toFixed(4)})`,
   );
@@ -260,7 +275,7 @@ writeFileSync(
 
 const at = (name) => marks.get(name)?.at ?? "–";
 console.log(
-  `opening ${LABEL}: dpr ${report.dpr} · theme ${report.theme} · drawn on ${how?.host ?? "?"} from sheet ${how?.sheet ?? "?"} · marks painted ${at("app-painted")} / opening ${at("opening-painted")} / revealed ${at("revealed")} / interactive ${at("interactive")} ms · ink ${report.screen ? report.screen.inkRatio.toFixed(4) : "–"}`,
+  `opening ${LABEL}: dpr ${report.dpr} · theme ${report.theme} · drawn on ${how?.host ?? "?"} from sheet ${how?.sheet ?? "?"} · marks painted ${at("app-painted")} / opening ${at("opening-painted")} / revealed ${at("revealed")} / interactive ${at("interactive")} ms · shot ${report.capture ? `${report.capture.from}–${report.capture.to}` : "–"} ms · ink ${report.screen ? report.screen.inkRatio.toFixed(4) : "–"}`,
 );
 if (problems.length === 0) {
   console.log(`OPENING PROBE ${LABEL}: PASS`);

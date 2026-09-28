@@ -146,9 +146,12 @@ jobs:
       # app keeps in IndexedDB — verified on Windows only until this ran. It
       # runs BEFORE any other launch so the first finds a fresh profile. Three
       # launches: the first draws the sheet, the second must reuse it, the
-      # third at a device scale of 2 (a HiDPI screen twice the size, so the
-      # window keeps its CSS size) draws one of its own. Each must finish the
+      # third at a device scale of 2 draws one of its own. Each must finish the
       # opening, drawn on the worker from the sheet, with glyphs on screen.
+      # The scale-2 screen is 2048x1536 — 1024x768 at scale 2, the window the
+      # Mac runner's display clamps to. At 2880x1800 the software-rendered
+      # Xvfb starved the window of frames for a second (the first run,
+      # 2026-09-28): the screenshot landed on the connect screen.
       - name: the opening — worker, glyph sheet, the kept sheet, scale 2
         timeout-minutes: 8
         run: |
@@ -163,7 +166,7 @@ jobs:
           node packages/gui/scripts/opening-probe.mjs /tmp/shots second kept -- \
             xvfb-run -a -s "-screen 0 1440x900x24" "$IMG" || FAIL=1
           node packages/gui/scripts/opening-probe.mjs /tmp/shots scale2 drawn -- \
-            xvfb-run -a -s "-screen 0 2880x1800x24" "$IMG" --force-device-scale-factor=2 || FAIL=1
+            xvfb-run -a -s "-screen 0 2048x1536x24" "$IMG" --force-device-scale-factor=2 || FAIL=1
           pkill -f "/tmp/.mount_" 2>/dev/null || true
           if [ "$FAIL" -ne 0 ]; then echo "::error::the opening probe failed inside the AppImage (see above)"; exit 1; fi
 
