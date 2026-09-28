@@ -12,8 +12,9 @@
  *     launch after (`any` accepts either, `none` expects text);
  *   - a screenshot 0.7 s into the opening holds glyphs: pixels far from the
  *     background's luminance, measured in the page from the capture — and
- *     the capture ended before the opening did (a starved window answers
- *     with a later frame);
+ *     the frame is from before the opening ended (a starved window answers
+ *     with a later frame): a screencast frame's own swap time, or when a
+ *     plain capture returned;
  *   - no uncaught exception in the page.
  *
  *   node opening-probe.mjs <outDir> <label> <drawn|kept|any|none> -- <command…>
@@ -83,6 +84,28 @@ class Cdp {
     if (r.exceptionDetails) throw new Error(`eval: ${r.exceptionDetails.text}`);
     return r.result?.value;
   }
+}
+
+/** The page's next screencast frame ({ data, metadata }), or null when none
+ *  comes within `ms`. */
+async function firstScreencastFrame(cdp, ms) {
+  let settle;
+  const frame = new Promise((resolve) => {
+    settle = resolve;
+  });
+  cdp.on("Page.screencastFrame", (p) => {
+    cdp
+      .send("Page.screencastFrameAck", { sessionId: p.sessionId })
+      .catch(() => undefined);
+    settle(p);
+  });
+  const timer = setTimeout(() => settle(null), ms);
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85 });
+  const got = await frame;
+  clearTimeout(timer);
+  await cdp.send("Page.stopScreencast").catch(() => undefined);
+  cdp.on("Page.screencastFrame", () => undefined);
+  return got;
 }
 
 async function portAnswers() {
@@ -157,6 +180,7 @@ try {
     ),
   );
   await cdp.send("Runtime.enable");
+  await cdp.send("Page.enable");
 
   const hasMark = (name) =>
     cdp
@@ -174,18 +198,33 @@ try {
   if (await waitMark("opening-painted", 60_000)) {
     // Into the hold: the figure developed, the veil frosted.
     await sleep(700);
-    // When the capture was taken, in the page's own clock (the marks'): a
+    // WHEN the frame was on screen, in the page's own clock (the marks'): a
     // window that gets no frames answers with the first frame it paints,
     // which can be the connect screen after the opening — and the connect
     // button alone passes the ink check (the first Linux run at scale 2,
-    // 2026-09-28). A capture that ends after the opening proves nothing.
-    const from = await cdp.eval("performance.now()");
-    const shot = await cdp.send("Page.captureScreenshot", {
-      format: "jpeg",
-      quality: 85,
+    // 2026-09-28). A screencast frame carries its own swap time; a capture's
+    // call can take seconds on a large software surface (2.1 s at 2048×1536
+    // on Xvfb) with the frame taken at its start. A covered window gets no
+    // screencast frames: then a plain capture, bounded by when it returned.
+    const origin = await cdp.eval("performance.timeOrigin");
+    const shot = await firstScreencastFrame(cdp, 3000).then(async (frame) => {
+      if (frame !== null) {
+        const swapped = frame.metadata?.timestamp;
+        const at =
+          typeof swapped === "number"
+            ? swapped * 1000 - origin
+            : await cdp.eval("performance.now()");
+        report.capture = { how: "screencast", at: Math.round(at) };
+        return frame;
+      }
+      const shot = await cdp.send("Page.captureScreenshot", {
+        format: "jpeg",
+        quality: 85,
+      });
+      const at = await cdp.eval("performance.now()");
+      report.capture = { how: "capture", at: Math.round(at) };
+      return shot;
     });
-    const to = await cdp.eval("performance.now()");
-    report.capture = { from: Math.round(from), to: Math.round(to) };
     writeFileSync(
       join(OUT, `opening-${LABEL}.jpg`),
       Buffer.from(shot.data, "base64"),
@@ -256,9 +295,9 @@ if (how !== null) {
   problems.push("the opening-painted mark carries no detail");
 }
 const ended = marks.get("interactive")?.at;
-if (report.capture && ended !== undefined && report.capture.to > ended) {
+if (report.capture && ended !== undefined && report.capture.at > ended) {
   problems.push(
-    `the screenshot landed after the opening (taken ${report.capture.from}–${report.capture.to} ms, interactive at ${ended} ms)`,
+    `the screenshot is from after the opening (${report.capture.how} at ${report.capture.at} ms, interactive at ${ended} ms)`,
   );
 } else if (report.screen && report.screen.inkRatio < 0.003) {
   problems.push(
@@ -275,7 +314,7 @@ writeFileSync(
 
 const at = (name) => marks.get(name)?.at ?? "–";
 console.log(
-  `opening ${LABEL}: dpr ${report.dpr} · theme ${report.theme} · drawn on ${how?.host ?? "?"} from sheet ${how?.sheet ?? "?"} · marks painted ${at("app-painted")} / opening ${at("opening-painted")} / revealed ${at("revealed")} / interactive ${at("interactive")} ms · shot ${report.capture ? `${report.capture.from}–${report.capture.to}` : "–"} ms · ink ${report.screen ? report.screen.inkRatio.toFixed(4) : "–"}`,
+  `opening ${LABEL}: dpr ${report.dpr} · theme ${report.theme} · drawn on ${how?.host ?? "?"} from sheet ${how?.sheet ?? "?"} · marks painted ${at("app-painted")} / opening ${at("opening-painted")} / revealed ${at("revealed")} / interactive ${at("interactive")} ms · shot ${report.capture ? `${report.capture.how} ${report.capture.at}` : "–"} ms · ink ${report.screen ? report.screen.inkRatio.toFixed(4) : "–"}`,
 );
 if (problems.length === 0) {
   console.log(`OPENING PROBE ${LABEL}: PASS`);
