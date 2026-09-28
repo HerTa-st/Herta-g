@@ -322,6 +322,11 @@ export const zh = {
   "composer.hold.steer": "立即插话",
   "composer.hold.edit": "修改",
   "composer.hold.discard": "撤回",
+  // 继续 (ADR 0071 §1.4): 板砖's last run was interrupted — the app exited
+  // under it, or the user pressed Stop — and can be continued where it stood.
+  "composer.resume.text": "板砖的上一次运行已中断。",
+  "composer.resume.action": "继续",
+  "composer.resume.aria": "继续被中断的运行",
   // Click-to-enlarge lightbox (ADR 0048 §4a). `lightbox.open` prefixes the
   // thumb button's aria-label, followed by the filename.
   "lightbox.open": "查看图片",

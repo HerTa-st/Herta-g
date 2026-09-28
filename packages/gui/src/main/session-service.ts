@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   type AppServerConfig,
+  type ContinueInterruptedResult,
   createSessionHost,
   defaultDirsFor,
   type LogQuery,
@@ -379,6 +380,8 @@ export function snapshot(s: Session): SessionSnapshot {
     ...(s.stagedImageList !== undefined && s.stagedImageList.length > 0
       ? { stagedImages: s.stagedImageList }
       : {}),
+    // The 继续 offer (ADR 0071 §1.4): a reloaded window's strip comes back.
+    ...(s.resumable === true ? { resumable: true } : {}),
   };
 }
 
@@ -451,6 +454,10 @@ export function startForwarders(session: Session, send: Send): () => void {
   // The repository card's stream (ADR 0058); optional on the interface.
   if (session.subscribeRepo !== undefined) {
     void pump(session.subscribeRepo(), EVT.repo);
+  }
+  // The 继续 offer (ADR 0071 §1.4); optional on the interface.
+  if (session.subscribeResume !== undefined) {
+    void pump(session.subscribeResume(), EVT.resume);
   }
   return () => {
     live = false;
@@ -707,6 +714,15 @@ export function createSessionService(
       CMD.steerText,
       async (_e, text: string): Promise<SteerTextResult> =>
         (await host?.activeSession?.steerText?.(text)) ?? { queued: true },
+    );
+    // 继续 (ADR 0071 §1.4). No session, or one that cannot continue: there
+    // is nothing to continue, and the renderer drops its strip.
+    handle(
+      CMD.continueInterrupted,
+      async (): Promise<ContinueInterruptedResult> =>
+        (await host?.activeSession?.continueInterrupted?.()) ?? {
+          unavailable: true,
+        },
     );
     handle(CMD.rewindLastTurn, async (_e, sessionId?: string) => {
       const active = host?.activeSession ?? null;

@@ -70,6 +70,10 @@ export interface BanzhuanBridgeDeps {
    * rather than the caller flushing them all at end-of-turn.
    */
   readonly sink?: ActorStreamingSink;
+  /** Continue the session's interrupted run from its journal (ADR 0071
+   *  §1.5) instead of starting a new one. Everything else — projection,
+   *  beats, the done-marker — is the same. */
+  readonly resume?: true;
 }
 
 /**
@@ -531,26 +535,35 @@ async function invokeBanzhuanBridgeInner(
 
   let report: AgentExecutionReport | undefined;
   try {
-    const extracted = extractUserMessages(record, deps.lang);
-    const boundary = findLastDispatchBoundary(record);
-    const recentDialogue = extractRecentDialogue(record, boundary);
-    const workingHistory = extractWorkingHistory(record, boundary);
     const runtime = deps.runtimeFactory();
-    const taskId = `task-${randomUUID()}`;
-    report = await runtime.runBrief(
-      { taskId },
-      {
+    if (deps.resume === true) {
+      // The run's own frame comes from its journal (ADR 0071 §1.5); what is
+      // new is only where this segment begins in the record.
+      report = await runtime.resumeBrief({
         signal,
-        userMessages: extracted.messages,
-        omittedUserMessages: extracted.omitted,
-        recentDialogue,
-        workingHistory,
-        lang: deps.lang,
-        // The record as it stood at dispatch: the journal keeps it, so a seal
-        // after a crash can tell this run's rows apart (ADR 0071 §1.2).
         recordLength: record.length,
-      },
-    );
+      });
+    } else {
+      const extracted = extractUserMessages(record, deps.lang);
+      const boundary = findLastDispatchBoundary(record);
+      const recentDialogue = extractRecentDialogue(record, boundary);
+      const workingHistory = extractWorkingHistory(record, boundary);
+      const taskId = `task-${randomUUID()}`;
+      report = await runtime.runBrief(
+        { taskId },
+        {
+          signal,
+          userMessages: extracted.messages,
+          omittedUserMessages: extracted.omitted,
+          recentDialogue,
+          workingHistory,
+          lang: deps.lang,
+          // The record as it stood at dispatch: the journal keeps it, so a
+          // seal after a crash can tell this run's rows apart (ADR 0071 §1.2).
+          recordLength: record.length,
+        },
+      );
+    }
   } catch (err) {
     // runBrief threw — an INFRA failure (workspace mkdir, the double-brief
     // guard, an internal bug), NOT an ordinary tool/provider failure: those

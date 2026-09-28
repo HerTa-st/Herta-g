@@ -678,6 +678,7 @@ export interface DreamActivitySink {
  *  turns. Session open/create reset the clock host-side. */
 const ACTIVITY_METHODS: ReadonlySet<string> = new Set([
   "submitText",
+  "continueInterrupted",
   "regenerateLastReplyIfOrphaned",
   "playOpening",
 ]);

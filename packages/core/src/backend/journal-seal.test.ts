@@ -4,7 +4,13 @@ import type {
   DispatchJournalEntry,
   JournalStartEntry,
 } from "./dispatch-journal.js";
-import { openDispatch, planSeal, processLine } from "./journal-seal.js";
+import {
+  openDispatch,
+  planResume,
+  planSeal,
+  processLine,
+  resumableRun,
+} from "./journal-seal.js";
 
 const ROOT = process.platform === "win32" ? "C:\\ws" : "/ws";
 const abs = (rel: string) =>
@@ -492,5 +498,202 @@ describe("what the seal reports", () => {
     ).toBe(
       "Process 7 (vite) was running when the app exited and has not been checked.",
     );
+  });
+});
+
+describe("continuing a run (ADR 0071 §1.4–§1.5)", () => {
+  const AT = new Date("2026-09-28T12:00:00.000Z");
+  const crashEnd: DispatchJournalEntry = {
+    kind: "end",
+    status: "interrupted",
+    cause: "app-exit",
+  };
+  const stopEnd: DispatchJournalEntry = { kind: "end", status: "interrupted" };
+
+  it("only a run whose latest segment ended interrupted can be continued", () => {
+    expect(resumableRun([start()])).toBeNull(); // still open: seal it first
+    expect(
+      resumableRun([start(), { kind: "end", status: "completed" }]),
+    ).toBeNull();
+    expect(resumableRun([start(), crashEnd])).toMatchObject({
+      cause: "app-exit",
+      recordLength: 5,
+    });
+    expect(resumableRun([start(), stopEnd])).toMatchObject({ cause: "stop" });
+    // Continued, then done: nothing left to continue.
+    expect(
+      resumableRun([
+        start(),
+        crashEnd,
+        { kind: "resume", at: "x", recordLength: 9 },
+        { kind: "end", status: "completed" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("after a crash: the conversation with the seal's closers in place, then the note", async () => {
+    const closer: ToolResult = {
+      ok: false,
+      summary: "app exited: not started",
+    };
+    const plan = await planResume(
+      [
+        start({ frame: { ...start().frame, lang: "en" } }),
+        asks(call("c1", "read_file"), call("c2", "run_command")),
+        dispatched("c1", true),
+        answer("c1"),
+        {
+          kind: "closer",
+          callId: "c2",
+          outcome: "not_started",
+          result: closer,
+        },
+        crashEnd,
+      ],
+      disk({}),
+      AT,
+    );
+    expect(plan?.messages.map((m) => m.role)).toEqual([
+      "assistant",
+      "tool",
+      "tool",
+      "user",
+    ]);
+    expect(plan?.messages[2]).toMatchObject({
+      role: "tool",
+      toolCallId: "c2",
+      result: closer,
+    });
+    expect(plan?.newClosers).toEqual([]);
+    const note = plan?.messages[3];
+    expect(note?.role === "user" && note.text).toContain(
+      "the app exited unexpectedly",
+    );
+    expect(note?.role === "user" && note.text).toContain(
+      "Continue the task from where it stopped.",
+    );
+  });
+
+  it("after a Stop: the open call is closed now, in the stop's words, and handed back to be journaled", async () => {
+    const plan = await planResume(
+      [
+        start(),
+        asks(call("c1", "run_command", { command: "npm test" })),
+        dispatched("c1"),
+        stopEnd,
+      ],
+      disk({}),
+      AT,
+    );
+    expect(plan?.cause).toBe("stop");
+    expect(plan?.newClosers.map((c) => [c.callId, c.outcome])).toEqual([
+      ["c1", "outcome_unknown"],
+    ]);
+    const closer = plan?.newClosers[0]?.result;
+    expect(closer?.error?.code).toBe("stopped_outcome_unknown");
+    expect(closer?.modelText).toContain(
+      "This command was running when the run was stopped.",
+    );
+    expect(plan?.messages.at(-2)).toMatchObject({
+      role: "tool",
+      toolCallId: "c1",
+    });
+  });
+
+  it("the shell's restart is said once; what else ran is reported with what the relaunch found", async () => {
+    const plan = await planResume(
+      [
+        start({ frame: { ...start().frame, lang: "en" } }),
+        asks(call("c1", "run_command", { command: "npm run dev" })),
+        dispatched("c1"),
+        {
+          kind: "spawn",
+          callId: "c1",
+          pid: 5,
+          startedAt: 1,
+          command: "bash (persistent shell)",
+          role: "shell",
+        },
+        {
+          kind: "spawn",
+          callId: "c1",
+          pid: 6,
+          startedAt: 1,
+          command: "npm run dev",
+          role: "background",
+        },
+        { kind: "reap", pid: 6, fate: "ended" },
+        {
+          kind: "closer",
+          callId: "c1",
+          outcome: "outcome_unknown",
+          result: { ok: false, summary: "x" },
+        },
+        crashEnd,
+      ],
+      disk({}),
+      AT,
+    );
+    const note = plan?.messages.at(-1);
+    const text = note?.role === "user" ? note.text : "";
+    expect(text).toContain("The shell has been restarted");
+    expect(text).toContain(
+      "Process 6 (npm run dev) was still running at relaunch and was ended.",
+    );
+    expect(text).not.toContain("Process 5");
+  });
+
+  it("state: the last todo list that took effect, the findings, the files already changed", async () => {
+    const plan = await planResume(
+      [
+        start(),
+        asks(
+          call("t1", "todo_write", {
+            todos: [
+              { content: "fix", status: "completed" },
+              { content: "test", status: "in_progress" },
+            ],
+          }),
+          call("f1", "report_finding"),
+          call("e1", "edit_file"),
+          call("e2", "write_new_file"),
+        ),
+        answer("t1"),
+        {
+          kind: "message",
+          message: {
+            role: "tool",
+            toolCallId: "f1",
+            result: {
+              ok: true,
+              summary: "finding 1",
+              data: { claim: "the cache is stale", cites: ["a.ts:3"] },
+            },
+            ts: TS,
+          },
+        },
+        dispatched("e1"),
+        wrote("e1", "a.ts", "B", "A"),
+        answer("e1"),
+        dispatched("e2"),
+        wrote("e2", "b.ts", null, "N"),
+        crashEnd,
+      ],
+      disk({ [abs("b.ts")]: "N" }),
+      AT,
+    );
+    expect(plan?.todos).toEqual([
+      { content: "fix", status: "completed" },
+      { content: "test", status: "in_progress" },
+    ]);
+    expect(plan?.findings).toEqual([
+      { claim: "the cache is stale", cites: ["a.ts:3"] },
+    ]);
+    // e2 had no closer in the journal (a seal cut short): decided now,
+    // found applied — it counts, as created.
+    expect(plan?.changedFiles).toEqual([
+      { path: "a.ts", kind: "modified" },
+      { path: "b.ts", kind: "created" },
+    ]);
   });
 });

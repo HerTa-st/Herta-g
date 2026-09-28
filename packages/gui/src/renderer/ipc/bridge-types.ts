@@ -3,6 +3,7 @@ import type {
   ApprovalResult,
   BranchList,
   CommitDescription,
+  ContinueInterruptedResult,
   CreateSessionOpts,
   LogPage,
   LogQuery,
@@ -11,6 +12,7 @@ import type {
   RepoContextSnapshot,
   RepoEvent,
   ResolveApprovalOpts,
+  ResumeEvent,
   RewindResult,
   SessionAgentEvent,
   SessionDeletedEvent,
@@ -67,6 +69,9 @@ export interface SessionSnapshot {
    *  learns it is busy — Stop, the hold window — instead of coming back idle
    *  over a running turn (UX review 2026-09-22, item 7). Absent = idle. */
   readonly turn?: { readonly backendActive: boolean };
+  /** A 继续 is on offer (ADR 0071 §1.4): a reloaded window's strip comes
+   *  back. Optional on the wire; absent = no offer. */
+  readonly resumable?: boolean;
   /** Pictures staged in the composer and not yet sent (ADR 0048 §4): a
    *  reloaded window's strip comes back instead of vanishing while main
    *  still counts them. Optional on the wire; absent = none. */
@@ -470,6 +475,12 @@ export interface HertaBridge {
    *  the next turn. OPTIONAL — fakes and the website demo omit it, and the
    *  held strip then offers no steer. */
   steerText?(text: string): Promise<SteerTextResult>;
+  /** 继续 (ADR 0071 §1.4): continue the interrupted 板砖 run. Resolves when
+   *  the turn has ended, like `submitText`; never rejects. OPTIONAL with
+   *  `onResume` — fakes and the website demo omit them, and no strip shows. */
+  continueInterrupted?(): Promise<ContinueInterruptedResult>;
+  /** Whether a 继续 is on offer changed. */
+  onResume?(cb: (e: ResumeEvent) => void): () => void;
   /** Withdraw the latest 开拓者 turn (record-only, idle-only). Resolves with the
    *  withdrawn user text to restore into the composer, or a failure reason.
    *  `sessionId` binds the destructive call to the session the user clicked in:

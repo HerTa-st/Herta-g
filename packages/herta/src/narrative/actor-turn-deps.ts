@@ -73,6 +73,12 @@ export interface ActorTurnDeps {
    * not sanitize at read, so construction is the only gate.
    */
   readonly userAttachments?: readonly SystemBlock[];
+  /**
+   * A 继续 turn (ADR 0071 §1.4): the user block is marked `resume`, and the
+   * harness continues the interrupted 板砖 run (the bridge's `resume`) before
+   * Herta says anything, as a typed `@板砖` dispatches.
+   */
+  readonly resume?: true;
   /** Max speech iterations before the loop terminates defensively. Default 5. */
   readonly maxIterations?: number;
   /**

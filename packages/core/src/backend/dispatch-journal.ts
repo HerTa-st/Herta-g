@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { type FileHandle, mkdir, open, readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "../atomic-write.js";
@@ -21,6 +23,21 @@ import type { RepoContextSnapshot } from "./backend-context-builder.js";
  */
 
 export const DISPATCH_JOURNAL_VERSION = 1;
+
+/** A file's sha256 (hex), or null when it does not exist — how the seal and
+ *  a continued run decide a write the journal recorded (ADR 0071 §1.3). */
+export function hashFile(path: string): Promise<string | null> {
+  return new Promise((resolvePromise, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolvePromise(hash.digest("hex")));
+    stream.on("error", (err) => {
+      if ((err as { code?: unknown }).code === "ENOENT") resolvePromise(null);
+      else reject(err);
+    });
+  });
+}
 
 /** Where a session's journal lives: a `journal/` folder beside the session
  *  records, so the session listing (which reads `<id>.jsonl` there) never

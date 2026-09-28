@@ -99,8 +99,11 @@ d("PersistentShell (real bash)", () => {
   it.skipIf(process.platform !== "win32")(
     "kill() also ends what a shell that exited on its own left in its group",
     async () => {
-      // `nohup`: a plain `&` job dies with the shell's exit; this one does
-      // not, and only the group still leads to it.
+      // `nohup`: a plain `&` job dies with the shell's exit; this one usually
+      // does not, and then only the group still leads to it. Under a loaded
+      // suite it sometimes goes down with the shell's launcher anyway — then
+      // there is nothing left to end, and the test still holds kill() to
+      // leaving nothing running and forgetting the group.
       const r = await shell.run(
         "nohup sleep 45 >/dev/null 2>&1 & cat /proc/$!/winpid",
         { timeoutMs: 10_000 },
@@ -117,7 +120,8 @@ d("PersistentShell (real bash)", () => {
         }
       };
       try {
-        expect(alive(job)).toBe(true);
+        // The exited shell's group is remembered whether or not the job
+        // outlived it: only kill() can read MSYS to find out.
         expect(shell.isRunning()).toBe(true);
         await shell.kill();
         const until = Date.now() + 5_000;

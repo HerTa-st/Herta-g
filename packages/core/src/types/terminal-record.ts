@@ -42,6 +42,11 @@ export interface UserBlock {
    *  holds it, and the ⟲ control never sits on it. Absent on every other
    *  user block. Never enters the prompt (the serializer reads `text`). */
   readonly steer?: true;
+  /** A 继续 (ADR 0071 §1.4): the user asked to continue an interrupted 板砖
+   *  run. A turn of its own — rewind withdraws it like any user turn — and a
+   *  regenerate after a crash re-runs it as a resume, not as chat. Never
+   *  enters the prompt (the serializer reads `text`). */
+  readonly resume?: true;
   /** Wall-clock ISO time the block was emitted/persisted. Optional for
    *  backward compat (pre-timestamp sessions lack it). Stamped at the output
    *  boundaries (live sink emit + JSONL persist), never at construction — the

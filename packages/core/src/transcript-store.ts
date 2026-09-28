@@ -64,6 +64,15 @@ export class TranscriptStore {
     return msg;
   }
 
+  /**
+   * Start from an earlier conversation (a continued run, ADR 0071 §1.5):
+   * the messages are taken as they are, and `onAppend` is NOT called — they
+   * are already recorded wherever it records to.
+   */
+  seed(messages: readonly Message[]): void {
+    this.messages.push(...messages);
+  }
+
   all(): readonly Message[] {
     return this.messages;
   }

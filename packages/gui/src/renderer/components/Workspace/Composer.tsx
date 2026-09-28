@@ -81,6 +81,7 @@ export function Composer(): JSX.Element {
     composerNotice,
     backendActive,
     held,
+    resumable,
     restagedImages,
   } = useSessionSelector(
     (s) => ({
@@ -92,6 +93,7 @@ export function Composer(): JSX.Element {
       composerNotice: s.composerNotice,
       backendActive: s.backendActive,
       held: s.held,
+      resumable: s.resumable,
       restagedImages: s.restagedImages,
     }),
     shallowEqualObjects,
@@ -585,6 +587,55 @@ export function Composer(): JSX.Element {
           the other two are always there. The label ("sends when 板砖 is
           done") is the card's title, not a row of its own: the placeholder
           already said it, and the card reads as the message itself. */}
+      {/* 继续 (ADR 0071 §1.4): 板砖's last run was interrupted — the app
+          exited under it, or the user pressed Stop — and main can continue
+          it. Offered in the held card's place and shape, only while the
+          session is idle; pressing it sends the 继续 turn. */}
+      {resumable && !busy && bridge.continueInterrupted !== undefined && (
+        <section
+          className="composer-held composer-resume"
+          aria-label={t("composer.resume.aria")}
+          data-testid="composer-resume"
+        >
+          <span className="composer-held__icon" aria-hidden="true">
+            <svg
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="7" cy="7" r="5.6" />
+              <path d="M5.6 4.6v4.8M8.4 4.6v4.8" />
+            </svg>
+          </span>
+          <span className="composer-held__text">
+            {t("composer.resume.text")}
+          </span>
+          <span className="composer-held__actions">
+            <button
+              type="button"
+              className="composer-held__action composer-held__action--steer"
+              onClick={() => void sessionStore.continueInterrupted()}
+            >
+              <svg
+                viewBox="0 0 11 11"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 2l5.5 3.5L3 9z" />
+              </svg>
+              {t("composer.resume.action")}
+            </button>
+          </span>
+        </section>
+      )}
       {held !== null && (
         <section
           ref={heldCardRef}

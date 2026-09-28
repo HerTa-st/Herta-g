@@ -44,6 +44,7 @@ export {
   CodingAgentRuntime,
   type CodingAgentRuntimeDeps,
   type RepoSnapshot,
+  type ResumeBriefOptions,
   type RunBriefOptions,
 } from "./backend/coding-agent-runtime.js";
 export {
@@ -61,6 +62,7 @@ export {
   type DispatchJournalEntry,
   dispatchJournalDir,
   dispatchJournalPath,
+  hashFile,
   type JournalFrameInputs,
   type JournalHost,
   type JournalProcessFate,
@@ -76,11 +78,16 @@ export {
 export {
   type OpenDispatch,
   openDispatch,
+  planResume,
   planSeal,
   processLine,
+  type ResumableRun,
+  type ResumePlan,
+  resumableRun,
   type SealedCall,
   type SealedProcess,
   type SealPlan,
+  type StopCause,
 } from "./backend/journal-seal.js";
 export {
   type RenderScopedMemoryOptions,

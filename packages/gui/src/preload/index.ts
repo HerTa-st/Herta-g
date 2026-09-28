@@ -19,6 +19,7 @@ const bridge: HertaBridge = {
     ipcRenderer.invoke(CMD.submitText, text, stagedImageIds),
   interrupt: (turnId) => ipcRenderer.invoke(CMD.interrupt, turnId),
   steerText: (text) => ipcRenderer.invoke(CMD.steerText, text),
+  continueInterrupted: () => ipcRenderer.invoke(CMD.continueInterrupted),
   rewindLastTurn: (sessionId) =>
     ipcRenderer.invoke(CMD.rewindLastTurn, sessionId),
   maybePlayEasterEgg: () => ipcRenderer.invoke(CMD.maybePlayEasterEgg),
@@ -129,6 +130,7 @@ const bridge: HertaBridge = {
   onOpenSettings: (cb) => subscribe(EVT.openSettings, () => cb()),
   onWorkspace: (cb) => subscribe(EVT.workspace, cb),
   onRepo: (cb) => subscribe(EVT.repo, cb),
+  onResume: (cb) => subscribe(EVT.resume, cb),
   onRecord: (cb) => subscribe(EVT.record, cb),
   onOverlay: (cb) => subscribe(EVT.overlay, cb),
   onSpeech: (cb) => subscribe(EVT.speech, cb),

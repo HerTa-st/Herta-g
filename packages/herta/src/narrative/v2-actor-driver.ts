@@ -466,6 +466,9 @@ export class V2ActorDriver {
     // Attachment blocks sent WITH this message (ADR 0048 §4) — appended after
     // the user block by the actor turn, so they sit inside the turn's span.
     userAttachments: readonly SystemBlock[] = [],
+    // A 继续 turn (ADR 0071 §1.4): the interrupted 板砖 run continues before
+    // Herta speaks, like a typed `@板砖` — no router, no speculative thought.
+    opts: { readonly resume?: true } = {},
   ): Promise<TerminalRecord> {
     const prevLen = this.record.length;
 
@@ -516,7 +519,7 @@ export class V2ActorDriver {
     // and the predicate is the very one the turn dispatches on, so the mood
     // is known without asking. The call sat in front of the dispatch: ~0.65 s
     // and one request before 板砖 could start.
-    const preempts = userTextPreemptsDispatch(text);
+    const preempts = opts.resume === true || userTextPreemptsDispatch(text);
     let routerSettled = preempts;
     const routerPending = preempts
       ? Promise.resolve(null)
@@ -676,6 +679,7 @@ export class V2ActorDriver {
         signal,
         precomputedRecap,
         ...(userAttachments.length > 0 ? { userAttachments } : {}),
+        ...(opts.resume === true ? { resume: true as const } : {}),
         lang: this.deps.lang ?? "zh",
         intentState: this.currentIntentState,
         attachedMetaThink:
@@ -820,8 +824,16 @@ export class V2ActorDriver {
     if (last === undefined || last.kind !== "user") return this.record;
     this.record = this.record.slice(0, -1);
     // voiceEligible=false: a regenerate (resume-recovery redo) must not re-play
-    // the particle interjection or the veto catching-herself line.
-    return this.runTurn(last.text, signal, false);
+    // the particle interjection or the veto catching-herself line. A 继续 the
+    // app died under before its run began is re-run as a 继续 (ADR 0071
+    // §1.4), not handed to Herta as a message saying "continue".
+    return this.runTurn(
+      last.text,
+      signal,
+      false,
+      [],
+      last.resume === true ? { resume: true } : {},
+    );
   }
 
   /**

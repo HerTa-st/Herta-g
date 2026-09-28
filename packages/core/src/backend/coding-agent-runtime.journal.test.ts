@@ -63,6 +63,26 @@ function runtimeWith(provider: FakeProvider, journalPath: string) {
   });
   tools.register(tool("look", true));
   tools.register(tool("change", false));
+  // A step that runs until the run is stopped.
+  tools.register({
+    name: "slow",
+    schema: () => ({
+      name: "slow",
+      description: "slow",
+      inputSchema: { type: "object", properties: {} },
+    }),
+    run: (
+      _call: unknown,
+      ctx: { signal: AbortSignal },
+    ): Promise<ToolResult> => {
+      ran.push("slow");
+      return new Promise((_resolve, reject) => {
+        ctx.signal.addEventListener("abort", () =>
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+        );
+      });
+    },
+  });
   const runtime = new CodingAgentRuntime({
     sessionId: "s-1",
     provider,
@@ -138,6 +158,79 @@ describe("a run keeps its journal (ADR 0071 §1.1)", () => {
     ]);
     expect(indexDuringRun).toEqual([["sess.jsonl"], ["sess.jsonl"]]);
     expect(await readJournalIndex(dirname(path))).toEqual([]);
+  });
+
+  it("a run the user stopped mid-step continues from its journal (ADR 0071 §1.5)", async () => {
+    const path = dispatchJournalPath(join(root, "sessions"), "sess");
+    let continued: ProviderPromptFrame | undefined;
+    const provider = new FakeProvider({
+      turns: [
+        [
+          {
+            type: "tool-call-request",
+            call: { id: "c1", tool: "slow", input: {} },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        (frame) => {
+          continued = frame;
+          return [{ type: "finish", reason: "stop" }];
+        },
+      ],
+    });
+    const { runtime, ran } = runtimeWith(provider, path);
+    const stop = new AbortController();
+    const first = runtime.runBrief(
+      { taskId: "task-1" },
+      {
+        signal: stop.signal,
+        userMessages: [{ text: "run the slow thing" }],
+        recordLength: 3,
+      },
+    );
+    while (!ran.includes("slow")) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    stop.abort();
+    expect((await first).status).toBe("interrupted");
+
+    // (The scripted model does nothing more, so the run reports `partial`
+    // under the ordinary status rules.)
+    await runtime.resumeBrief({ recordLength: 6 });
+    // The same base frame: the original brief's own words.
+    const sent = JSON.stringify(continued ?? {});
+    expect(sent).toContain("run the slow thing");
+    // The open step closed in the stop's words, then the note.
+    expect(sent).toContain("stopped_outcome_unknown");
+    expect(sent).toContain("开拓者按了停止");
+    const messages = continued?.messages ?? [];
+    expect(messages.at(-1)?.role).toBe("user");
+
+    const kinds = ((await readDispatchJournal(path)) ?? []).map((e) =>
+      e.kind === "message" ? `message:${e.message.role}` : e.kind,
+    );
+    expect(kinds).toEqual([
+      "start",
+      "message:assistant",
+      "dispatch",
+      "end",
+      "closer",
+      "resume",
+      "message:assistant",
+      "end",
+    ]);
+  });
+
+  it("will not continue a run that ended, or one started under another contract", async () => {
+    const path = dispatchJournalPath(join(root, "sessions"), "sess");
+    const { runtime } = runtimeWith(
+      scripted([{ id: "c1", tool: "change" }]),
+      path,
+    );
+    await runtime.runBrief({ taskId: "task-1" });
+    await expect(runtime.resumeBrief({})).rejects.toMatchObject({
+      kind: "resume_unavailable",
+    });
   });
 
   it("fails closed: with no journal, a mutating call does not run and says why; a read still runs", async () => {

@@ -344,6 +344,11 @@ export const en = {
   "composer.hold.steer": "Interject now",
   "composer.hold.edit": "Edit",
   "composer.hold.discard": "Withdraw",
+  // 继续 (ADR 0071 §1.4): Brick's last run was interrupted — the app exited
+  // under it, or the user pressed Stop — and can be continued where it stood.
+  "composer.resume.text": "Brick's last run was interrupted.",
+  "composer.resume.action": "Continue",
+  "composer.resume.aria": "Continue the interrupted run",
   // Click-to-enlarge lightbox (ADR 0048 §4a). `lightbox.open` prefixes the
   // thumb button's aria-label, followed by the filename.
   "lightbox.open": "View picture",

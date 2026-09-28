@@ -1,10 +1,12 @@
 import type {
   ApprovalResult,
+  ContinueInterruptedResult,
   CreateSessionOpts,
   OverlayEvent,
   RecordEvent,
   RepoEvent,
   ResolveApprovalOpts,
+  ResumeEvent,
   RewindResult,
   SessionAgentEvent,
   SessionDeletedEvent,
@@ -49,6 +51,8 @@ export interface MockHertaBridgeOpts {
   readonly interruptResult?: { readonly ok: boolean };
   /** What `steerText` answers (ADR 0063); default accepted on "mock-turn". */
   readonly steerTextResult?: SteerTextResult;
+  /** What `continueInterrupted` answers (ADR 0071 §1.4); default a turn. */
+  readonly continueInterruptedResult?: ContinueInterruptedResult;
   readonly rewindLastTurnResult?: RewindResult;
   readonly listSessionsResult?: readonly SessionMetadata[];
   /** Seed for searchSessions (transcript content search). Default []. */
@@ -169,6 +173,8 @@ export interface MockHertaBridge {
     interrupt: Array<string | undefined>;
     /** The texts steered while 板砖 ran (ADR 0063). */
     steerText: string[];
+    /** 继续 presses (ADR 0071 §1.4). */
+    continueInterrupted: number;
     rewindLastTurn: number;
     maybePlayEasterEgg: number;
     openSession: string[];
@@ -259,6 +265,8 @@ export interface MockHertaBridge {
   emitNavBlocked(e: NavBlockedEvent): void;
   /** The repository card's stream (ADR 0058). */
   emitRepo(e: RepoEvent): void;
+  /** The 继续 offer's stream (ADR 0071 §1.4). */
+  emitResume(e: ResumeEvent): void;
 }
 
 const DEFAULT_SNAPSHOT: SessionSnapshot = {
@@ -286,6 +294,7 @@ export function createMockHertaBridge(
   const deletedCbs = new Set<(e: SessionDeletedEvent) => void>();
   const workspaceCbs = new Set<(e: WorkspaceEvent) => void>();
   const repoCbs = new Set<(e: RepoEvent) => void>();
+  const resumeCbs = new Set<(e: ResumeEvent) => void>();
   const voiceCbs = new Set<(e: VoiceCueEvent) => void>();
   const updateCbs = new Set<(e: UpdateState) => void>();
   const navBlockedCbs = new Set<(e: NavBlockedEvent) => void>();
@@ -295,6 +304,7 @@ export function createMockHertaBridge(
     submitTextStaged: [],
     interrupt: [],
     steerText: [],
+    continueInterrupted: 0,
     rewindLastTurn: 0,
     maybePlayEasterEgg: 0,
     openSession: [],
@@ -515,6 +525,11 @@ export function createMockHertaBridge(
       calls.interrupt.push(turnId);
       return opts.interruptResult ?? { ok: true };
     },
+    continueInterrupted: async () => {
+      calls.continueInterrupted += 1;
+      return opts.continueInterruptedResult ?? { turnId: "mock-turn" };
+    },
+    onResume: (cb) => sub(resumeCbs, cb),
     steerText: async (text) => {
       calls.steerText.push(text);
       return opts.steerTextResult ?? { accepted: "mock-turn" };
@@ -924,6 +939,9 @@ export function createMockHertaBridge(
     },
     emitRepo: (e) => {
       for (const cb of repoCbs) cb(e);
+    },
+    emitResume: (e) => {
+      for (const cb of resumeCbs) cb(e);
     },
     emitVoice: (e) => {
       for (const cb of voiceCbs) cb(e);

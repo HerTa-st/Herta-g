@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   DispatchJournal,
   type DispatchJournalEntry,
+  hashFile,
   type JournalHost,
   type JournalProcessFate,
   type LastTurnEnd,
@@ -94,20 +93,6 @@ async function hostState(
   } catch {
     return "unknown";
   }
-}
-
-/** A file's sha256, or null when it does not exist. */
-export function hashFile(path: string): Promise<string | null> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash("sha256");
-    const stream = createReadStream(path);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve(hash.digest("hex")));
-    stream.on("error", (err) => {
-      if ((err as { code?: unknown }).code === "ENOENT") resolve(null);
-      else reject(err);
-    });
-  });
 }
 
 function lastTerminalMarker(record: TerminalRecord): number {

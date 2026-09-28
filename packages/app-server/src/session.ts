@@ -25,6 +25,8 @@ import {
   type ProjectCommandRuleStore,
   type ProviderAdapter,
   type RepoContextSnapshot,
+  readDispatchJournal,
+  resumableRun,
   ruleDisplay,
   type SessionTopic,
   type SystemBlock,
@@ -89,11 +91,13 @@ import type {
   ApprovalResult,
   AppServerConfig,
   AttachResult,
+  ContinueInterruptedResult,
   OverlayEvent,
   RecordEvent,
   RemoveAttachmentResult,
   RepoEvent,
   ResolveApprovalOpts,
+  ResumeEvent,
   RewindResult,
   Session,
   SessionAgentEvent,
@@ -445,6 +449,9 @@ export class SessionImpl implements Session {
    *  `turn.failed` on the bus — the window in which a steer has a sampling
    *  boundary to reach. Tracked from the bus, cleared with the turn. */
   private backendRunning = false;
+  private readonly contract: string;
+  /** Whether a 继续 is on offer (ADR 0071 §1.4); see `refreshResumable`. */
+  private _resumable = false;
 
   /** The session title and its topic history — generation after a user
    *  turn, the rewind fence, the sidecar (session-titler.ts). */
@@ -513,7 +520,11 @@ export class SessionImpl implements Session {
     onWorkspaceChanged?: () => void;
     /** ADR 0067: fired when a readable document is attached. */
     onDocumentAttached?: () => void;
+    /** The contract this session's backend runs (ADR 0040): an interrupted
+     *  run that started under another cannot be continued here. */
+    contract: string;
   }) {
+    this.contract = opts.contract;
     this.steer = opts.steer;
     this.bus = opts.bus;
     this.onWorkspaceChanged = opts.onWorkspaceChanged;
@@ -686,6 +697,9 @@ export class SessionImpl implements Session {
       // entry replacing `currentTurn` mid-turn is what the callers' gates
       // forbid; the check keeps a wrong release impossible regardless.)
       if (this.currentTurn?.turnId === turnId) this.currentTurn = null;
+      // A dispatch, a Stop or a 继续 may have changed what can be continued
+      // (ADR 0071 §1.4).
+      void this.refreshResumable();
     }
     return turnId;
   }
@@ -751,6 +765,103 @@ export class SessionImpl implements Session {
   /** 板砖's run is in progress (the hold window, ADR 0063). */
   get backendActive(): boolean {
     return this.backendRunning;
+  }
+
+  /** Whether a 继续 is on offer now (ADR 0071 §1.4). */
+  get resumable(): boolean {
+    return this._resumable;
+  }
+
+  subscribeResume(): AsyncIterable<ResumeEvent> {
+    return this.projector.subscribeResume();
+  }
+
+  /**
+   * Work out whether a 继续 is on offer, and say so when it changes. On
+   * offer while the session is idle, its latest terminal marker is a 中断
+   * one (the app exited, or the user pressed Stop), and the journal still
+   * holds that run — ended interrupted, begun before the marker — under
+   * this session's contract. A later dispatch, a rewind past the marker or
+   * a 继续 takes the offer away; chatting with Herta in between does not.
+   */
+  async refreshResumable(): Promise<void> {
+    this.setResumable(await this.computeResumable());
+  }
+
+  private async computeResumable(): Promise<boolean> {
+    if (this.currentTurn !== null) return false;
+    const record = this.driver.getRecord();
+    let marker = -1;
+    for (let i = record.length - 1; i >= 0; i -= 1) {
+      const b = record[i];
+      if (
+        b?.kind === "system" &&
+        (b.role === "done-marker" || b.role === "noop-marker")
+      ) {
+        marker = i;
+        break;
+      }
+    }
+    const block = record[marker];
+    if (
+      block?.kind !== "system" ||
+      block.role !== "done-marker" ||
+      block.markerSummary?.state !== "interrupted"
+    ) {
+      return false;
+    }
+    let entries: Awaited<ReturnType<typeof readDispatchJournal>>;
+    try {
+      entries = await readDispatchJournal(
+        dispatchJournalPath(this.transcriptDir, this.sessionId),
+      );
+    } catch {
+      return false;
+    }
+    const run = entries === null ? null : resumableRun(entries);
+    return (
+      run !== null &&
+      run.recordLength !== undefined &&
+      run.recordLength <= marker &&
+      run.start.contract === this.contract
+    );
+  }
+
+  private setResumable(value: boolean): void {
+    if (value === this._resumable) return;
+    this._resumable = value;
+    this.projector.emitResume({ kind: "offer", resumable: value });
+  }
+
+  /**
+   * 继续 (ADR 0071 §1.4): continue the interrupted 板砖 run. The turn's user
+   * block is `继续` (`Continue`) marked `resume`; the run continues from its
+   * journal before Herta speaks, and she comments after it. Never rejects:
+   * no key, a turn already running, or no run to continue each answer as a
+   * result the renderer can act on.
+   */
+  async continueInterrupted(): Promise<ContinueInterruptedResult> {
+    if (this.deepSeekKey().trim() === "") return { needsKey: true };
+    if (this.currentTurn !== null) return { unavailable: true };
+    // Checked against the journal now, not trusted from the last answer.
+    await this.refreshResumable();
+    if (!this._resumable || this.currentTurn !== null) {
+      return { unavailable: true };
+    }
+    this.setResumable(false);
+    const text = this.lang === "en" ? "Continue" : "继续";
+    const turnId = await this.runAsTurn(
+      (signal) => this.driver.runTurn(text, signal, true, [], { resume: true }),
+      {
+        onFinished: () => this.recordTurnEnd("completed"),
+        onFailed: (err) => {
+          this.reconcileRecordAfterFailure();
+          this.recordTurnEnd(isAbortError(err) ? "interrupted" : "failed");
+        },
+        rethrow: false,
+      },
+    );
+    return { turnId };
   }
 
   /** A dream pass changed the corpus: the next turn re-derives the prefix
@@ -1083,6 +1194,9 @@ export class SessionImpl implements Session {
       dispatchJournalPath(this.transcriptDir, this.sessionId),
       this._record.length,
     ).catch(() => undefined);
+    // Rewinding past a 中断 marker takes the offer away; rewinding a 继续
+    // turn can bring it back.
+    await this.refreshResumable();
     return {
       ok: true,
       userText: result.userText,
@@ -2001,12 +2115,17 @@ export class SessionImpl implements Session {
       workingDiffDescriber: deps.workingDiffDescriber ?? describeWorkingDiff,
       logDescriber: deps.logDescriber ?? describeLog,
       branchesDescriber: deps.branchesDescriber ?? describeBranches,
+      contract: backend.contract,
     });
     sessionHolder.session = session;
     // The repository card's first answer (ADR 0058): fire-and-forget, the
     // event reaches whoever subscribes; the open/create snapshot carries
     // whatever has landed by then.
     void session.refreshRepo();
+    // Whether a 继续 is on offer (ADR 0071 §1.4) — AWAITED, unlike the repo
+    // card: the open's snapshot is what a reload re-syncs from, and the
+    // answer is one small file read.
+    await session.refreshResumable();
     return session;
   }
 }

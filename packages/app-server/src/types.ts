@@ -535,6 +535,19 @@ export type SteerTextResult =
   | { readonly accepted: string }
   | { readonly queued: true };
 
+/** Whether a 继续 is on offer changed (ADR 0071 §1.4). */
+export type ResumeEvent =
+  | { readonly kind: "offer"; readonly resumable: boolean }
+  | { readonly kind: "dropped"; readonly count: number };
+
+/** What `continueInterrupted` answers. `turnId`: the continued run's turn,
+ *  now finished. `needsKey`: no DeepSeek key yet. `unavailable`: nothing to
+ *  continue (the offer had lapsed, or a turn was running). Never an error. */
+export type ContinueInterruptedResult =
+  | { readonly turnId: string }
+  | { readonly needsKey: true }
+  | { readonly unavailable: true };
+
 export interface Session {
   readonly sessionId: string;
   readonly workspaceRoot: string;
@@ -568,6 +581,9 @@ export interface Session {
    *  (ADR 0063). A window that reloads mid-turn re-learns it from the reset
    *  snapshot. Optional: hosts without the GUI's session omit it. */
   readonly backendActive?: boolean;
+  /** A 继续 is on offer (ADR 0071 §1.4) — what a reloaded window's strip is
+   *  rebuilt from. Optional like the above. */
+  readonly resumable?: boolean;
   /** Pictures staged in the composer and not yet sent (ADR 0048 §4) — what
    *  a reloaded window's strip is rebuilt from. Optional like the above. */
   readonly stagedImageList?: readonly StagedImageInfo[];
@@ -612,6 +628,13 @@ export interface Session {
    * it; the composer then offers no steer.
    */
   steerText?(text: string): Promise<SteerTextResult>;
+  /**
+   * 继续 (ADR 0071 §1.4): continue the interrupted 板砖 run. OPTIONAL like
+   * `steerText`: fakes and the website demo omit it, and no offer is shown.
+   */
+  continueInterrupted?(): Promise<ContinueInterruptedResult>;
+  /** The offer's changes (see `resumable`). Optional with the above. */
+  subscribeResume?(): AsyncIterable<ResumeEvent>;
   /**
    * Rewind the latest 开拓者 (user) turn: withdraw it and everything below it
    * (Herta reply, 板砖 system blocks, beats, markers) from every record store,

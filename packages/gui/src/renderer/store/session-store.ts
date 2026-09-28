@@ -4,6 +4,7 @@ import type {
   RecordEvent,
   RepoContextSnapshot,
   RepoEvent,
+  ResumeEvent,
   SessionAgentEvent,
   SessionDeletedEvent,
   SessionTopic,
@@ -164,6 +165,10 @@ export interface SessionSnapshotView {
    *  A composer-side draft with a delivery trigger — never in the record,
    *  and gone with the activation like any other draft. */
   readonly held: string | null;
+  /** A 继续 is on offer (ADR 0071 §1.4): 板砖's last run was interrupted —
+   *  the app exited under it, or the user pressed Stop — and main can
+   *  continue it. Main's answer, from the reset snapshot and `onResume`. */
+  readonly resumable: boolean;
   /** One-shot transient notice shown by the composer — e.g. the rewind warning
    *  that 板砖's file edits were NOT reverted. Cleared on the next keystroke. */
   readonly composerNotice: string | null;
@@ -240,6 +245,7 @@ const INITIAL: SessionSnapshotView = {
   composerDraftImages: null,
   restagedImages: null,
   held: null,
+  resumable: false,
   composerNotice: null,
   needsKeyText: null,
   needsKeyImages: null,
@@ -343,6 +349,10 @@ export class SessionStore {
       ...(bridge.onRepo !== undefined
         ? [bridge.onRepo((e) => this.onRepo(e))]
         : []),
+      // Optional: the 继续 offer (ADR 0071 §1.4).
+      ...(bridge.onResume !== undefined
+        ? [bridge.onResume((e) => this.onResume(e))]
+        : []),
     ];
     // Subscribed: now ask for the state. Main's own push at did-finish-load
     // can land before this line after a reload, and was then lost — the
@@ -353,6 +363,33 @@ export class SessionStore {
   }
 
   private navBlockSeq = 0;
+
+  /** Main's answer on the 继续 offer changed. A dropped-events sentinel
+   *  says nothing about it; the next reset re-syncs. */
+  private onResume(e: ResumeEvent): void {
+    if (e.kind !== "offer" || e.resumable === this.snapshot.resumable) return;
+    this.emit({ ...this.snapshot, resumable: e.resumable });
+  }
+
+  /**
+   * 继续 pressed: the strip goes at once (the turn's own lifecycle takes over
+   * the composer), and main continues the run. With no key, the no-key card
+   * opens as for a send; with nothing to continue, the strip just stays gone.
+   */
+  async continueInterrupted(): Promise<void> {
+    const bridge = this.bridge;
+    if (bridge?.continueInterrupted === undefined || !this.snapshot.resumable) {
+      return;
+    }
+    this.emit({ ...this.snapshot, resumable: false });
+    let r: Awaited<ReturnType<NonNullable<HertaBridge["continueInterrupted"]>>>;
+    try {
+      r = await bridge.continueInterrupted();
+    } catch {
+      return;
+    }
+    if ("needsKey" in r) this.emit({ ...this.snapshot, resumable: true });
+  }
 
   private onNavBlocked(e: NavBlockedEvent): void {
     this.navBlockSeq += 1;
@@ -695,6 +732,8 @@ export class SessionStore {
           ? e.stagedImages
           : null,
       held: null,
+      // The 继续 offer as main has it for this session (ADR 0071 §1.4).
+      resumable: e.resumable === true,
       composerNotice: null,
       needsKeyText: null,
       needsKeyImages: null,

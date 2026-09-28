@@ -28,8 +28,11 @@ import {
   currentJournalHost,
   DISPATCH_JOURNAL_VERSION,
   DispatchJournal,
+  hashFile,
   markJournalOpen,
+  readDispatchJournal,
 } from "./dispatch-journal.js";
+import { planResume, type ResumePlan } from "./journal-seal.js";
 import { renderScopedMemory } from "./scoped-memory.js";
 
 /**
@@ -177,6 +180,14 @@ export interface RunBriefOptions {
   recordLength?: number;
 }
 
+export interface ResumeBriefOptions {
+  signal?: AbortSignal;
+  /** The session record's length when the run was continued, recorded on
+   *  the journal's `resume` entry: the seal's record gate for this segment
+   *  (ADR 0071 §1.2). */
+  recordLength?: number;
+}
+
 interface PendingPermission {
   tool: string;
   risk: RiskLevel;
@@ -254,9 +265,57 @@ export class CodingAgentRuntime {
     }
   }
 
-  async runBrief(
+  runBrief(
     brief: HertaToAgentBrief,
     opts: RunBriefOptions = {},
+  ): Promise<AgentExecutionReport> {
+    return this.run(brief, opts, null);
+  }
+
+  /**
+   * Continue a run the app exited during, or the user stopped (ADR 0071
+   * §1.5), from its journal: the same base frame, the conversation with every
+   * open step closed and the harness's note after it, the todo list and
+   * findings that took effect, the files already changed. It appends to the
+   * same journal under a `resume` entry. Nothing is re-run.
+   *
+   * Rejects with `kind: "resume_unavailable"` when the journal holds no run
+   * that can be continued, or one started under another contract (its calls
+   * name that contract's tools).
+   */
+  async resumeBrief(opts: ResumeBriefOptions): Promise<AgentExecutionReport> {
+    const unavailable = (why: string): Error =>
+      Object.assign(new Error(`cannot continue this run: ${why}`), {
+        kind: "resume_unavailable" as const,
+      });
+    if (this.deps.journalPath === undefined) throw unavailable("no journal");
+    const entries = await readDispatchJournal(this.deps.journalPath);
+    const plan =
+      entries === null
+        ? null
+        : await planResume(entries, hashFile, this.deps.clock());
+    if (plan === null) throw unavailable("no interrupted run in the journal");
+    if (plan.start.contract !== this.deps.contract) {
+      throw unavailable(
+        `it ran under the ${plan.start.contract ?? "unknown"} contract`,
+      );
+    }
+    return this.run(
+      plan.start.brief,
+      {
+        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+        ...(opts.recordLength !== undefined
+          ? { recordLength: opts.recordLength }
+          : {}),
+      },
+      plan,
+    );
+  }
+
+  private async run(
+    brief: HertaToAgentBrief,
+    opts: RunBriefOptions,
+    resume: ResumePlan | null,
   ): Promise<AgentExecutionReport> {
     if (this.briefInFlight) {
       // A real Error, not an AgentError literal (audit 2026-07-10, finding
@@ -290,6 +349,21 @@ export class CodingAgentRuntime {
       const findings = new FindingsLedger();
 
       const builder = new ExecutionReportBuilder(brief.taskId);
+      // A continued run starts where its journal left off (ADR 0071 §1.5).
+      // The read ledger stays empty: the model reads a file again before it
+      // edits it, and the freshness rule does the rest.
+      if (resume !== null) {
+        transcript.seed(resume.messages);
+        todos.replace(resume.todos);
+        for (const f of resume.findings) {
+          findings.add(f);
+          builder.addEvidence({
+            kind: "finding",
+            summary: f.claim,
+            source: f.cites.join(", "),
+          });
+        }
+      }
       const pendingPermissions = new Map<string, PendingPermission>();
       let failed = false;
       /** The KIND of the last turn.failed — `"interrupted"` distinguishes a
@@ -320,6 +394,16 @@ export class CodingAgentRuntime {
       >();
       let okEvidence = 0;
       let deniedPermissions = 0;
+      // A continued run's report speaks for the whole task: the files
+      // changed before the interruption count (ADR 0071 §1.5). Their diff is
+      // not kept, so no line totals are claimed for them.
+      for (const f of resume?.changedFiles ?? []) {
+        changedByPath.set(f.path, {
+          path: f.path,
+          kind: f.kind,
+          diffSummary: "changed before the interruption",
+        });
+      }
 
       // The dispatch BASELINE. `changedByPath` above only ever learns about a
       // path from one of the three editors, and `bash` is not one of them — so
@@ -337,13 +421,21 @@ export class CodingAgentRuntime {
       // gathered in parallel; every wrapper swallows its own failures. The
       // project-memory recall (ADR 0060) joins them: one small file read
       // per dispatch, skipped when the caller already decided the text.
-      const lang = opts.lang ?? "zh";
+      // A continued run rebuilds its base frame from the journal: the same
+      // inputs, so the same prompt (ADR 0071 §1.5). Only the baseline is
+      // taken afresh — it is what this segment is credited against.
+      const frameIn = resume?.start.frame;
+      const lang = frameIn?.lang ?? opts.lang ?? "zh";
       const [baseline, repoContext, recalledMemory] = await Promise.all([
         this.probeRepo(opts.signal),
-        this.describeRepo(opts.signal),
-        opts.scopedMemory === undefined
-          ? this.recallScopedMemory(lang)
-          : Promise.resolve(opts.scopedMemory),
+        frameIn !== undefined
+          ? Promise.resolve(frameIn.repoContext ?? null)
+          : this.describeRepo(opts.signal),
+        frameIn !== undefined
+          ? Promise.resolve(frameIn.scopedMemory)
+          : opts.scopedMemory === undefined
+            ? this.recallScopedMemory(lang)
+            : Promise.resolve(opts.scopedMemory),
       ]);
 
       const absorb = (event: AgentEvent): void => {
@@ -522,12 +614,14 @@ export class CodingAgentRuntime {
       };
       const handle = {
         signal: opts.signal ?? new AbortController().signal,
-        userMessages: opts.userMessages ?? [],
-        omittedUserMessages: opts.omittedUserMessages ?? 0,
-        scopedRepoInstructions: opts.scopedRepoInstructions ?? "",
+        userMessages: frameIn?.userMessages ?? opts.userMessages ?? [],
+        omittedUserMessages:
+          frameIn?.omittedUserMessages ?? opts.omittedUserMessages ?? 0,
+        scopedRepoInstructions:
+          frameIn?.scopedRepoInstructions ?? opts.scopedRepoInstructions ?? "",
         scopedMemory: recalledMemory,
-        recentDialogue: opts.recentDialogue ?? "",
-        workingHistory: opts.workingHistory ?? "",
+        recentDialogue: frameIn?.recentDialogue ?? opts.recentDialogue ?? "",
+        workingHistory: frameIn?.workingHistory ?? opts.workingHistory ?? "",
         lang,
         ...(repoContext !== null ? { repoContext } : {}),
         ...(this.deps.pendingUserInput !== undefined
@@ -535,7 +629,30 @@ export class CodingAgentRuntime {
           : {}),
       };
 
-      if (this.deps.journalPath !== undefined) {
+      if (this.deps.journalPath !== undefined && resume !== null) {
+        // The same journal, continued: the closers a stopped run still owed,
+        // then the `resume` entry that opens this segment — both durable
+        // before any step runs.
+        journal = await DispatchJournal.reopen(this.deps.journalPath, {
+          live: true,
+        });
+        for (const c of resume.newClosers) {
+          await journal.append({ kind: "closer", ...c });
+        }
+        try {
+          await journal.appendDurable({
+            kind: "resume",
+            at: this.deps.clock().toISOString(),
+            ...(opts.recordLength !== undefined
+              ? { recordLength: opts.recordLength }
+              : {}),
+          });
+          await markJournalOpen(this.deps.journalPath, true);
+        } catch {
+          // A failed journal refuses every step with a side effect (the
+          // loop's fail-closed rule); the run itself goes on.
+        }
+      } else if (this.deps.journalPath !== undefined) {
         journal = await DispatchJournal.begin(this.deps.journalPath, {
           kind: "start",
           v: DISPATCH_JOURNAL_VERSION,
