@@ -90,6 +90,7 @@ function stubSheet(over: Partial<OpeningSheet> = {}): OpeningSheet {
     ink: BASE_LAYER_STYLE.foreground,
     glyphs: OPENING_GLYPHS,
     entries: sizes.map((px) => ({ px, w: 9, h: 13, pos })),
+    origin: "kept",
     ...over,
   };
 }
@@ -168,16 +169,21 @@ describe("OpeningAsciiCanvas with the glyph sheet (M-opening-4)", () => {
     const { ctx } = stubContext();
     const { pump } = fakeFrames();
     const sheet = stubSheet();
+    const onFirstFrame = vi.fn();
     render(
       <OpeningAsciiCanvas
         data={stubSegment()}
         onComplete={() => {}}
+        onFirstFrame={onFirstFrame}
         getSheet={() => Promise.resolve(sheet)}
       />,
     );
     await settle();
     pump(1000);
     pump(1040);
+    // The first frame says how it was drawn: here, on this thread, from the
+    // sheet kept from an earlier launch.
+    expect(onFirstFrame).toHaveBeenCalledWith({ host: "main", sheet: "kept" });
     expect(ctx.fillText).not.toHaveBeenCalled();
     expect(ctx.drawImage).toHaveBeenCalled();
     for (const call of ctx.drawImage.mock.calls) {
@@ -384,6 +390,20 @@ describe("OpeningAsciiCanvas on the draw worker (M-opening-3)", () => {
     expect(worker.transfers[1]).toEqual([]);
   });
 
+  it("reports a worker's first frame drawn from the sheet with the sheet's origin", async () => {
+    const sheet = stubSheet({ origin: "drawn" });
+    const { worker, onFirstFrame } = setUp(stubSegment(), () =>
+      Promise.resolve(sheet),
+    );
+    await settle();
+    worker.say({ type: "first-frame", atEpochMs: 5, usesSheet: true });
+    expect(onFirstFrame).toHaveBeenCalledWith({
+      atEpochMs: 5,
+      host: "worker",
+      sheet: "drawn",
+    });
+  });
+
   it("an unmount while the sheet is awaited plays nothing", async () => {
     let deliver: (s: OpeningSheet | null) => void = () => undefined;
     const { worker, unmount } = setUp(
@@ -408,10 +428,14 @@ describe("OpeningAsciiCanvas on the draw worker (M-opening-3)", () => {
 
   it("passes on the worker's first frame (with its time) and dissolve, once each", () => {
     const { worker, onComplete, onFirstFrame } = setUp();
-    worker.say({ type: "first-frame", atEpochMs: 1234.5 });
-    worker.say({ type: "first-frame", atEpochMs: 9999 });
+    worker.say({ type: "first-frame", atEpochMs: 1234.5, usesSheet: false });
+    worker.say({ type: "first-frame", atEpochMs: 9999, usesSheet: false });
     expect(onFirstFrame).toHaveBeenCalledTimes(1);
-    expect(onFirstFrame).toHaveBeenCalledWith(1234.5);
+    expect(onFirstFrame).toHaveBeenCalledWith({
+      atEpochMs: 1234.5,
+      host: "worker",
+      sheet: "none",
+    });
     worker.say({ type: "dissolve", dissolveMs: 1234 });
     worker.say({ type: "dissolve", dissolveMs: 99 });
     expect(onComplete).toHaveBeenCalledTimes(1);

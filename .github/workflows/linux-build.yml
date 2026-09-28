@@ -142,6 +142,31 @@ jobs:
             console.log('sherpa-onnx runtime loaded from', p);
           "
 
+      # The opening (ADR 0068 §15–§19) draws on a worker from a glyph sheet the
+      # app keeps in IndexedDB — verified on Windows only until this ran. It
+      # runs BEFORE any other launch so the first finds a fresh profile. Three
+      # launches: the first draws the sheet, the second must reuse it, the
+      # third at a device scale of 2 (a HiDPI screen twice the size, so the
+      # window keeps its CSS size) draws one of its own. Each must finish the
+      # opening, drawn on the worker from the sheet, with glyphs on screen.
+      - name: the opening — worker, glyph sheet, the kept sheet, scale 2
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb fuse3
+          mkdir -p /tmp/shots
+          IMG=$(ls packages/gui/release/*.AppImage | head -1)
+          chmod +x "$IMG"
+          FAIL=0
+          node packages/gui/scripts/opening-probe.mjs /tmp/shots first drawn -- \
+            xvfb-run -a -s "-screen 0 1440x900x24" "$IMG" || FAIL=1
+          node packages/gui/scripts/opening-probe.mjs /tmp/shots second kept -- \
+            xvfb-run -a -s "-screen 0 1440x900x24" "$IMG" || FAIL=1
+          node packages/gui/scripts/opening-probe.mjs /tmp/shots scale2 drawn -- \
+            xvfb-run -a -s "-screen 0 2880x1800x24" "$IMG" --force-device-scale-factor=2 || FAIL=1
+          pkill -f "/tmp/.mount_" 2>/dev/null || true
+          if [ "$FAIL" -ne 0 ]; then echo "::error::the opening probe failed inside the AppImage (see above)"; exit 1; fi
+
       # The question this whole job exists for: does the AppImage START on a
       # stock desktop? fuse3 yes (every Ubuntu desktop has it), libfuse2 no.
       # Under Xvfb, with the Chromium sandbox as the AppRun decides it

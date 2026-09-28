@@ -43,11 +43,15 @@ export type OpeningDrawRequest =
     }
   | ({ readonly type: "resize" } & View);
 
-/** Worker → main. `first-frame` carries when it was committed, in epoch ms;
- *  `no-context`: the canvas gave no 2D context (the main thread plays the
- *  opening instead). */
+/** Worker → main. `first-frame` carries when it was committed, in epoch ms,
+ *  and whether the frames copy from the glyph sheet; `no-context`: the canvas
+ *  gave no 2D context (the main thread plays the opening instead). */
 export type OpeningDrawEvent =
-  | { readonly type: "first-frame"; readonly atEpochMs: number }
+  | {
+      readonly type: "first-frame";
+      readonly atEpochMs: number;
+      readonly usesSheet: boolean;
+    }
   | { readonly type: "dissolve"; readonly dissolveMs: number }
   | { readonly type: "instant" }
   | { readonly type: "no-context" };
@@ -106,6 +110,7 @@ function play(data: SegmentData, received: OpeningSheet | null): void {
       send({
         type: "first-frame",
         atEpochMs: performance.timeOrigin + performance.now(),
+        usesSheet: started.usesSheet(),
       });
     }
     if (more) requestAnimationFrame(step);

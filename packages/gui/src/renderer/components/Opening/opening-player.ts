@@ -114,6 +114,8 @@ export interface OpeningPlayer {
   /** Draw the frame for animation-frame time `timeMs`. False once playback
    *  is over: the host stops asking for frames. */
   frame(timeMs: number): boolean;
+  /** Whether the frames copy glyphs from the sheet at this view (else text). */
+  usesSheet(): boolean;
 }
 
 /**
@@ -394,6 +396,10 @@ export function createOpeningPlayer(
         events.onDissolve(dissolveMs);
       }
       return elapsed < duration;
+    },
+
+    usesSheet() {
+      return useSheet;
     },
   };
   return player;

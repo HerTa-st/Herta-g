@@ -63,12 +63,17 @@ export function journeyMark(name: JourneyMark): void {
  *  `performance.timeOrigin + performance.now()`): the opening's draw worker
  *  reports when its first frame was committed, and the message reaches this
  *  thread later than the frame reached the screen. */
-export function journeyMarkAt(name: JourneyMark, epochMs: number): void {
+export function journeyMarkAt(
+  name: JourneyMark,
+  epochMs: number,
+  detail?: Readonly<Record<string, unknown>>,
+): void {
   if (!canMark()) return;
   const full = PREFIX + name;
   performance.clearMarks(full);
   performance.mark(full, {
     startTime: Math.max(0, epochMs - performance.timeOrigin),
+    ...(detail !== undefined ? { detail } : {}),
   });
 }
 
@@ -95,9 +100,12 @@ function nextTask(cb: () => void): void {
  * Mark once the NEXT frame has painted: a task queued from inside an
  * animation frame runs after that frame's paint. A window with no frames
  * (occluded, minimized) would never paint, so a timer caps the wait and the
- * mark says so (`detail.late`).
+ * mark says so (`detail.late`). A `detail` given here rides along with it.
  */
-export function journeyMarkAfterPaint(name: JourneyMark): void {
+export function journeyMarkAfterPaint(
+  name: JourneyMark,
+  detail?: Readonly<Record<string, unknown>>,
+): void {
   if (!canMark()) return;
   let done = false;
   const mark = (late: boolean): void => {
@@ -105,7 +113,11 @@ export function journeyMarkAfterPaint(name: JourneyMark): void {
     done = true;
     const full = PREFIX + name;
     performance.clearMarks(full);
-    performance.mark(full, late ? { detail: { late: true } } : undefined);
+    const merged = late ? { ...detail, late: true } : detail;
+    performance.mark(
+      full,
+      merged !== undefined ? { detail: merged } : undefined,
+    );
   };
   const cap = setTimeout(() => mark(true), PAINT_WAIT_MAX_MS);
   if (typeof requestAnimationFrame !== "function") return;

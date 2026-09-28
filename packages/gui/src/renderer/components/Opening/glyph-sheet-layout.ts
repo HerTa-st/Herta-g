@@ -29,6 +29,8 @@ export interface OpeningSheet {
   /** The symbols, in cell order. */
   readonly glyphs: string;
   readonly entries: readonly OpeningSheetEntry[];
+  /** Drawn at this launch, or kept from an earlier one (M-opening-5). */
+  readonly origin: "drawn" | "kept";
 }
 
 export const OPENING_SHEET_WIDTH = 2048;

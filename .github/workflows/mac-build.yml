@@ -449,6 +449,41 @@ jobs:
             echo "::notice::unsigned build — signature checks failed as expected"
           fi
 
+      # The opening (ADR 0068 §15–§19): drawn on a worker from a glyph sheet the
+      # app keeps in IndexedDB, verified on Windows only until this ran. It
+      # runs BEFORE the first look so its first launch finds a fresh profile.
+      # Three launches: the first draws the sheet, the second must reuse it,
+      # the third at a device scale of 2 — a Retina Mac's, which no Windows
+      # check covers — draws one of its own. Each must finish the opening,
+      # drawn on the worker from the sheet, with glyphs on screen. Like the
+      # first look it must not cost the dmg: the failure is an ::error, and
+      # the step is allowed to fail. The probe starts the app detached with
+      # its output in a file (node's own setsid, no external binary) and ends
+      # it by process group, so the helpers cannot hold the step's pipes.
+      - name: the opening — worker, glyph sheet, the kept sheet, scale 2
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          mkdir -p /tmp/shots
+          case "$(uname -m)" in
+            arm64)  WANT=packages/gui/release/mac-arm64 ;;
+            x86_64) WANT=packages/gui/release/mac ;;
+            *)      WANT= ;;
+          esac
+          APP=$(find "$WANT" -maxdepth 2 -name "Herta.app" -type d 2>/dev/null | head -1)
+          if [ -z "$APP" ]; then
+            APP=$(find packages/gui/release -maxdepth 3 -name "Herta.app" -type d | head -1)
+          fi
+          if [ -z "$APP" ]; then echo "::error::no .app to probe"; exit 1; fi
+          BIN="$APP/Contents/MacOS/Herta"
+          FAIL=0
+          node packages/gui/scripts/opening-probe.mjs /tmp/shots first drawn -- "$BIN" || FAIL=1
+          node packages/gui/scripts/opening-probe.mjs /tmp/shots second kept -- "$BIN" || FAIL=1
+          node packages/gui/scripts/opening-probe.mjs /tmp/shots scale2 drawn -- "$BIN" --force-device-scale-factor=2 || FAIL=1
+          pkill -f "Herta.app/Contents/MacOS/Herta" 2>/dev/null || true
+          pkill -f "Herta Helper" 2>/dev/null || true
+          if [ "$FAIL" -ne 0 ]; then echo "::error::the opening probe failed on macOS (see above)"; exit 1; fi
+
       # ── The actual point: look at it ────────────────────────────────────
       # Two captures, because neither alone is enough (learned from run
       # 30915359960):

@@ -46,6 +46,7 @@ function fakeSheet(): { sheet: OpeningSheet; closed: () => number } {
       ink: BASE_LAYER_STYLE.foreground,
       glyphs: OPENING_GLYPHS,
       entries: [],
+      origin: "drawn",
     },
     closed: () => closes,
   };

@@ -3,7 +3,10 @@ import { journeyMarkAfterPaint, journeyMarkAt } from "../../lib/journey.js";
 import { holdLaunch, releaseLaunch } from "../../lib/launch-gate.js";
 import type { SegmentData } from "./ascii-renderer.js";
 import { releaseOpeningGlyphSheet } from "./glyph-sheet.js";
-import { OpeningAsciiCanvas } from "./OpeningAsciiCanvas.js";
+import {
+  OpeningAsciiCanvas,
+  type OpeningFirstFrame,
+} from "./OpeningAsciiCanvas.js";
 import { pickOpeningSegment } from "./pick-opening-segment.js";
 
 /** Fallback dissolve duration (ms), used only until the canvas reports the real
@@ -11,10 +14,15 @@ import { pickOpeningSegment } from "./pick-opening-segment.js";
 const CURTAIN_MS = 700;
 
 /** At the first drawn frame, not at the segment's load: the draw worker says
- *  when it committed that frame; a frame drawn here is marked after paint. */
-const markOpeningPainted = (atEpochMs?: number): void => {
-  if (atEpochMs === undefined) journeyMarkAfterPaint("launch:opening-painted");
-  else journeyMarkAt("launch:opening-painted", atEpochMs);
+ *  when it committed that frame; a frame drawn here is marked after paint.
+ *  The mark's detail says how it was drawn (the CI opening probe reads it). */
+const markOpeningPainted = (frame: OpeningFirstFrame): void => {
+  const detail = { host: frame.host, sheet: frame.sheet };
+  if (frame.atEpochMs === undefined) {
+    journeyMarkAfterPaint("launch:opening-painted", detail);
+  } else {
+    journeyMarkAt("launch:opening-painted", frame.atEpochMs, detail);
+  }
 };
 
 export interface OpeningAsciiProps {
