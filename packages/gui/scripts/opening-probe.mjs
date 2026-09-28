@@ -349,8 +349,11 @@ if (painted !== undefined && revealed !== undefined && ended !== undefined) {
   const to = Math.round(revealed + (ended - revealed) * 0.25);
   // Reported either way; a problem only when frames are judged.
   const flag = (why) => {
-    if (JUDGE_FRAMES) problems.push(why);
-    else (report.unjudged ??= []).push(why);
+    if (JUDGE_FRAMES) {
+      problems.push(why);
+      return;
+    }
+    report.unjudged = [...(report.unjudged ?? []), why];
   };
   if (level < 0.003 || start === undefined) {
     flag(
