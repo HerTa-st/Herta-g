@@ -86,18 +86,23 @@ class Cdp {
   }
 }
 
-/** The page's next screencast frame ({ data, metadata }), or null when none
- *  comes within `ms`. */
-async function firstScreencastFrame(cdp, ms) {
+/** The page's second screencast frame ({ data, metadata }), or null when
+ *  none comes within `ms`. The FIRST can be stale: on Linux at scale 2 it
+ *  was a flat fill without even the window controls, which exist from
+ *  React's first paint (2026-09-28) — the trap opening-flash.mjs met in a
+ *  late-started trace's first screenshot (ADR 0068 §18). */
+async function screencastFrame(cdp, ms) {
   let settle;
   const frame = new Promise((resolve) => {
     settle = resolve;
   });
+  let seen = 0;
   cdp.on("Page.screencastFrame", (p) => {
     cdp
       .send("Page.screencastFrameAck", { sessionId: p.sessionId })
       .catch(() => undefined);
-    settle(p);
+    seen += 1;
+    if (seen >= 2) settle(p);
   });
   const timer = setTimeout(() => settle(null), ms);
   await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85 });
@@ -202,12 +207,13 @@ try {
     // window that gets no frames answers with the first frame it paints,
     // which can be the connect screen after the opening — and the connect
     // button alone passes the ink check (the first Linux run at scale 2,
-    // 2026-09-28). A screencast frame carries its own swap time; a capture's
+    // 2026-09-28). A screencast frame carries its own swap time (the second
+    // one: the first can be stale); a capture's
     // call can take seconds on a large software surface (2.1 s at 2048×1536
     // on Xvfb) with the frame taken at its start. A covered window gets no
     // screencast frames: then a plain capture, bounded by when it returned.
     const origin = await cdp.eval("performance.timeOrigin");
-    const shot = await firstScreencastFrame(cdp, 3000).then(async (frame) => {
+    const shot = await screencastFrame(cdp, 3000).then(async (frame) => {
       if (frame !== null) {
         const swapped = frame.metadata?.timestamp;
         const at =
