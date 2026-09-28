@@ -482,6 +482,43 @@ describe("VoiceSettings", () => {
     expect(queryByText("Unchecked · …0000")).toBeNull();
   });
 
+  // UX review 2026-09-22, item 25: the flag lived in the pane's own state,
+  // so reopening the pane read Connected for a key nobody had checked.
+  it("an unchecked key still reads 'Unchecked' when the pane is opened again", async () => {
+    const first = setup({
+      offlineMiniMax: true,
+      realtimeVoiceResult: {
+        enabled: true,
+        bundle: true,
+        runtime: true,
+        failed: false,
+        engine: "minimax",
+      },
+    });
+    await first.findByText("MiniMax API key");
+    fireEvent.change(first.getByLabelText("MiniMax API key"), {
+      target: { value: "sk-api-wrong-0000" },
+    });
+    fireEvent.click(
+      first.getAllByRole("button", { name: "Save" })[0] as HTMLElement,
+    );
+    expect(await first.findByText("Unchecked · …0000")).toBeTruthy();
+    first.unmount();
+
+    const again = renderWithLocale(
+      <HertaBridgeProvider bridge={first.mock.bridge}>
+        <VoiceSettings />
+      </HertaBridgeProvider>,
+    );
+    expect(again.getByText("Unchecked · …0000")).toBeTruthy();
+    expect(again.queryByText("Connected · …0000")).toBeNull();
+    // The pane's read on mount confirms, and changes nothing.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(again.getByText("Unchecked · …0000")).toBeTruthy();
+  });
+
   // ── the token-plan key (ADR 0062 §1.8) ───────────────────────────────────
 
   it("a plan key alone on an empty account: stored as Connected, and the clone line says cloning needs the pay-as-you-go key", async () => {

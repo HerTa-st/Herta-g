@@ -48,6 +48,12 @@ export interface SettingsSnapshot {
   "voice.minimaxPlanKey": DeepSeekKeyStatus | null;
   "voice.clone": MiniMaxVoiceState | null;
   "voice.refusal": MiniMaxRefusalState | null;
+  /** A MiniMax key saved while the platform could not check it (未核对).
+   *  Only the save's answer says so — main keeps no such flag, so no read
+   *  primes these; the pane's own write is what a remount shows (UX review
+   *  2026-09-22, item 25: it read 已连接 after the pane was reopened). */
+  "voice.minimaxKeyUnverified": boolean;
+  "voice.minimaxPlanKeyUnverified": boolean;
   "dream.enabled": boolean;
   "deepseek.keyStatus": DeepSeekKeyStatus | null;
   "deepseek.models": ModelConfig;

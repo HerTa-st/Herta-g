@@ -33,7 +33,7 @@ export interface SessionItemProps {
 
 export function SessionItem(props: SessionItemProps): JSX.Element {
   const t = useT();
-  const { sessionStore } = useHertaBridge();
+  const { sessionStore, sessionListStore } = useHertaBridge();
   const { bridge } = useHertaBridge();
   // Selector-based: every card re-rendering on every streaming delta (whole-
   // snapshot subscription) also re-ran the sidebar FLIP measure per token.
@@ -457,7 +457,13 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
             text={props.title}
             placeholder={t("session.untitled")}
             animate={animate}
-            onRevealed={() => setMessageOpen(true)}
+            onRevealed={() => {
+              setMessageOpen(true);
+              // Typed in once: a remount shows it as it stands.
+              if (animate) {
+                sessionListStore.settleLiveTitle(props.session.sessionId);
+              }
+            }}
           />
         </span>
         {/* Live pulse: Herta is mid-reply in THIS (active) session — the

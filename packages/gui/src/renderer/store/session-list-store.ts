@@ -98,6 +98,17 @@ export class SessionListStore {
    *  null. Stable reference until the next live title. */
   readonly getLiveTitleSnapshot = (): LiveTitle | null => this.liveTitle;
 
+  /** The live title finished typing in on its card: from now on it is a
+   *  title like any other. Without this the card typed it in again on every
+   *  remount — a search filter, a move into another day group — for the
+   *  rest of the run (UX review 2026-09-22, item 25). A newer live title
+   *  (another session's) is left alone. */
+  settleLiveTitle(sessionId: string): void {
+    if (this.liveTitle?.sessionId !== sessionId) return;
+    this.liveTitle = null;
+    for (const l of this.listeners) l();
+  }
+
   dispose(): void {
     this.disconnect();
     this.listeners.clear();

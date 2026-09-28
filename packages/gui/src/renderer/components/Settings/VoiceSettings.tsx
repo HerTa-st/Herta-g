@@ -349,8 +349,16 @@ export function VoiceSettings(): JSX.Element {
     "voice.refusal",
     null,
   );
-  const [keyUnverified, setKeyUnverified] = useState(false);
-  const [planUnverified, setPlanUnverified] = useState(false);
+  const [keyUnverified, setKeyUnverified] = useRememberedSetting(
+    bridge,
+    "voice.minimaxKeyUnverified",
+    false,
+  );
+  const [planUnverified, setPlanUnverified] = useRememberedSetting(
+    bridge,
+    "voice.minimaxPlanKeyUnverified",
+    false,
+  );
 
   useEffect(() => {
     const read = bridge.getRealtimeVoice;
@@ -408,6 +416,7 @@ export function VoiceSettings(): JSX.Element {
     setMmPlanKey,
     setClone,
     setRefusal,
+    setKeyUnverified,
   ]);
 
   // A downloaded bundle counts the moment its state says ready; the initial

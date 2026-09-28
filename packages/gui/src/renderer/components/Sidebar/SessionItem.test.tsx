@@ -208,6 +208,35 @@ describe("SessionItem badge", () => {
       await screen.findByText("Test session", {}, { timeout: 3000 }),
     ).toBeInTheDocument();
   });
+
+  // UX review 2026-09-22, item 25: the live title was never cleared, so the
+  // card typed it in again on every remount (a search filter, a move into
+  // another day group).
+  it("types a live title in once: a remount after the reveal shows it at once", async () => {
+    const mock = createMockHertaBridge();
+    const card = (key: string): JSX.Element => (
+      <HertaBridgeProvider bridge={mock.bridge}>
+        <SessionItem key={key} session={SESSION} title="排查失踪引用" />
+      </HertaBridgeProvider>
+    );
+    const view = renderWithLocale(card("first"));
+    act(() => {
+      mock.emitTitle({
+        kind: "title",
+        sessionId: SESSION.sessionId,
+        title: "排查失踪引用",
+      });
+    });
+    // The reveal starts with the placeholder fading out, then types.
+    expect(document.querySelector(".title-fade-out")).not.toBeNull();
+    await screen.findByText("排查失踪引用", {}, { timeout: 3000 });
+    expect(document.querySelector(".title-caret")).toBeNull();
+
+    view.rerender(card("second"));
+    expect(document.querySelector(".title-fade-out")).toBeNull();
+    expect(document.querySelector(".title-caret")).toBeNull();
+    expect(screen.getByText("排查失踪引用")).toBeInTheDocument();
+  });
 });
 
 describe("SessionItem delete", () => {

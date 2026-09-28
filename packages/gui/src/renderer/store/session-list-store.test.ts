@@ -176,6 +176,35 @@ describe("SessionListStore", () => {
     store.dispose();
   });
 
+  it("settling the live title ends it for that session only, and keeps the title", async () => {
+    const mock = createMockHertaBridge({
+      listSessionsResult: [meta("a"), meta("b")],
+    });
+    const store = new SessionListStore();
+    store.connect(mock.bridge);
+    await Promise.resolve();
+    await Promise.resolve();
+    let notified = 0;
+    store.subscribe(() => {
+      notified += 1;
+    });
+
+    mock.emitTitle({ kind: "title", sessionId: "b", title: "排查失踪引用" });
+    notified = 0;
+    // Another card cannot settle b's title.
+    store.settleLiveTitle("a");
+    expect(store.getLiveTitleSnapshot()?.sessionId).toBe("b");
+    expect(notified).toBe(0);
+
+    store.settleLiveTitle("b");
+    expect(store.getLiveTitleSnapshot()).toBeNull();
+    expect(notified).toBe(1);
+    expect(store.getSnapshot().find((s) => s.sessionId === "b")?.title).toBe(
+      "排查失踪引用",
+    );
+    store.dispose();
+  });
+
   it("drops the matching card when a session is deleted", async () => {
     const mock = createMockHertaBridge({
       listSessionsResult: [meta("a"), meta("b")],
