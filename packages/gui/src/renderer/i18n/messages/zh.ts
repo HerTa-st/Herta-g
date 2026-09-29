@@ -330,6 +330,8 @@ export const zh = {
   "composer.hold.discard": "撤回",
   // 继续 (ADR 0071 §1.4): 板砖's last run was interrupted — the app exited
   // under it, or the user pressed Stop — and can be continued where it stood.
+  // @-file mentions (ADR 0072 §2): the matching workspace files.
+  "composer.mentions.aria": "工作区文件",
   "composer.resume.text": "板砖的上一次运行已中断。",
   "composer.resume.action": "继续",
   "composer.resume.aria": "继续被中断的运行",

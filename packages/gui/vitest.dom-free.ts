@@ -49,6 +49,7 @@ export const DOM_FREE_TESTS = [
   "src/main/update-service.test.ts",
   "src/main/voice-path.test.ts",
   "src/main/win-path.test.ts",
+  "src/main/workspace-files.test.ts",
   // Shared between main and renderer — pure functions.
   "src/shared/agent-event-wire.test.ts",
   "src/shared/dead-transcoder.test.ts",
@@ -89,6 +90,7 @@ export const DOM_FREE_TESTS = [
   "src/renderer/ipc/bridge-types.test.ts",
   "src/renderer/ipc/mock-bridge.test.ts",
   "src/renderer/lib/banzhuan-mention.test.ts",
+  "src/renderer/lib/file-mention.test.ts",
   "src/renderer/lib/incremental-strip.test.ts",
   // NOT now-tick.test.ts: the test's own text mentions no DOM, but the module
   // it exercises calls `window.setInterval`. Need comes from the import

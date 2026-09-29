@@ -2931,6 +2931,78 @@ button.agent-preview {
 .composer-notice.is-exiting {
   animation: notice-out 240ms var(--ease-accel) both;
 }
+/* @-file mentions (ADR 0072 §2): the workspace's matching files, floating
+   above the composer like the rewind notice — absolute, so the input row
+   never reflows. Dressed as the app's other menu (the Settings select): a
+   solid card that reads over the conversation in either theme. */
+.composer-mentions {
+  position: absolute;
+  left: 12px;
+  bottom: 100%;
+  width: min(520px, calc(100% - 24px));
+  max-height: 296px;
+  overflow-y: auto;
+  margin: 0 0 10px;
+  padding: 5px;
+  border: 1px solid var(--ink-a10);
+  border-radius: 12px;
+  background: var(--card-solid);
+  box-shadow: 0 10px 28px var(--shadow-pop);
+  backdrop-filter: blur(12px) saturate(130%);
+  z-index: 7;
+  animation: mentions-in 160ms var(--ease-pop) both;
+}
+.composer-mentions__item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.composer-mentions__item.is-active {
+  background: var(--ink-a06);
+}
+.composer-mentions__name {
+  flex: none;
+  font-weight: 600;
+}
+/* The folder, muted, ellipsized at its START so the part nearest the file
+   stays readable. */
+.composer-mentions__dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  color: var(--muted-slate);
+  font-size: 12px;
+}
+@keyframes mentions-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-mentions {
+    animation: none;
+  }
+}
 @keyframes notice-in {
   from {
     opacity: 0;

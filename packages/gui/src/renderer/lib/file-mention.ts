@@ -1,0 +1,97 @@
+/**
+ * @-file mentions in the composer (ADR 0072 §2): which `@query` the caret
+ * sits in, whether `@板砖` completion still owns it, and which workspace
+ * paths match. Pure, so the matching unit-tests without a DOM.
+ */
+
+/** The `@query` the caret sits in: the `@` must start the text or follow
+ *  whitespace, and the query runs from it to the caret with no whitespace
+ *  and no second `@`. Null when the caret is not in one. */
+export function findMentionQuery(
+  value: string,
+  caret: number | null,
+): { readonly start: number; readonly query: string } | null {
+  if (caret === null || caret < 1 || caret > value.length) return null;
+  let i = caret - 1;
+  while (i >= 0) {
+    const ch = value[i] as string;
+    if (ch === "@") break;
+    if (/\s/.test(ch)) return null;
+    i -= 1;
+  }
+  if (i < 0) return null;
+  if (i > 0 && !/\s/.test(value[i - 1] ?? "")) return null;
+  return { start: i, query: value.slice(i + 1, caret) };
+}
+
+/** Whether the query can still become the `@板砖` delegation token — its
+ *  completion (the inline ghost) keeps precedence until it cannot. */
+export function brickAhead(query: string, lang: "zh" | "en"): boolean {
+  if (query.length === 0) return true;
+  if ("板砖".startsWith(query)) return true;
+  return lang === "en" && "brick".startsWith(query.toLowerCase());
+}
+
+/** How many matches the list shows. */
+export const MENTION_LIMIT = 8;
+
+/**
+ * The workspace paths that match `query`, best first. Case-insensitive; a
+ * `\` in the query reads as `/`. The file name starting with the query ranks
+ * first, then the file name containing it, then the path containing it, then
+ * the query's characters in order in the FILE NAME — or, for a query that
+ * names a folder (it holds a `/`), in the whole path. In order across the
+ * whole path for any query was noise: `errors.ts` in `packages/core/src`
+ * matched "parser" (live check 2026-09-29). Shorter paths win a tie, then
+ * the alphabet.
+ */
+export function rankPaths(
+  paths: readonly string[],
+  query: string,
+  limit = MENTION_LIMIT,
+): string[] {
+  const q = query.toLowerCase().replace(/\\/g, "/");
+  if (q.length === 0) return [];
+  const namesFolder = q.includes("/");
+  const scored: Array<{ path: string; rank: number }> = [];
+  for (const path of paths) {
+    const p = path.toLowerCase();
+    const base = p.slice(p.lastIndexOf("/") + 1);
+    let rank: number;
+    if (base.startsWith(q)) rank = 0;
+    else if (base.includes(q)) rank = 1;
+    else if (p.includes(q)) rank = 2;
+    else if (inOrder(namesFolder ? p : base, q)) rank = 3;
+    else continue;
+    scored.push({ path, rank });
+  }
+  scored.sort(
+    (a, b) =>
+      a.rank - b.rank ||
+      a.path.length - b.path.length ||
+      a.path.localeCompare(b.path),
+  );
+  return scored.slice(0, limit).map((s) => s.path);
+}
+
+function inOrder(text: string, q: string): boolean {
+  let j = 0;
+  for (let i = 0; i < text.length && j < q.length; i += 1) {
+    if (text[i] === q[j]) j += 1;
+  }
+  return j === q.length;
+}
+
+/** The text with `@query` (from `start` to the caret) replaced by the path
+ *  and one space, and where the caret goes. */
+export function insertMention(
+  value: string,
+  start: number,
+  caret: number,
+  path: string,
+): { readonly text: string; readonly caret: number } {
+  const after = value.slice(caret);
+  const sep = after.startsWith(" ") ? "" : " ";
+  const text = `${value.slice(0, start)}${path}${sep}${after}`;
+  return { text, caret: start + path.length + 1 };
+}

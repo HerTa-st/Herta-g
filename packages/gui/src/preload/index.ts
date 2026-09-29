@@ -61,6 +61,8 @@ const bridge: HertaBridge = {
     ipcRenderer.invoke(CMD.unstageImage, sessionId, id),
   readWorkspaceFile: (sessionId, path) =>
     ipcRenderer.invoke(CMD.readWorkspaceFile, sessionId, path),
+  listWorkspaceFiles: (sessionId) =>
+    ipcRenderer.invoke(CMD.listWorkspaceFiles, sessionId),
   readWorkspaceBytes: (sessionId, path) =>
     ipcRenderer.invoke(CMD.readWorkspaceBytes, sessionId, path),
   readWorkspaceCommit: (sessionId, ref) =>

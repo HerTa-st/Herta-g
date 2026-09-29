@@ -1619,3 +1619,117 @@ describe("Composer — attachments (ADR 0033)", () => {
     );
   });
 });
+
+describe("Composer — @-file mentions (ADR 0072 §2)", () => {
+  const FILES = ["README.md", "src/parser.ts", "docs/parsers.md", "build.ts"];
+
+  function mentionComposer(
+    lang: "zh" | "en" = "zh",
+    opts: { readonly listing?: boolean } = {},
+  ) {
+    const mock = createMockHertaBridge(
+      opts.listing === false ? {} : { workspaceFiles: FILES },
+    );
+    const r = renderComposer(mock);
+    act(() =>
+      mock.emitReset({
+        sessionId: "s-m",
+        workspaceRoot: "/r",
+        record: [],
+        overlay: null,
+        backendWorkspace: "/r",
+        backendWorkspaceIsDefault: true,
+        lang,
+      }),
+    );
+    const input = screen.getByPlaceholderText(
+      "Message Herta…",
+    ) as HTMLTextAreaElement;
+    const type = (value: string) =>
+      fireEvent.change(input, {
+        target: { value, selectionStart: value.length },
+      });
+    const options = () =>
+      [...document.querySelectorAll(".composer-mentions__item")].map(
+        (li) => li.textContent,
+      );
+    return { ...r, mock, input, type, options };
+  }
+
+  it("lists the matching workspace files and inserts the plain path, replacing @query", async () => {
+    const { input, type, options, mock } = mentionComposer();
+    type("看看 @pars");
+    await waitFor(() =>
+      expect(options()).toEqual(["parser.tssrc", "parsers.mddocs"]),
+    );
+    expect(mock.calls.listWorkspaceFiles).toBe(1);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("看看 docs/parsers.md ");
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    // Enter picked; it did not send.
+    expect(mock.calls.submitText).toHaveLength(0);
+  });
+
+  it("the highlight survives the selection React re-reports after a key (live check 2026-09-29)", async () => {
+    const { input, type, options } = mentionComposer();
+    type("看看 @pars");
+    await waitFor(() => expect(options()).toHaveLength(2));
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    // What a real key-up does: the selection is re-reported, unchanged.
+    fireEvent.select(input);
+    expect(
+      document.querySelector(".composer-mentions__item.is-active")?.textContent,
+    ).toBe("parsers.mddocs");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("看看 docs/parsers.md ");
+  });
+
+  it("Tab inserts too, and the list is fetched once while typing", async () => {
+    const { input, type, options, mock } = mentionComposer();
+    type("@p");
+    await waitFor(() => expect(options().length).toBeGreaterThan(0));
+    type("@pa");
+    type("@par");
+    await waitFor(() => expect(options()[0]).toBe("parser.tssrc"));
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input.value).toBe("src/parser.ts ");
+    expect(mock.calls.listWorkspaceFiles).toBe(1);
+  });
+
+  it("Esc dismisses the list for that mention; Enter then sends as usual", async () => {
+    const { input, type, options, mock } = mentionComposer();
+    type("fix @pars");
+    await waitFor(() => expect(options().length).toBe(2));
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    type("fix @parse");
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mock.calls.submitText).toEqual(["fix @parse"]);
+  });
+
+  it("leaves @板砖 / @brick completion alone while the query can still become it", async () => {
+    const zh = mentionComposer("zh");
+    zh.type("@板");
+    await Promise.resolve();
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    zh.unmount();
+
+    const en = mentionComposer("en");
+    en.type("@b");
+    await Promise.resolve();
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    // "bu" can no longer be @brick: files now.
+    en.type("@bu");
+    await waitFor(() => expect(en.options()).toEqual(["build.ts"]));
+  });
+
+  it("without a file listing on the bridge, @ completes only @板砖", async () => {
+    const { type, mock } = mentionComposer("zh", { listing: false });
+    type("@src");
+    await Promise.resolve();
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    expect(mock.calls.listWorkspaceFiles).toBe(0);
+  });
+});

@@ -283,6 +283,13 @@ export type Locale = "zh" | "en";
  *  into new sessions. */
 export type InteractionLanguageChoice = "zh" | "en" | "follow";
 
+/** The composer's @-mention list (ADR 0072 §2): workspace-relative paths
+ *  with `/`, and whether a cap cut the list short. */
+export interface WorkspaceFileList {
+  readonly files: readonly string[];
+  readonly truncated: boolean;
+}
+
 /** Settings → Window's attention rows (ADR 0072 §1). */
 export interface AttentionSettings {
   /** OS notifications while the window is not attended. */
@@ -622,6 +629,10 @@ export interface HertaBridge {
     sessionId: string,
     path: string,
   ): Promise<ReadWorkspaceFileReply>;
+  /** The composer's @-mention list (ADR 0072 §2): the files of the session's
+   *  effective workspace, bounded; null when the session is not the active
+   *  one. OPTIONAL — without it `@` completes only `@板砖`. */
+  listWorkspaceFiles?(sessionId: string): Promise<WorkspaceFileList | null>;
   /** The rich kinds' read (ADR 0054 §2): bytes for pictures, PDFs and
    *  Office files, same jail, 64 MB ceiling. Optional like its sibling. */
   readWorkspaceBytes?(

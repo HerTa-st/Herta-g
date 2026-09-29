@@ -1,0 +1,85 @@
+import { describe, expect, it } from "vitest";
+import {
+  brickAhead,
+  findMentionQuery,
+  insertMention,
+  rankPaths,
+} from "./file-mention.js";
+
+describe("@-file mentions (ADR 0072 §2)", () => {
+  it("finds the @query the caret sits in — anywhere in the text, only after a boundary", () => {
+    expect(findMentionQuery("看看 @src/pa", 10)).toEqual({
+      start: 3,
+      query: "src/pa",
+    });
+    // Mid-text: the query runs to the caret, not past it.
+    expect(findMentionQuery("@src/parser.ts 改一下", 4)).toEqual({
+      start: 0,
+      query: "src",
+    });
+    expect(findMentionQuery("@", 1)).toEqual({ start: 0, query: "" });
+    // An e-mail address is not a mention; neither is text after a space.
+    expect(findMentionQuery("me@host", 7)).toBeNull();
+    expect(findMentionQuery("@src parser", 11)).toBeNull();
+    expect(findMentionQuery("abc", 3)).toBeNull();
+    expect(findMentionQuery("", 0)).toBeNull();
+  });
+
+  it("leaves the query to @板砖 completion while it can still become the token", () => {
+    expect(brickAhead("", "zh")).toBe(true);
+    expect(brickAhead("板", "zh")).toBe(true);
+    expect(brickAhead("板砖", "zh")).toBe(true);
+    expect(brickAhead("src", "zh")).toBe(false);
+    // EN: "b", "br", "Bri" may still become @brick; "bu" cannot.
+    expect(brickAhead("Bri", "en")).toBe(true);
+    expect(brickAhead("bu", "en")).toBe(false);
+    // A zh session has no "brick" token.
+    expect(brickAhead("b", "zh")).toBe(false);
+  });
+
+  it("ranks the file name first, then the path, then an in-order match; shorter wins a tie", () => {
+    const paths = [
+      "packages/core/src/parser/tokens.ts",
+      "src/parser.ts",
+      "docs/parsers.md",
+      "test/parser.test.ts",
+      "src/pa-r-ser-x.ts",
+      "README.md",
+    ];
+    expect(rankPaths(paths, "parser")).toEqual([
+      "src/parser.ts",
+      "docs/parsers.md",
+      "test/parser.test.ts",
+      "packages/core/src/parser/tokens.ts",
+      "src/pa-r-ser-x.ts",
+    ]);
+    expect(rankPaths(paths, "SRC\\PARSER")).toEqual([
+      "src/parser.ts",
+      "packages/core/src/parser/tokens.ts",
+      "src/pa-r-ser-x.ts",
+    ]);
+    expect(rankPaths(paths, "")).toEqual([]);
+    // In order across a FOLDER's letters is noise for a bare file query
+    // (live check 2026-09-29): p-a-r-s-e-r is spread over this path.
+    expect(rankPaths(["packages/core/src/errors.ts"], "parser")).toEqual([]);
+    expect(rankPaths(paths, "zzz")).toEqual([]);
+    expect(
+      rankPaths(
+        Array.from({ length: 20 }, (_, i) => `f${i}.ts`),
+        "f",
+      ),
+    ).toHaveLength(8);
+  });
+
+  it("replaces @query with the plain path and one space, and puts the caret after it", () => {
+    expect(insertMention("看看 @src/pa", 3, 10, "src/parser.ts")).toEqual({
+      text: "看看 src/parser.ts ",
+      caret: 17,
+    });
+    // Mid-text, before an existing space: no second space.
+    expect(insertMention("@src 改一下", 0, 4, "src/parser.ts")).toEqual({
+      text: "src/parser.ts 改一下",
+      caret: 14,
+    });
+  });
+});

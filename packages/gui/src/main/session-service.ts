@@ -116,6 +116,7 @@ import {
   type VoiceModelService,
 } from "./tts/voice-model.js";
 import { resolveVoiceRoot } from "./voice-path.js";
+import { listWorkspaceFiles } from "./workspace-files.js";
 
 type Send = (channel: string, payload: unknown) => void;
 
@@ -987,6 +988,13 @@ export function createSessionService(
         return readWorkspaceFileBounded(s.backendWorkspace, path);
       },
     );
+    // The composer's @-mention list (ADR 0072 §2): the files of the same
+    // workspace, listed asynchronously and bounded (workspace-files.ts).
+    handle(CMD.listWorkspaceFiles, async (_e, sessionId: string) => {
+      const s = host?.activeSession ?? null;
+      if (s === null || s.sessionId !== sessionId) return null;
+      return listWorkspaceFiles(s.backendWorkspace);
+    });
     // The rich kinds' read (ADR 0054 §2): the whole file as bytes for the
     // renderers that parse it themselves — same jail, 64 MB ceiling.
     handle(

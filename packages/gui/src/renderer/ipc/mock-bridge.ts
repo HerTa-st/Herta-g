@@ -114,6 +114,10 @@ export interface MockHertaBridgeOpts {
   readonly attentionResult?: AttentionSettings;
   /** When true, setAttention rejects (simulates a failed settings write). */
   readonly failSetAttention?: boolean;
+  /** The workspace's files for the composer's @-mention list (ADR 0072
+   *  §2). UNDEFINED (the default) omits the surface — `@` completes only
+   *  `@板砖`, like the website demo. */
+  readonly workspaceFiles?: readonly string[];
   /** Seed for getTheme (Settings → Window appearance). Default "light". */
   readonly themeResult?: ThemePref;
   /** Seed for getDeviceScene (Settings → 差分协处理器 → 3D device, ADR
@@ -229,6 +233,7 @@ export interface MockHertaBridge {
     getCloseToTray: number;
     setCloseToTray: boolean[];
     setAttention: Partial<AttentionSettings>[];
+    listWorkspaceFiles: number;
     setTheme: ThemePref[];
     setDeviceScene: boolean[];
     getInteractionLanguage: number;
@@ -342,6 +347,7 @@ export function createMockHertaBridge(
     getCloseToTray: 0,
     setCloseToTray: [],
     setAttention: [],
+    listWorkspaceFiles: 0,
     setTheme: [],
     setDeviceScene: [],
     getInteractionLanguage: 0,
@@ -772,6 +778,17 @@ export function createMockHertaBridge(
     setTheme: async (theme) => {
       calls.setTheme.push(theme);
     },
+    ...(opts.workspaceFiles !== undefined
+      ? {
+          listWorkspaceFiles: async () => {
+            calls.listWorkspaceFiles += 1;
+            return {
+              files: [...(opts.workspaceFiles as readonly string[])],
+              truncated: false,
+            };
+          },
+        }
+      : {}),
     ...(opts.attentionResult !== undefined
       ? {
           getAttention: async () => {

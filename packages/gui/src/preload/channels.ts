@@ -31,6 +31,7 @@ export const CMD = {
   stageImages: "session:stageImages",
   unstageImage: "session:unstageImage",
   readWorkspaceFile: "session:readWorkspaceFile",
+  listWorkspaceFiles: "session:listWorkspaceFiles",
   readWorkspaceBytes: "session:readWorkspaceBytes",
   readWorkspaceCommit: "session:readWorkspaceCommit",
   readWorkspaceDiff: "session:readWorkspaceDiff",

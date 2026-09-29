@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { attachmentImageUrl } from "../../../shared/attachment-image.js";
 import { useHertaBridge } from "../../context/HertaBridgeContext.js";
 import { useSessionLang } from "../../hooks/useActiveSession.js";
@@ -9,6 +9,12 @@ import {
 import { useT } from "../../i18n/LocaleProvider.js";
 import { aliasBrickInput } from "../../lib/banzhuan-mention.js";
 import { renderBanzhuanText } from "../../lib/banzhuan-text.js";
+import {
+  brickAhead,
+  findMentionQuery,
+  insertMention,
+  rankPaths,
+} from "../../lib/file-mention.js";
 import { submitMessage } from "../../lib/submit-message.js";
 import { stopAllVoice } from "../../voice/play-voice.js";
 import { Tooltip } from "../Tooltip/Tooltip.js";
@@ -58,6 +64,10 @@ function caretIsFree(form: HTMLElement | null): boolean {
 /** How long the rewind notice's slide-out runs before it unmounts. Must match
  *  the `.composer-notice.is-exiting` animation duration in reference-ux.css. */
 const NOTICE_EXIT_MS = 240;
+
+/** How long the workspace's file list is reused before `@` lists it again
+ *  (ADR 0072 §2) — a file 板砖 just created shows up on the next mention. */
+const MENTION_FILES_TTL_MS = 10_000;
 
 /** Filename extension for a pasted image whose File carries no name. The
  *  MIME subtype is the only thing the clipboard tells us. */
@@ -136,6 +146,24 @@ export function Composer(): JSX.Element {
   // After a Tab insertion we must restore the caret AFTER the inserted 板砖,
   // applied post-render via this ref (React owns the controlled value).
   const pendingCaret = useRef<number | null>(null);
+  // @-file mentions (ADR 0072 §2): the `@query` the caret is in, the
+  // workspace's files (listed by main, kept briefly per session), the
+  // highlighted match, and the `@` whose list the user dismissed with Esc
+  // (it stays dismissed while the caret stays in that mention).
+  const [mention, setMention] = useState<{
+    readonly start: number;
+    readonly query: string;
+  } | null>(null);
+  const [mentionFiles, setMentionFiles] = useState<readonly string[] | null>(
+    null,
+  );
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionKey = useRef("");
+  const mentionDismissed = useRef(-1);
+  const mentionCache = useRef<{
+    readonly sessionId: string;
+    readonly at: number;
+  } | null>(null);
   const busy = status !== "idle";
   const suppressed = overlay?.kind === "pending-permission";
   // A message while 板砖 works (ADR 0063). The hold exists ONLY while the
@@ -397,7 +425,73 @@ export function Composer(): JSX.Element {
     setText("");
     setHintActive(false);
     escDismissed.current = -1;
+    setMention(null);
+    setMentionFiles(null);
+    mentionCache.current = null;
+    mentionDismissed.current = -1;
   }, [sessionId]);
+
+  // The mention list for the caret's `@query`: only where the bridge can
+  // list files, only past what could still become `@板砖` (its ghost keeps
+  // precedence), and not for a mention the user dismissed. The files are
+  // fetched once and kept for a few seconds, so typing does not re-list.
+  const updateMention = (value: string, caret: number | null): void => {
+    const mq = findMentionQuery(value, caret);
+    if (mq === null) mentionDismissed.current = -1;
+    if (
+      mq === null ||
+      mq.start === mentionDismissed.current ||
+      brickAhead(mq.query, lang) ||
+      bridge.listWorkspaceFiles === undefined ||
+      sessionId === null
+    ) {
+      mentionKey.current = "";
+      setMention(null);
+      return;
+    }
+    // The highlight resets only when the mention itself changes: React
+    // re-reports the selection on key-up, and resetting there undid every
+    // ArrowDown (live check 2026-09-29).
+    const key = `${mq.start}:${mq.query}`;
+    if (key !== mentionKey.current) {
+      mentionKey.current = key;
+      setMentionIndex(0);
+    }
+    setMention(mq);
+    const cached = mentionCache.current;
+    if (
+      cached === null ||
+      cached.sessionId !== sessionId ||
+      Date.now() - cached.at > MENTION_FILES_TTL_MS
+    ) {
+      mentionCache.current = { sessionId, at: Date.now() };
+      const asked = sessionId;
+      void bridge.listWorkspaceFiles(asked).then(
+        (r) => {
+          if (mentionCache.current?.sessionId !== asked) return;
+          setMentionFiles(r?.files ?? []);
+        },
+        () => setMentionFiles([]),
+      );
+    }
+  };
+  const mentionMatches = useMemo(
+    () =>
+      mention !== null && mentionFiles !== null
+        ? rankPaths(mentionFiles, mention.query)
+        : [],
+    [mention, mentionFiles],
+  );
+  const mentionOpen = mention !== null && mentionMatches.length > 0;
+  const pickMention = (path: string): void => {
+    if (mention === null) return;
+    const caret = taRef.current?.selectionStart ?? text.length;
+    const next = insertMention(text, mention.start, caret, path);
+    pendingCaret.current = next.caret;
+    setText(next.text);
+    setMention(null);
+    taRef.current?.focus({ preventScroll: true });
+  };
 
   useEffect(() => {
     if (pendingCaret.current !== null && taRef.current) {
@@ -837,6 +931,43 @@ export function Composer(): JSX.Element {
             ))}
           </ul>
         )}
+        {mentionOpen && (
+          <div
+            className="composer-mentions"
+            role="listbox"
+            aria-label={t("composer.mentions.aria")}
+          >
+            {mentionMatches.map((path, i) => {
+              const cut = path.lastIndexOf("/");
+              const name = path.slice(cut + 1);
+              const dir = cut >= 0 ? path.slice(0, cut) : "";
+              const active = i === mentionIndex % mentionMatches.length;
+              return (
+                <button
+                  key={path}
+                  type="button"
+                  role="option"
+                  // The caret stays in the textarea; the keys it takes move
+                  // the highlight, so an option is never tabbed to.
+                  tabIndex={-1}
+                  aria-selected={active}
+                  className={`composer-mentions__item${active ? " is-active" : ""}`}
+                  // mousedown, not click: the textarea keeps the caret.
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pickMention(path);
+                  }}
+                  onMouseEnter={() => setMentionIndex(i)}
+                >
+                  <span className="composer-mentions__name">{name}</span>
+                  {dir.length > 0 && (
+                    <span className="composer-mentions__dir">{dir}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="composer-input-wrap">
           <div className="composer-highlight" aria-hidden="true">
             {renderBanzhuanText(text, "composer", lang)}
@@ -863,17 +994,48 @@ export function Composer(): JSX.Element {
               setHintActive(
                 shouldHint(e.target.value, e.target.selectionStart, -1),
               );
+              updateMention(e.target.value, e.target.selectionStart);
             }}
-            onSelect={(e) =>
+            onSelect={(e) => {
               setHintActive(
                 shouldHint(
                   e.currentTarget.value,
                   e.currentTarget.selectionStart,
                   escDismissed.current,
                 ),
-              )
-            }
+              );
+              updateMention(
+                e.currentTarget.value,
+                e.currentTarget.selectionStart,
+              );
+            }}
+            onBlur={() => setMention(null)}
             onKeyDown={(e) => {
+              // The @-mention list, while it is open (ADR 0072 §2): arrows
+              // move, Enter or Tab inserts the path, Esc dismisses it.
+              if (mentionOpen && mention !== null) {
+                const n = mentionMatches.length;
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMentionIndex(
+                    (i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n,
+                  );
+                  return;
+                }
+                if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                  e.preventDefault();
+                  const pick = mentionMatches[mentionIndex % n];
+                  if (pick !== undefined) pickMention(pick);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  mentionDismissed.current = mention.start;
+                  setMention(null);
+                  return;
+                }
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 // IME safety (Chinese input): Enter during composition confirms
                 // the candidate, it does NOT send. isComposing covers the spec
