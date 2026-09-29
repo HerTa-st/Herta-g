@@ -27,10 +27,12 @@ const SESSION: SessionMetadata = {
 function Harness(): JSX.Element {
   const list = useSessionList();
   const header = useSessionSelector((s) => s.title);
+  const topics = useSessionSelector((s) => s.topics);
   const s = list.find((x) => x.sessionId === SESSION.sessionId);
   return (
     <>
       <span data-testid="header">{header ?? ""}</span>
+      <span data-testid="topics">{topics.map((t) => t.title).join("|")}</span>
       {s !== undefined && (
         <SessionItem session={s} title={sessionDisplayTitle(s)} />
       )}
@@ -231,6 +233,24 @@ describe("rename in place (ADR 0072 §3)", () => {
     await waitFor(() =>
       expect(card().querySelector(".session-item__title")?.textContent).toBe(
         "主进程的版本",
+      ),
+    );
+  });
+
+  it("the open session's topic rail takes the topics main answers — the current one renamed (owner 2026-09-30)", async () => {
+    const topics = [
+      { title: "第一个话题", anchorIndex: 0, anchorText: "hi", at: "t1" },
+      { title: "新名字", anchorIndex: 4, anchorText: "later", at: "t2" },
+    ];
+    await setup({
+      sessionActions: { renameResult: { ok: true, title: "新名字", topics } },
+    });
+    fireEvent.keyDown(card(), { key: "F2" });
+    fireEvent.change(field(), { target: { value: "新名字" } });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByTestId("topics").textContent).toBe(
+        "第一个话题|新名字",
       ),
     );
   });

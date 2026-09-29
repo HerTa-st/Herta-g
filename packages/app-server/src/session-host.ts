@@ -14,7 +14,6 @@ import {
   listSessionHeaders as readSessionHeaders,
   listSessions as readSessionListings,
   readSessionTitle,
-  readSessionTitleUserSet,
   readSessionTopics,
   resolveEffectiveWorkspace,
   type TerminalRecord,
@@ -48,12 +47,14 @@ import {
   searchSessionTranscripts,
 } from "./session-search.js";
 import { cleanUserTitle } from "./session-titler.js";
+import { renameCurrentTopic } from "./session-topics.js";
 import { cachedRecapBoundary } from "./session-wiring.js";
 import type {
   AppServerConfig,
   CreateSessionOpts,
   ListSessionsOpts,
   OpenSessionOpts,
+  RenameSessionResult,
   Session,
   SessionExportSource,
   SessionHost,
@@ -636,17 +637,18 @@ class SessionHostImpl implements SessionHost {
   }
 
   /**
-   * Name a session by hand (ADR 0072 §3). Serialized with the lifecycle ops:
-   * a session opening concurrently reads the sidecar as it loads, and a
-   * rename written in between would be overwritten by its titler's next
-   * write. The open session is renamed through its titler (which fences out
-   * a generation in flight); any other gets its sidecar rewritten with its
-   * topics kept.
+   * Name a session by hand (ADR 0072 §3): the current topic takes the name.
+   * Serialized with the lifecycle ops: a session opening concurrently reads
+   * the sidecar as it loads, and a rename written in between would be
+   * overwritten by its titler's next write. The open session is renamed
+   * through its titler (which fences out a generation in flight) and answers
+   * its topics; any other gets its sidecar rewritten, the last topic renamed
+   * (with none, its reopen synthesizes the first from the name).
    */
   renameSession(
     sessionId: string,
     title: string,
-  ): Promise<{ ok: true; title: string } | { ok: false }> {
+  ): Promise<RenameSessionResult> {
     return this.serializeLifecycle(async () => {
       const clean = cleanUserTitle(title);
       if (clean === null) return { ok: false } as const;
@@ -654,18 +656,18 @@ class SessionHostImpl implements SessionHost {
         const active = this._active;
         if (active !== null && active.sessionId === sessionId) {
           if (active.renameTitle === undefined) return { ok: false } as const;
-          active.renameTitle(clean);
-          return { ok: true, title: clean } as const;
+          const topics = active.renameTitle(clean);
+          return { ok: true, title: clean, topics } as const;
         }
         // Never a sidecar for a session that does not exist.
         await access(join(this.config.transcriptDir, `${sessionId}.jsonl`));
-        writeSessionTitle(
-          this.config.transcriptDir,
-          sessionId,
-          clean,
-          readSessionTopics(this.config.transcriptDir, sessionId),
-          { userSet: true },
-        );
+        writeSessionTitle(this.config.transcriptDir, sessionId, clean, [
+          ...renameCurrentTopic(
+            readSessionTopics(this.config.transcriptDir, sessionId),
+            clean,
+            [],
+          ),
+        ]);
         return { ok: true, title: clean } as const;
       } catch (err) {
         console.warn(`[herta] renaming session ${sessionId} failed:`, err);
@@ -693,12 +695,10 @@ class SessionHostImpl implements SessionHost {
       const title = readSessionTitle(this.config.transcriptDir, sessionId);
       return {
         sessionId,
-        // What the sidebar shows: a generated title whose every user turn was
-        // rewound away is not the session's (loadSessionTitleState).
+        // What the window shows: a title whose every user turn was rewound
+        // away is not the session's (loadSessionTitleState).
         title:
-          title !== undefined &&
-          (record.some((b) => b.kind === "user") ||
-            readSessionTitleUserSet(this.config.transcriptDir, sessionId))
+          title !== undefined && record.some((b) => b.kind === "user")
             ? title
             : null,
         lang: meta.lang ?? "zh",

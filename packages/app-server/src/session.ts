@@ -736,8 +736,8 @@ export class SessionImpl implements Session {
     return this.titler.topics;
   }
 
-  renameTitle(title: string): void {
-    this.titler.setUserTitle(title);
+  renameTitle(title: string): readonly SessionTopic[] {
+    return this.titler.renameCurrentTopic(title);
   }
 
   get turnInFlight(): boolean {
@@ -2088,7 +2088,6 @@ export class SessionImpl implements Session {
         emit: (event) => projector.emitTitle(event),
         initialTitle: existing.title,
         initialTopics: existing.topics,
-        initialUserSet: existing.userSet,
       }),
       // D3: the deferred opening seed (new sessions with an opening). null for
       // resumed sessions (seedBlock is only set when initialRecord is empty) and

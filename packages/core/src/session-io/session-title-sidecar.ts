@@ -48,10 +48,6 @@ interface TitleSidecar {
   readonly title: string;
   readonly generatedAt: string;
   readonly topics?: readonly SessionTopic[];
-  /** The user named the session by hand (ADR 0072 §3): the automatic
-   *  retitle leaves the title alone, and a rewind to an empty record keeps
-   *  it. Absent on every generated title. */
-  readonly userSet?: true;
 }
 
 function sidecarPath(transcriptDir: string, sessionId: string): string {
@@ -63,7 +59,6 @@ export function writeSessionTitle(
   sessionId: string,
   title: string,
   topics?: readonly SessionTopic[],
-  opts?: { readonly userSet?: boolean },
 ): void {
   mkdirSync(transcriptDir, { recursive: true });
   const payload: TitleSidecar = {
@@ -71,7 +66,6 @@ export function writeSessionTitle(
     title,
     generatedAt: new Date().toISOString(),
     ...(topics !== undefined && topics.length > 0 ? { topics } : {}),
-    ...(opts?.userSet === true ? { userSet: true as const } : {}),
   };
   // Atomic (audit BL7). A torn write here is not recoverable by
   // regeneration: `synthesizeInitialTopic` can only ever make ONE entry, so a
@@ -112,21 +106,6 @@ export function readSessionTitle(
     return parsed.title;
   }
   return undefined;
-}
-
-/** Whether the persisted title was set by the user (ADR 0072 §3). False
- *  when absent, malformed, or generated. */
-export function readSessionTitleUserSet(
-  transcriptDir: string,
-  sessionId: string,
-): boolean {
-  const parsed = readSidecar(transcriptDir, sessionId);
-  return (
-    parsed !== null &&
-    parsed.version === 1 &&
-    typeof parsed.title === "string" &&
-    parsed.userSet === true
-  );
 }
 
 /** The persisted topic history, [] when absent/malformed. Entries are

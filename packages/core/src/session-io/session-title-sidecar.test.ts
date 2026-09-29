@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   readSessionTitle,
-  readSessionTitleUserSet,
   readSessionTopics,
   type SessionTopic,
   writeSessionTitle,
@@ -47,20 +46,6 @@ describe("session title sidecar", () => {
     writeSessionTitle(dir, "old", "旧标题"); // no topics arg
     expect(readSessionTopics(dir, "old")).toEqual([]);
     expect(readSessionTopics(tmp(), "absent")).toEqual([]);
-  });
-
-  it("carries the user's-own flag, and a generated write drops it (ADR 0072 §3)", () => {
-    const dir = tmp();
-    const topics: SessionTopic[] = [
-      { title: "排查失踪引用", anchorIndex: 0, anchorText: "查一下", at: "t1" },
-    ];
-    writeSessionTitle(dir, "abc", "我的名字", topics, { userSet: true });
-    expect(readSessionTitle(dir, "abc")).toBe("我的名字");
-    expect(readSessionTitleUserSet(dir, "abc")).toBe(true);
-    expect(readSessionTopics(dir, "abc")).toEqual(topics);
-    writeSessionTitle(dir, "abc", "生成的标题", topics);
-    expect(readSessionTitleUserSet(dir, "abc")).toBe(false);
-    expect(readSessionTitleUserSet(dir, "absent")).toBe(false);
   });
 
   it("drops malformed topic ENTRIES, keeping the valid ones", () => {

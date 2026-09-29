@@ -4,6 +4,7 @@ import type {
   CreateSessionOpts,
   OverlayEvent,
   RecordEvent,
+  RenameSessionResult,
   RepoEvent,
   ResolveApprovalOpts,
   ResumeEvent,
@@ -126,9 +127,7 @@ export interface MockHertaBridgeOpts {
    *  `exportSource` (null = unreadable); the save answers `saveResult`
    *  (default saved). */
   readonly sessionActions?: {
-    readonly renameResult?:
-      | { readonly ok: true; readonly title: string }
-      | { readonly ok: false };
+    readonly renameResult?: RenameSessionResult;
     readonly exportSource?: SessionExportSource | null;
     readonly saveResult?: {
       readonly saved: boolean;

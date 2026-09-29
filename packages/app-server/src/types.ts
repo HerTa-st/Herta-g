@@ -487,6 +487,17 @@ export interface SessionExportSource {
   readonly record: TerminalRecord;
 }
 
+/** What a rename answers (ADR 0072 §3): the title as kept, and — for the
+ *  open session — its topics as they now stand, the rail's last entry
+ *  renamed with it. */
+export type RenameSessionResult =
+  | {
+      readonly ok: true;
+      readonly title: string;
+      readonly topics?: readonly SessionTopic[];
+    }
+  | { readonly ok: false };
+
 // ───── SessionHost / Session interfaces ─────
 
 export interface SessionHost {
@@ -517,9 +528,7 @@ export interface SessionHost {
   renameSession?(
     sessionId: string,
     title: string,
-  ): Promise<
-    { readonly ok: true; readonly title: string } | { readonly ok: false }
-  >;
+  ): Promise<RenameSessionResult>;
   /** A session's record, title and language for an export (ADR 0072 §3):
    *  the open one's from memory, any other's read off the event loop. Null
    *  when it cannot be read. Optional like `renameSession`. */
@@ -594,11 +603,12 @@ export interface Session {
   /** Current session title (generated after the first turn, or the user's
    *  own), or null. */
   readonly title: string | null;
-  /** The user renamed the session (ADR 0072 §3): `title` is already cleaned
-   *  (`cleanUserTitle`). The automatic retitle leaves it alone from here on.
-   *  Throws when the title sidecar cannot be written. Optional: only the GUI
-   *  SessionImpl implements it. */
-  renameTitle?(title: string): void;
+  /** The user renamed the session (ADR 0072 §3): the current topic takes the
+   *  name — the title and the rail's last entry — and the retitle rules go
+   *  on as before. `title` is already cleaned (`cleanUserTitle`). Returns
+   *  the topics as they now stand. Throws when the title sidecar cannot be
+   *  written. Optional: only the GUI SessionImpl implements it. */
+  renameTitle?(title: string): readonly SessionTopic[];
   /** The session's topic history (title changes anchored at the user block
    *  that started each topic) — the topic rail's jump targets. Empty until
    *  a title exists. */

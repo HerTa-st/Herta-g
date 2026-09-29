@@ -90,3 +90,22 @@ export function synthesizeInitialTopic(
   }
   return null;
 }
+
+/**
+ * The topics after the user renames the session (ADR 0072 §3, owner
+ * 2026-09-30): a rename names the CURRENT topic, so the last entry takes the
+ * name — its anchor, its text and its birth stay, since the topic began
+ * where it began. With no entries yet, the first is synthesized from the
+ * name, as a reopen would (`record` is the whole record; `[]` leaves that
+ * to the reopen).
+ */
+export function renameCurrentTopic(
+  topics: readonly SessionTopic[],
+  title: string,
+  record: TerminalRecord,
+): readonly SessionTopic[] {
+  const last = topics[topics.length - 1];
+  if (last !== undefined) return [...topics.slice(0, -1), { ...last, title }];
+  const first = synthesizeInitialTopic(title, topics, record);
+  return first === null ? topics : [first];
+}

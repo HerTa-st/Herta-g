@@ -571,11 +571,21 @@ export class SessionStore {
 
   /** The user renamed a session (ADR 0072 §3). The open one's header takes
    *  the name at once, without the reveal a generated title gets; main
-   *  sends no title event for a rename. Any other session is not shown
-   *  here. */
-  applyUserTitle(sessionId: string, title: string | null): void {
+   *  sends no title event for a rename. `topics`, when main answered them,
+   *  are the rail's entries with the current topic renamed. Any other
+   *  session is not shown here. */
+  applyUserTitle(
+    sessionId: string,
+    title: string | null,
+    topics?: readonly SessionTopic[],
+  ): void {
     if (this.snapshot.sessionId !== sessionId) return;
-    this.emit({ ...this.snapshot, title, titleAnimate: false });
+    this.emit({
+      ...this.snapshot,
+      title,
+      titleAnimate: false,
+      ...(topics !== undefined ? { topics } : {}),
+    });
   }
 
   /** Single-flight guard for loadOlderBlocks. */

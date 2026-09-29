@@ -9,6 +9,7 @@ import type {
   LogQuery,
   OverlayEvent,
   RecordEvent,
+  RenameSessionResult,
   RepoContextSnapshot,
   RepoEvent,
   ResolveApprovalOpts,
@@ -542,9 +543,7 @@ export interface HertaBridge {
   renameSession?(
     sessionId: string,
     title: string,
-  ): Promise<
-    { readonly ok: true; readonly title: string } | { readonly ok: false }
-  >;
+  ): Promise<RenameSessionResult>;
   /** What an export is built from (ADR 0072 §3): the record as the window
    *  shows it, the title and the session's language. Null when the session
    *  cannot be read. OPTIONAL with `saveSessionExport`. */

@@ -15,7 +15,6 @@ import {
   type ProviderAdapter,
   type ProviderEvent,
   readSessionTitle,
-  readSessionTitleUserSet,
   type TerminalRecord,
   V2RecordPersister,
   writeSessionTitle,
@@ -525,71 +524,110 @@ describe("SessionImpl — title generation", () => {
     const session = await mkSession(cfg, sessionId, slowTitle);
     await session.submitText("hi");
     // The first title is being generated when the user names the session.
-    session.renameTitle("我起的名字");
+    const topics = session.renameTitle("我起的名字");
     release?.();
     await session.whenTitleSettled();
     expect(session.title).toBe("我起的名字");
     expect(readSessionTitle(cfg.transcriptDir, sessionId)).toBe("我起的名字");
-    expect(readSessionTitleUserSet(cfg.transcriptDir, sessionId)).toBe(true);
+    // No topic yet: the name became the first, anchored at the first message;
+    // the late title added none.
+    expect(topics).toEqual([
+      expect.objectContaining({ title: "我起的名字", anchorIndex: 0 }),
+    ]);
+    expect(session.topics).toEqual(topics);
     await session.close();
   });
 
-  it("a renamed session is never retitled — not periodically, not on re-entry (ADR 0072 §3)", async () => {
+  it("a rename names the CURRENT topic, and the retitle rules go on with the name as the incumbent (owner 2026-09-30)", async () => {
+    // The rail's multi-topic history must keep growing after a rename: the
+    // user renamed the topic they were on, not the whole session forever.
+    const cfg = mkConfig();
+    const sessionId = randomUUID();
+    const systems: string[] = [];
+    let mode: "copy" | "new" = "new";
+    let n = 0;
+    const titles: ProviderAdapter = {
+      streamChat(frame: Parameters<ProviderAdapter["streamChat"]>[0]) {
+        const system = "stableSystem" in frame ? frame.stableSystem : "";
+        systems.push(system);
+        n += 1;
+        // "copy": the conversation stayed on topic — the incumbent contract
+        // (ADR 0034) answers with the current title, word for word.
+        const incumbent = /当前标题：(.+)/.exec(system)?.[1]?.trim();
+        const text =
+          mode === "copy" && incumbent !== undefined ? incumbent : `话题${n}`;
+        return (async function* () {
+          yield { type: "text-delta", text } satisfies ProviderEvent;
+          yield { type: "finish", reason: "stop" } satisfies ProviderEvent;
+        })();
+      },
+    };
+    const session = await mkSession(cfg, sessionId, titles);
+    await session.submitText("msg 0");
+    await session.whenTitleSettled();
+    expect(session.title).toBe("话题1");
+    expect(session.topics.map((t) => t.title)).toEqual(["话题1"]);
+
+    // The rename renames the current topic — the only one — in place.
+    const renamed = session.renameTitle("我起的名字");
+    expect(session.title).toBe("我起的名字");
+    expect(renamed.map((t) => t.title)).toEqual(["我起的名字"]);
+    expect(renamed[0]?.anchorIndex).toBe(0);
+
+    // Six turns later the periodic retitle runs, shown the name as the
+    // incumbent. Still on topic: the model copies it — nothing changes.
+    mode = "copy";
+    for (let i = 1; i <= 6; i++) {
+      await session.submitText(`msg ${i}`);
+      await session.whenTitleSettled();
+    }
+    expect(systems).toHaveLength(2);
+    expect(systems[1]).toContain("当前标题：我起的名字");
+    expect(session.title).toBe("我起的名字");
+    expect(session.topics.map((t) => t.title)).toEqual(["我起的名字"]);
+
+    // The conversation moves on: the next periodic retitle is a new topic.
+    mode = "new";
+    for (let i = 7; i <= 12; i++) {
+      await session.submitText(`msg ${i}`);
+      await session.whenTitleSettled();
+    }
+    expect(systems).toHaveLength(3);
+    expect(session.title).toBe("话题3");
+    expect(session.topics.map((t) => t.title)).toEqual(["我起的名字", "话题3"]);
+    await session.close();
+  });
+
+  it("a rename restarts the periodic count — the retitle comes six turns after it, not sooner", async () => {
     const cfg = mkConfig();
     const sessionId = randomUUID();
     let calls = 0;
     const counting: ProviderAdapter = {
       streamChat() {
         calls += 1;
-        const n = calls;
+        const k = calls;
         return (async function* () {
-          yield { type: "text-delta", text: `标题${n}` };
+          yield { type: "text-delta", text: `标题${k}` };
           yield { type: "finish", reason: "stop" };
         })();
       },
     };
     const session = await mkSession(cfg, sessionId, counting);
-    await session.submitText("msg 0");
-    await session.whenTitleSettled();
-    expect(calls).toBe(1);
-    session.renameTitle("我起的名字");
-    // Seven more turns: past the periodic window (six) that would retitle.
-    for (let i = 1; i <= 7; i++) {
+    for (let i = 0; i < 4; i++) {
       await session.submitText(`msg ${i}`);
       await session.whenTitleSettled();
     }
-    expect(calls).toBe(1);
-    expect(session.title).toBe("我起的名字");
-    await session.close();
-
-    // Reopened: the flag holds, so the re-entry retitle does not fire.
-    const reopened = await mkSession(cfg, sessionId, counting, [
-      { kind: "user", text: "msg 0" },
-      { kind: "herta", surface: "speech", text: "嗯。" },
-    ] as TerminalRecord);
-    expect(reopened.title).toBe("我起的名字");
-    await reopened.submitText("again");
-    await reopened.whenTitleSettled();
-    expect(calls).toBe(1);
-    expect(reopened.title).toBe("我起的名字");
-    await reopened.close();
-  });
-
-  it("a rewind to empty keeps the user's name, in the session and on reopen (ADR 0072 §3)", async () => {
-    const cfg = mkConfig();
-    const sessionId = randomUUID();
-    const session = await mkSession(cfg, sessionId, stubChatProvider([]));
-    await session.submitText("hi");
-    await session.whenTitleSettled();
+    expect(calls).toBe(1); // the first title; three turns counted since
     session.renameTitle("我起的名字");
-    const result = await session.rewindLastTurn();
-    expect(result.ok).toBe(true);
-    expect(session.title).toBe("我起的名字");
+    for (let i = 4; i < 9; i++) {
+      await session.submitText(`msg ${i}`);
+      await session.whenTitleSettled();
+    }
+    expect(calls).toBe(1); // five turns since the rename
+    await session.submitText("msg 9");
+    await session.whenTitleSettled();
+    expect(calls).toBe(2); // the sixth
     await session.close();
-
-    const reopened = await mkSession(cfg, sessionId, stubChatProvider([]), []);
-    expect(reopened.title).toBe("我起的名字");
-    await reopened.close();
   });
 
   it("the initial title's prompt carries no incumbent contract", async () => {

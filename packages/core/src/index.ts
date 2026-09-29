@@ -188,7 +188,6 @@ export {
 } from "./session-io/read-session-file.js";
 export {
   readSessionTitle,
-  readSessionTitleUserSet,
   readSessionTopics,
   type SessionTopic,
   writeSessionTitle,

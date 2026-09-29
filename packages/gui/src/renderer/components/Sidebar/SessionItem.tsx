@@ -337,7 +337,9 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
 
   // Rename in place: the title becomes a field. Enter or leaving the field
   // keeps what was typed; Escape keeps the old name. The name shows at once
-  // and goes back if main could not keep it.
+  // and goes back if main could not keep it. It names the CURRENT topic
+  // (owner 2026-09-30): the open session's rail takes the topics main
+  // answers, and later retitles go on as before.
   const [editing, setEditing] = useState(false);
   const renameSettled = useRef(false);
   const renameField = useRef<HTMLInputElement>(null);
@@ -373,8 +375,12 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
       showNotice("renameFailed");
     };
     void bridge.renameSession?.(id, next).then((r) => {
-      if (!r.ok) failed();
-      else if (r.title !== next) apply(r.title);
+      if (!r.ok) {
+        failed();
+        return;
+      }
+      sessionListStore.applyUserTitle(id, r.title);
+      sessionStore.applyUserTitle(id, r.title, r.topics);
     }, failed);
   };
 

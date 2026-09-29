@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendTopic,
   pruneTopics,
+  renameCurrentTopic,
   synthesizeInitialTopic,
   TOPIC_ANCHOR_TEXT_MAX,
   TOPIC_HISTORY_CAP,
@@ -87,6 +88,45 @@ describe("pruneTopics", () => {
     const legacy = [topic("A", 0), topic("B", 6)];
     expect(pruneTopics(legacy, 7).map((t) => t.title)).toEqual(["A", "B"]);
     expect(pruneTopics(legacy, 6).map((t) => t.title)).toEqual(["A"]);
+  });
+});
+
+describe("renameCurrentTopic (ADR 0072 §3, owner 2026-09-30)", () => {
+  const record: TerminalRecord = [
+    { kind: "herta", surface: "speech", text: "开场白" },
+    { kind: "user", text: "第一条消息", at: "2026-07-12T00:00:00.000Z" },
+  ];
+  const topics: SessionTopic[] = [
+    { title: "第一个", anchorIndex: 1, anchorText: "a", at: "t1" },
+    {
+      title: "当前的",
+      anchorIndex: 9,
+      anchorText: "b",
+      at: "t2",
+      bornAtLength: 12,
+    },
+  ];
+
+  it("renames the last topic only — its anchor, text and birth stay", () => {
+    expect(renameCurrentTopic(topics, "新名字", record)).toEqual([
+      topics[0],
+      { ...topics[1], title: "新名字" },
+    ]);
+  });
+
+  it("with no topics, makes the first from the name at the first message", () => {
+    expect(renameCurrentTopic([], "新名字", record)).toEqual([
+      {
+        title: "新名字",
+        anchorIndex: 1,
+        anchorText: "第一条消息",
+        at: "2026-07-12T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("with no topics and no message, has none to rename", () => {
+    expect(renameCurrentTopic([], "新名字", [])).toEqual([]);
   });
 });
 

@@ -13,7 +13,6 @@ import {
   dispatchJournalPath,
   readSessionFile,
   readSessionTitle,
-  readSessionTitleUserSet,
   readSessionTopics,
   V2RecordPersister,
   writeSessionTitle,
@@ -433,12 +432,16 @@ function persistClosedSession(
 }
 
 describe("renameSession", () => {
-  it("names a closed session, keeping its topics, and flags the name as the user's", async () => {
+  it("names a closed session's CURRENT topic: the title and the last topic, earlier topics kept", async () => {
     const cfg = mkConfig();
     const sessionId = "to-rename";
-    persistClosedSession(cfg, sessionId, [{ kind: "user", text: "hi" }]);
+    persistClosedSession(cfg, sessionId, [
+      { kind: "user", text: "hi" },
+      { kind: "user", text: "later" },
+    ]);
     const topics = [
-      { title: "旧标题", anchorIndex: 0, anchorText: "hi", at: "t" },
+      { title: "第一个话题", anchorIndex: 0, anchorText: "hi", at: "t1" },
+      { title: "旧标题", anchorIndex: 1, anchorText: "later", at: "t2" },
     ];
     writeSessionTitle(cfg.transcriptDir, sessionId, "旧标题", topics);
     const host = createSessionHost(cfg);
@@ -447,22 +450,25 @@ describe("renameSession", () => {
 
     expect(r).toEqual({ ok: true, title: "新的 名字" });
     expect(readSessionTitle(cfg.transcriptDir, sessionId)).toBe("新的 名字");
-    expect(readSessionTitleUserSet(cfg.transcriptDir, sessionId)).toBe(true);
-    expect(readSessionTopics(cfg.transcriptDir, sessionId)).toEqual(topics);
+    expect(readSessionTopics(cfg.transcriptDir, sessionId)).toEqual([
+      topics[0],
+      { ...topics[1], title: "新的 名字" },
+    ]);
     // What the sidebar lists.
     expect(host.listSessions()[0]?.title).toBe("新的 名字");
   });
 
-  it("renames the open session through its titler", async () => {
+  it("renames the open session through its titler, and answers its topics for the rail", async () => {
     const cfg = mkConfig();
     const host = createSessionHost(cfg);
     const s = await host.createSession({});
 
     const r = await host.renameSession?.(s.sessionId, "我起的名字");
 
-    expect(r).toEqual({ ok: true, title: "我起的名字" });
+    // A fresh session has no user message: nothing to anchor a topic at.
+    expect(r).toEqual({ ok: true, title: "我起的名字", topics: [] });
     expect(s.title).toBe("我起的名字");
-    expect(readSessionTitleUserSet(cfg.transcriptDir, s.sessionId)).toBe(true);
+    expect(readSessionTitle(cfg.transcriptDir, s.sessionId)).toBe("我起的名字");
     await host.closeActiveSession();
   });
 
@@ -523,19 +529,12 @@ describe("readSessionForExport", () => {
     expect(host.activeSession).toBeNull();
   });
 
-  it("leaves out a generated title the record no longer supports, as the sidebar does", async () => {
+  it("leaves out a title the record no longer supports, as the window does", async () => {
     const cfg = mkConfig();
     persistClosedSession(cfg, "rewound", []);
     writeSessionTitle(cfg.transcriptDir, "rewound", "被撤回的标题");
-    persistClosedSession(cfg, "named", []);
-    writeSessionTitle(cfg.transcriptDir, "named", "我起的名字", [], {
-      userSet: true,
-    });
     const host = createSessionHost(cfg);
     expect((await host.readSessionForExport?.("rewound"))?.title).toBeNull();
-    expect((await host.readSessionForExport?.("named"))?.title).toBe(
-      "我起的名字",
-    );
   });
 
   it("reads the open session from memory, and answers null for one that cannot be read", async () => {

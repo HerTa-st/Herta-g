@@ -6,7 +6,6 @@ import type {
 import {
   errorMessage,
   readSessionTitle,
-  readSessionTitleUserSet,
   readSessionTopics,
   writeSessionTitle,
 } from "@herta/core";
@@ -15,6 +14,7 @@ import { type ApiKey, deepseekProvider } from "@herta/providers";
 import {
   appendTopic,
   pruneTopics,
+  renameCurrentTopic,
   synthesizeInitialTopic,
   topicAnchorText,
 } from "./session-topics.js";
@@ -127,30 +127,22 @@ export function loadSessionTitleState(
   transcriptDir: string,
   sessionId: string,
   loadedRecord: TerminalRecord,
-): {
-  title: string | null;
-  topics: readonly SessionTopic[];
-  userSet: boolean;
-} {
+): { title: string | null; topics: readonly SessionTopic[] } {
   let title = readSessionTitle(transcriptDir, sessionId) ?? null;
   let topics: readonly SessionTopic[] = readSessionTopics(
     transcriptDir,
     sessionId,
   );
-  // A name the user gave (ADR 0072 §3) describes the session, not a window
-  // of it: it outlives a rewind to empty, where a generated title does not.
-  const userSet =
-    title !== null && readSessionTitleUserSet(transcriptDir, sessionId);
   if (!loadedRecord.some((b) => b.kind === "user")) {
     // No surviving user turn: whatever the sidecar describes is gone.
-    if (!userSet) title = null;
+    title = null;
     topics = [];
   } else {
     topics = pruneTopics(topics, loadedRecord.length);
   }
   const synthesized = synthesizeInitialTopic(title, topics, loadedRecord);
   if (synthesized !== null) topics = [synthesized];
-  return { title, topics, userSet };
+  return { title, topics };
 }
 
 /** Longest title a rename keeps, in characters (a generated one is a short
@@ -181,15 +173,10 @@ export interface SessionTitlerDeps {
   readonly emit: (event: TitleEvent) => void;
   readonly initialTitle: string | null;
   readonly initialTopics: readonly SessionTopic[];
-  /** The initial title is the user's own (ADR 0072 §3). */
-  readonly initialUserSet?: boolean;
 }
 
 export class SessionTitler {
   private _title: string | null;
-  /** The user named the session (ADR 0072 §3): no automatic (re)title from
-   *  here on, and a rewind to empty keeps the name. */
-  private userSet: boolean;
   /** Topic history (title changes anchored at their window's first user
    *  block) — the rail's jump targets. Loaded from the sidecar; appended by
    *  a landed title; pruned by rewind. */
@@ -216,8 +203,7 @@ export class SessionTitler {
   constructor(private readonly deps: SessionTitlerDeps) {
     this._title = deps.initialTitle;
     this._topics = deps.initialTopics;
-    this.userSet = deps.initialUserSet === true && deps.initialTitle !== null;
-    this.reEntryRetitlePending = deps.initialTitle !== null && !this.userSet;
+    this.reEntryRetitlePending = deps.initialTitle !== null;
   }
 
   get title(): string | null {
@@ -229,26 +215,36 @@ export class SessionTitler {
   }
 
   /**
-   * The user renamed the session (ADR 0072 §3). The name is persisted with
-   * its flag and kept: the periodic retitle stops, so the topic rail keeps
-   * the topics it has and gains no new ones. A generation already in flight
-   * is fenced out like a rewind's — it would land a title over the one just
-   * typed. `title` is already cleaned (`cleanUserTitle`). Throws when the
-   * sidecar cannot be written, so the caller can say the rename failed.
+   * The user renamed the session (ADR 0072 §3): the CURRENT topic gets the
+   * name — the title, and the last entry of the topic rail (the first one, if
+   * the session has none yet). Nothing else changes (owner 2026-09-30): the
+   * retitle rules go on as before, and a retitle shows the model this name as
+   * the incumbent (ADR 0034), so it stays while the conversation stays on
+   * its topic and gives way, as a new topic, when it moves on.
+   *
+   * The rename counts as a fresh title (the periodic count restarts, no
+   * re-entry retitle is owed), and a generation already in flight is fenced
+   * out like a rewind's — it would land a title over the one just typed.
+   * `title` is already cleaned (`cleanUserTitle`). Throws when the sidecar
+   * cannot be written, so the caller can say the rename failed; nothing
+   * changes then. Returns the topics as they now stand.
    */
-  setUserTitle(title: string): void {
-    writeSessionTitle(
-      this.deps.transcriptDir,
-      this.deps.sessionId,
-      title,
+  renameCurrentTopic(title: string): readonly SessionTopic[] {
+    const topics = renameCurrentTopic(
       this._topics,
-      { userSet: true },
+      title,
+      this.deps.getRecord(),
     );
+    writeSessionTitle(this.deps.transcriptDir, this.deps.sessionId, title, [
+      ...topics,
+    ]);
     this.epoch += 1;
     this._title = title;
-    this.userSet = true;
+    this._topics = topics;
     this.reEntryRetitlePending = false;
     this.turnsSinceTitle = 0;
+    this.attempts = 0;
+    return topics;
   }
 
   /**
@@ -260,8 +256,6 @@ export class SessionTitler {
    * retry next turn.
    */
   afterUserTurn(): void {
-    // The user's own name stands (ADR 0072 §3).
-    if (this.userSet) return;
     this.turnsSinceTitle += 1;
     const shouldRetitle =
       (this._title === null && this.attempts < MAX_INITIAL_TITLE_ATTEMPTS) ||
@@ -285,9 +279,7 @@ export class SessionTitler {
    */
   onRewind(recordLength: number, hasUserTurn: boolean): void {
     this.epoch += 1;
-    // A name the user gave survives (ADR 0072 §3): it names the session, not
-    // the exchange the rewind withdrew.
-    if (!hasUserTurn && !this.userSet) {
+    if (!hasUserTurn) {
       this._title = null;
       this.reEntryRetitlePending = false;
       this.turnsSinceTitle = 0;
@@ -302,7 +294,6 @@ export class SessionTitler {
           this.deps.sessionId,
           this._title,
           this._topics,
-          { userSet: this.userSet },
         );
       }
     }
