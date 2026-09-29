@@ -556,6 +556,62 @@ describe("translateBackend", () => {
     });
   });
 
+  it('in thinking mode every assistant message carries reasoning_content — "" when the model gave none — so a request that goes on after its final answer is accepted (live todo lab 2026-09-29)', () => {
+    // The end-of-run check's shape: the model's final answer (here with no
+    // reasoning), then the state trailer — no user message in between.
+    // DeepSeek refused exactly this with the field omitted, and took it with
+    // the field as "".
+    const frame = makeBackendFrame({
+      messages: [
+        { role: "user", text: "fix it", ts: "t" },
+        {
+          role: "assistant",
+          text: "",
+          toolCalls: [{ id: "c1", tool: "bash", input: { command: "ls" } }],
+          ts: "t",
+          reasoningContent: "Look first.",
+        },
+        {
+          role: "tool",
+          toolCallId: "c1",
+          result: { ok: true, summary: "listed" },
+          ts: "t",
+        },
+        { role: "assistant", text: "Done.", toolCalls: [], ts: "t" },
+      ],
+      trailingState: "（收尾检查：……）",
+    });
+    const thinking = {
+      model: "deepseek-v4-pro",
+      extraBody: { thinking: { type: "enabled" }, reasoning_effort: "high" },
+    };
+    const req = translate(frame, thinking);
+    const assistants = req.messages.filter((m) => m.role === "assistant");
+    expect(assistants.map((m) => m.reasoning_content)).toEqual([
+      "Look first.",
+      "",
+    ]);
+    expect(req.messages.at(-1)).toEqual({
+      role: "system",
+      content: "（收尾检查：……）",
+    });
+
+    // Thinking disabled, or not asked for: the field stays off an answer
+    // that has none, as before.
+    for (const opts of [
+      {
+        model: "deepseek-flash",
+        extraBody: { thinking: { type: "disabled" } },
+      },
+      { model: "test-model" },
+    ]) {
+      const last = translate(frame, opts).messages.filter(
+        (m) => m.role === "assistant",
+      )[1];
+      expect(last !== undefined && "reasoning_content" in last).toBe(false);
+    }
+  });
+
   it("emits scopedRepoInstructions and scopedMemory as additional system messages when non-empty", () => {
     const frame = makeBackendFrame({
       scopedRepoInstructions: "Prefer edit_file.",

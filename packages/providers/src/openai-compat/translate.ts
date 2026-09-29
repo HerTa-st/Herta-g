@@ -54,6 +54,25 @@ export interface OpenAIChatRequest {
   [vendorKey: string]: unknown;
 }
 
+/**
+ * Whether the request asks for DeepSeek's thinking mode (the factory sends
+ * `thinking: {type: "enabled"}`). There, an assistant message must carry
+ * `reasoning_content` back whenever the request goes on after it without a
+ * new user message — even an answer the model gave with no reasoning at all.
+ * Probed 2026-09-29, after the end-of-run todo check (a system trailer after
+ * the model's final answer) 400'd a live run: the field omitted →
+ * "The `reasoning_content` in the thinking mode must be passed back to the
+ * API"; the field as "" → 200; a user message after it → 200 either way.
+ */
+function thinkingEnabled(opts: TranslateOpts): boolean {
+  const t = opts.extraBody?.thinking;
+  return (
+    typeof t === "object" &&
+    t !== null &&
+    (t as { type?: unknown }).type === "enabled"
+  );
+}
+
 export function translate(
   frame: ProviderPromptFrame,
   opts: TranslateOpts,
@@ -81,8 +100,9 @@ export function translateActor(
   if (frame.retrievedLore.length > 0) {
     messages.push({ role: "system", content: frame.retrievedLore });
   }
+  const thinking = thinkingEnabled(opts);
   for (const m of frame.messages) {
-    messages.push(...toOpenAI(m));
+    messages.push(...toOpenAI(m, thinking));
   }
   const tools =
     frame.toolSchemas.length > 0 ? frame.toolSchemas.map(toTool) : undefined;
@@ -103,8 +123,9 @@ export function translateBackend(
   if (frame.scopedMemory.length > 0) {
     messages.push({ role: "system", content: frame.scopedMemory });
   }
+  const thinking = thinkingEnabled(opts);
   for (const m of frame.messages) {
-    messages.push(...toOpenAI(m));
+    messages.push(...toOpenAI(m, thinking));
   }
   // The per-iteration state trailer (todo list, working state, steps left):
   // trails the transcript so the stable prefix keeps its prompt-cache bytes;
@@ -145,32 +166,32 @@ function finalizeRequest(
  * layer that knows the wire format, rather than leaking a provider rule into
  * the transcript.
  */
-function toOpenAI(m: Message): OpenAIMessage[] {
+function toOpenAI(m: Message, thinking: boolean): OpenAIMessage[] {
   if (m.role === "user") {
     return [{ role: "user", content: m.text }];
   }
   if (m.role === "assistant") {
-    if (m.toolCalls.length === 0) {
-      const out: Extract<OpenAIMessage, { role: "assistant" }> = {
-        role: "assistant",
-        content: m.text,
-      };
-      if (m.reasoningContent !== undefined && m.reasoningContent.length > 0) {
-        out.reasoning_content = m.reasoningContent;
-      }
-      return [out];
-    }
-    const out: Extract<OpenAIMessage, { role: "assistant" }> = {
-      role: "assistant",
-      content: m.text.length > 0 ? m.text : null,
-      tool_calls: m.toolCalls.map((c) => ({
-        id: c.id,
-        type: "function",
-        function: { name: c.tool, arguments: JSON.stringify(c.input ?? {}) },
-      })),
-    };
+    const out: Extract<OpenAIMessage, { role: "assistant" }> =
+      m.toolCalls.length === 0
+        ? { role: "assistant", content: m.text }
+        : {
+            role: "assistant",
+            content: m.text.length > 0 ? m.text : null,
+            tool_calls: m.toolCalls.map((c) => ({
+              id: c.id,
+              type: "function",
+              function: {
+                name: c.tool,
+                arguments: JSON.stringify(c.input ?? {}),
+              },
+            })),
+          };
+    // Carried back whenever there is some; in thinking mode ALWAYS, as ""
+    // when the model gave none (see thinkingEnabled).
     if (m.reasoningContent !== undefined && m.reasoningContent.length > 0) {
       out.reasoning_content = m.reasoningContent;
+    } else if (thinking) {
+      out.reasoning_content = "";
     }
     return [out];
   }
