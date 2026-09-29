@@ -26,7 +26,10 @@ function CopyReply(props: { readonly text: string }): JSX.Element {
   }, [copied]);
   const label = t(copied ? "workspace.copied" : "workspace.copyReply");
   return (
-    <Tooltip label={label} placement="bottom">
+    // Portaled: the button sits at the column's LEFT edge (the rewind sits
+    // at the right), so an in-flow pill centred on it ran past the
+    // scroller's clip and was cut in half (owner 2026-09-29).
+    <Tooltip label={label} placement="bottom" portal>
       <button
         type="button"
         className={`message-copy${copied ? " is-copied" : ""}`}

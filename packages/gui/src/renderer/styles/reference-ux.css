@@ -785,6 +785,16 @@ button,
 }
 .conversation-shell > .conversation {
   flex: 1;
+  /* Room for the shadows (owner 2026-09-29: "a white band between the left
+     bar and the conversation"). The scroller clips at its box, and her
+     bubbles sit 8px inside it (--record-left) under a 32px-blur shadow — so
+     every shadow was cut in one straight vertical line, tinted to its right
+     and bare to its left: a pale band down the whole column. The box now
+     reaches back over the body's left padding (the gap to the sidebar, or to
+     the window's edge) and pads the same amount, so the content does not
+     move and the shadows fade out before the clip. */
+  margin-left: calc(-1 * var(--body-pad-left, 0px));
+  padding-left: var(--body-pad-left, 0px);
 }
 /* The fade masks the CONTENT itself instead of overlaying frost: text
    dissolves and reveals the true background — which over the app's

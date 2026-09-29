@@ -64,6 +64,29 @@ describe("the record's left edge is one token", () => {
     expect(body).toMatch(/padding:\s*3px\s+0\s+3px\s+var\(--record-left/);
   });
 
+  it("the scroller leaves the edge's shadows room to fade — no pale band beside the column (owner 2026-09-29)", () => {
+    // The scroller clips at its box, and the bubbles sit --record-left (8px)
+    // inside it under a 32px-blur shadow: with the box's edge at the content's
+    // edge, every shadow was cut in one straight line, and the strip left of
+    // it read as a white band down the whole window. The box reaches back over
+    // the body's left padding and pads the same token, so the content stays
+    // put — the two must be the SAME token, or the column shifts sideways.
+    const body = [
+      ...CSS.matchAll(/^\.conversation-shell > \.conversation\s*\{([^}]*)\}/gm),
+    ]
+      .map((m) => m[1] ?? "")
+      .join("\n")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(body).toMatch(
+      /margin-left:\s*calc\(-1 \* var\(--body-pad-left, 0px\)\);/,
+    );
+    expect(body).toMatch(/padding-left:\s*var\(--body-pad-left, 0px\);/);
+    // …and the body's own padding is drawn from that same token.
+    expect(CSS).toMatch(
+      /padding:var\(--body-pad-top\) var\(--body-pad-right\) var\(--body-pad-bottom\) var\(--body-pad-left\);/,
+    );
+  });
+
   it("the LED-centre gutters derive from it, so they track the edge", () => {
     // The history panel's rule and the plan strip's hairline both hang from
     // the LED's centre (edge + half the 7px dot). Hard-coded at 11px they

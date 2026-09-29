@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithLocale } from "../../i18n/test-util.js";
 import { GalaxyTravelRow } from "./GalaxyTravelRow.js";
@@ -236,6 +236,26 @@ describe("HertaBubble", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Copied")).toBeInTheDocument(),
     );
+  });
+
+  it("the copy button's pill is lifted onto the body, so the scroller's edge cannot cut it (owner 2026-09-29)", () => {
+    vi.useFakeTimers();
+    try {
+      renderWithLocale(<HertaBubble text="certainly" at={justNow()} />);
+      const button = screen.getByLabelText("Copy reply");
+      // No in-flow pill beside the button: that one was clipped in half at
+      // the column's left edge.
+      expect(button.parentElement?.querySelector(".tooltip")).toBeNull();
+      fireEvent.pointerEnter(button.parentElement as HTMLElement);
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      const pill = document.body.querySelector(".tooltip--portal");
+      expect(pill?.textContent).toBe("Copy reply");
+      expect(pill?.parentElement).toBe(document.body);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a code-only reply offers no copy — its row keeps just the time", () => {
