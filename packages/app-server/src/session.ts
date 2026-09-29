@@ -736,6 +736,10 @@ export class SessionImpl implements Session {
     return this.titler.topics;
   }
 
+  renameTitle(title: string): void {
+    this.titler.setUserTitle(title);
+  }
+
   get turnInFlight(): boolean {
     return this.currentTurn !== null;
   }
@@ -2084,6 +2088,7 @@ export class SessionImpl implements Session {
         emit: (event) => projector.emitTitle(event),
         initialTitle: existing.title,
         initialTopics: existing.topics,
+        initialUserSet: existing.userSet,
       }),
       // D3: the deferred opening seed (new sessions with an opening). null for
       // resumed sessions (seedBlock is only set when initialRecord is empty) and

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import type {
   TerminalRecord,
   TerminalRecordBlock,
@@ -76,26 +77,52 @@ export interface LastTurnEnd {
   readonly atBlockCount: number;
 }
 
-export function readSessionFile(path: string): {
+export interface SessionFileContents {
   meta: SessionMeta;
   record: TerminalRecord;
   latestWorkspaceSet?: string;
   lastTurnEnd?: LastTurnEnd;
-} {
+}
+
+export function readSessionFile(path: string): SessionFileContents {
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch (err) {
-    const code = (err as { code?: string }).code;
-    if (code === "ENOENT") {
-      throw new SessionFileError({
+    throw notFoundOr(err, path);
+  }
+  return parseSessionText(raw, path);
+}
+
+/**
+ * `readSessionFile` off the event loop, for a reader on the desktop app's
+ * main thread that is not opening the session — an export (ADR 0072 §3).
+ * ADR 0068: no long synchronous fs on main, and a transcript can be tens of
+ * megabytes.
+ */
+export async function readSessionFileAsync(
+  path: string,
+): Promise<SessionFileContents> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    throw notFoundOr(err, path);
+  }
+  return parseSessionText(raw, path);
+}
+
+function notFoundOr(err: unknown, path: string): unknown {
+  const code = (err as { code?: string }).code;
+  return code === "ENOENT"
+    ? new SessionFileError({
         code: "not-found",
         message: `session file not found: ${path}`,
-      });
-    }
-    throw err;
-  }
+      })
+    : err;
+}
 
+function parseSessionText(raw: string, path: string): SessionFileContents {
   const lines = raw.split("\n");
   // biome-ignore lint/style/noNonNullAssertion: guarded by lines.length === 0 check below
   if (lines.length === 0 || lines[0]!.length === 0) {

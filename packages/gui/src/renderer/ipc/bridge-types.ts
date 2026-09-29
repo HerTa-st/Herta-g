@@ -16,6 +16,7 @@ import type {
   RewindResult,
   SessionAgentEvent,
   SessionDeletedEvent,
+  SessionExportSource,
   SessionMetadata,
   SessionSearchHit,
   SessionTopic,
@@ -535,6 +536,25 @@ export interface HertaBridge {
   deleteSession(
     sessionId: string,
   ): Promise<{ readonly ok: boolean; readonly wasActive: boolean }>;
+  /** Name a session by hand, open or not (ADR 0072 §3). Resolves the title
+   *  as kept (cleaned: one line, capped), or `ok: false`. OPTIONAL — the
+   *  sidebar's menu offers no rename without it. */
+  renameSession?(
+    sessionId: string,
+    title: string,
+  ): Promise<
+    { readonly ok: true; readonly title: string } | { readonly ok: false }
+  >;
+  /** What an export is built from (ADR 0072 §3): the record as the window
+   *  shows it, the title and the session's language. Null when the session
+   *  cannot be read. OPTIONAL with `saveSessionExport`. */
+  readSessionForExport?(sessionId: string): Promise<SessionExportSource | null>;
+  /** Show the save dialog and write the export. `saved: false` when the
+   *  user cancelled or the write failed (`failed` says which). */
+  saveSessionExport?(
+    fileName: string,
+    markdown: string,
+  ): Promise<{ readonly saved: boolean; readonly failed?: boolean }>;
   resolveApproval(opts: ResolveApprovalOpts): Promise<ApprovalResult>;
   /** Project command allow rules (ADR 0030) for the ACTIVE session's
    *  workspace, as display strings (`node src/index.mjs:*`). OPTIONAL —

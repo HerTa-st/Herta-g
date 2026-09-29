@@ -76,6 +76,7 @@ import {
   resolveInsideWorkspace,
 } from "./read-workspace-file.js";
 import { createSessionActivation } from "./session-activation.js";
+import { createExportSaver } from "./session-export.js";
 import {
   attentionSettingsOf,
   registerSettingsHandlers,
@@ -187,6 +188,8 @@ const USER_ACTION_CHANNELS: ReadonlySet<string> = new Set([
   CMD.search,
   CMD.recordSlice,
   CMD.deleteSession,
+  CMD.renameSession,
+  CMD.saveSessionExport,
   CMD.resolveApproval,
   CMD.removeCommandRule,
   CMD.setWorkspaceTrust,
@@ -849,6 +852,32 @@ export function createSessionService(
       if (!isSafeSessionId(id)) return { ok: false, wasActive: false };
       return activation.deleteAndReconcile(id);
     });
+    // Rename and export (ADR 0072 §3), from the sidebar's session menu —
+    // any session, open or not. Same id gate: both join transcript paths.
+    handle(CMD.renameSession, async (_e, id: string, title: string) => {
+      if (!isSafeSessionId(id) || typeof title !== "string") {
+        return { ok: false };
+      }
+      return (await host?.renameSession?.(id, title)) ?? { ok: false };
+    });
+    handle(CMD.readSessionForExport, async (_e, id: string) => {
+      if (!isSafeSessionId(id)) return null;
+      return (await host?.readSessionForExport?.(id)) ?? null;
+    });
+    const saveExport = createExportSaver({
+      showSaveDialog: (opts) =>
+        dialog.showSaveDialog(win, {
+          defaultPath: opts.defaultPath,
+          filters: opts.filters.map((f) => ({
+            name: f.name,
+            extensions: [...f.extensions],
+          })),
+        }),
+      documentsDir: () => app.getPath("documents"),
+    });
+    handle(CMD.saveSessionExport, (_e, name: unknown, markdown: unknown) =>
+      saveExport(name, markdown),
+    );
     handle(CMD.resolveApproval, (_e, opts) =>
       host?.activeSession?.resolveApproval(opts),
     );

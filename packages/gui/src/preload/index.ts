@@ -30,6 +30,12 @@ const bridge: HertaBridge = {
   openSession: (id) => ipcRenderer.invoke(CMD.open, id),
   createSession: (opts) => ipcRenderer.invoke(CMD.create, opts),
   deleteSession: (id) => ipcRenderer.invoke(CMD.deleteSession, id),
+  renameSession: (id, title) =>
+    ipcRenderer.invoke(CMD.renameSession, id, title),
+  readSessionForExport: (id) =>
+    ipcRenderer.invoke(CMD.readSessionForExport, id),
+  saveSessionExport: (fileName, markdown) =>
+    ipcRenderer.invoke(CMD.saveSessionExport, fileName, markdown),
   resolveApproval: (opts) => ipcRenderer.invoke(CMD.resolveApproval, opts),
   listCommandRules: () => ipcRenderer.invoke(CMD.listCommandRules),
   removeCommandRule: (display) =>

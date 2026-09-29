@@ -1,5 +1,5 @@
 import type { SessionMetadata } from "@herta/app-server";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useHertaBridge } from "../../context/HertaBridgeContext.js";
 import { useApprovalPending } from "../../hooks/useApprovalPending.js";
@@ -17,6 +17,23 @@ import { isRepeatClick } from "../../lib/repeat-click.js";
 import { TitleText } from "../TitleText.js";
 import { TrashIcon } from "./icons.js";
 import { PreviewText } from "./PreviewText.js";
+import {
+  SESSION_MENU_EXIT_MS,
+  SessionMenu,
+  type SessionMenuCloseReason,
+} from "./SessionMenu.js";
+import { runSessionExport } from "./session-markdown.js";
+
+/** The card's brief notices after a menu action (ADR 0072 §3). */
+type Notice = "exported" | "exportFailed" | "renameFailed";
+const NOTICE_KEY = {
+  exported: "session.exported",
+  exportFailed: "session.exportFailed",
+  renameFailed: "session.renameFailed",
+} as const;
+/** How long a notice stays, and its fade-out. */
+const NOTICE_MS = 2400;
+const NOTICE_EXIT_MS = 160;
 
 export interface SessionItemProps {
   readonly session: SessionMetadata;
@@ -278,6 +295,96 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
     return () => window.removeEventListener("scroll", close, true);
   }, [tipAt]);
 
+  // The session menu (ADR 0072 §3): rename, export — any session, open or
+  // not, so it never switches (and never interrupts). Each item shows only
+  // where the bridge has the surface; with neither the right-click is left
+  // alone. `lastMenuAt` holds the spot through the menu's exit.
+  const canRename = bridge.renameSession !== undefined;
+  const canExport =
+    bridge.readSessionForExport !== undefined &&
+    bridge.saveSessionExport !== undefined;
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const lastMenuAt = useRef({ x: 0, y: 0 });
+  if (menuAt !== null) lastMenuAt.current = menuAt;
+  const menu = usePresence(menuAt !== null, SESSION_MENU_EXIT_MS);
+  const closeMenu = useCallback((reason: SessionMenuCloseReason): void => {
+    setMenuAt(null);
+    if (reason === "escape") cardRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  // A brief notice in the action slot after an export or a failed rename.
+  // It fades out rather than vanish; `lastNotice` holds the words meanwhile.
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const lastNotice = useRef<Notice>("exported");
+  if (notice !== null) lastNotice.current = notice;
+  const noticePresence = usePresence(notice !== null, NOTICE_EXIT_MS);
+  const noticeTimer = useRef<number | null>(null);
+  const showNotice = (n: Notice): void => {
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    setNotice(n);
+    noticeTimer.current = window.setTimeout(() => {
+      noticeTimer.current = null;
+      setNotice(null);
+    }, NOTICE_MS);
+  };
+  useEffect(
+    () => () => {
+      if (noticeTimer.current !== null)
+        window.clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+
+  // Rename in place: the title becomes a field. Enter or leaving the field
+  // keeps what was typed; Escape keeps the old name. The name shows at once
+  // and goes back if main could not keep it.
+  const [editing, setEditing] = useState(false);
+  const renameSettled = useRef(false);
+  const renameField = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!editing) return;
+    renameField.current?.focus({ preventScroll: true });
+    renameField.current?.select();
+  }, [editing]);
+  const startRename = (): void => {
+    if (!canRename) return;
+    closeTip();
+    setConfirming(false);
+    renameSettled.current = false;
+    setEditing(true);
+  };
+  const finishRename = (typed: string | null, refocus: boolean): void => {
+    if (renameSettled.current) return;
+    renameSettled.current = true;
+    setEditing(false);
+    if (refocus) cardRef.current?.focus({ preventScroll: true });
+    const next = typed?.replace(/\s+/g, " ").trim() ?? "";
+    const id = props.session.sessionId;
+    const previous = props.session.title ?? null;
+    if (next === "" || next === previous) return;
+    const apply = (title: string | null): void => {
+      sessionListStore.applyUserTitle(id, title);
+      sessionStore.applyUserTitle(id, title);
+    };
+    apply(next);
+    setMessageOpen(true);
+    const failed = (): void => {
+      apply(previous);
+      showNotice("renameFailed");
+    };
+    void bridge.renameSession?.(id, next).then((r) => {
+      if (!r.ok) failed();
+      else if (r.title !== next) apply(r.title);
+    }, failed);
+  };
+
+  const exportSession = (): void => {
+    void runSessionExport(bridge, props.session.sessionId).then((r) => {
+      if (r === "saved") showNotice("exported");
+      else if (r === "failed") showNotice("exportFailed");
+    });
+  };
+
   // A tray switch to THIS session was refused mid-turn (2026-07-13): main
   // fronted the window and signalled the refusal — arm the same badge a
   // first direct click would, so the refusal explains itself (and the
@@ -379,10 +486,30 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
           closeTip();
           return;
         }
+        if (e.key === "F2") {
+          // Rename, as a file manager does (ADR 0072 §3).
+          e.preventDefault();
+          startRename();
+          return;
+        }
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           open();
         }
+      }}
+      onContextMenu={(e) => {
+        if (!canRename && !canExport) return;
+        e.preventDefault();
+        closeTip();
+        if (editing) return;
+        // From the keyboard (the context-menu key, Shift+F10) there is no
+        // pointer: open at the card's lower left instead.
+        const r = cardRef.current?.getBoundingClientRect();
+        setMenuAt(
+          e.button !== 2 && r !== undefined
+            ? { x: r.left + 12, y: r.bottom - 6 }
+            : { x: e.clientX, y: e.clientY },
+        );
       }}
       // Reset to the trash on a GENUINE re-hover, or shortly after leaving —
       // never synchronously ON leave. An immediate reset at leave swaps
@@ -451,20 +578,61 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
           </span>,
           document.body,
         )}
+      {menu.mounted && (
+        <SessionMenu
+          at={lastMenuAt.current}
+          leaving={menuAt === null}
+          {...(canRename ? { onRename: startRename } : {})}
+          {...(canExport ? { onExport: exportSession } : {})}
+          onClose={closeMenu}
+        />
+      )}
       <span className="session-item__title-row">
-        <span className="session-item__title" ref={titleRef}>
-          <TitleText
-            text={props.title}
-            placeholder={t("session.untitled")}
-            animate={animate}
-            onRevealed={() => {
-              setMessageOpen(true);
-              // Typed in once: a remount shows it as it stands.
-              if (animate) {
-                sessionListStore.settleLiveTitle(props.session.sessionId);
-              }
-            }}
-          />
+        <span
+          className={`session-item__title${editing ? " is-editing" : ""}`}
+          ref={titleRef}
+        >
+          {editing ? (
+            <input
+              ref={renameField}
+              className="session-item__rename"
+              aria-label={t("session.renameAria")}
+              defaultValue={hasTitle ? props.title : ""}
+              placeholder={t("session.untitled")}
+              maxLength={80}
+              spellCheck={false}
+              // The card opens its session on a click and on Enter/Space;
+              // none of that may reach it from the field.
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                // An IME's Enter picks a candidate; it is not the name.
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  finishRename(e.currentTarget.value, true);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  finishRename(null, true);
+                }
+              }}
+              onBlur={(e) => finishRename(e.currentTarget.value, false)}
+            />
+          ) : (
+            <TitleText
+              text={props.title}
+              placeholder={t("session.untitled")}
+              animate={animate}
+              onRevealed={() => {
+                setMessageOpen(true);
+                // Typed in once: a remount shows it as it stands.
+                if (animate) {
+                  sessionListStore.settleLiveTitle(props.session.sessionId);
+                }
+              }}
+            />
+          )}
         </span>
         {/* Live pulse: Herta is mid-reply in THIS (active) session — the
             peripheral signal whose click-side counterpart is the armed
@@ -511,9 +679,20 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
             action-slot wrapper floors the width at the trash's, so an
             "empty-looking" slot always measures the same. */}
         <span className="session-item__action-slot" data-testid="action-slot">
-          {pendingApproval ? (
+          {editing ? null : pendingApproval ? (
             <span key="badge-approval" className="session-item__badge">
               {t("session.pendingApproval")}
+            </span>
+          ) : noticePresence.mounted ? (
+            // After a menu action (ADR 0072 §3): 已导出, or what failed.
+            <span
+              key="badge-notice"
+              role="status"
+              className={`session-item__badge session-item__badge--notice${
+                lastNotice.current === "exported" ? "" : " is-error"
+              }${notice === null ? " is-leaving" : ""}`}
+            >
+              {t(NOTICE_KEY[lastNotice.current])}
             </span>
           ) : openFailed ? (
             <button

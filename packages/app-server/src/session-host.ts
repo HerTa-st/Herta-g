@@ -10,12 +10,18 @@ import {
   dreamDirFor,
   ensureHertaGitignore,
   readSessionFile,
+  readSessionFileAsync,
   listSessionHeaders as readSessionHeaders,
   listSessions as readSessionListings,
+  readSessionTitle,
+  readSessionTitleUserSet,
+  readSessionTopics,
   resolveEffectiveWorkspace,
   type TerminalRecord,
+  type TerminalRecordBlock,
   V2RecordPersister,
   workspacesBaseDir,
+  writeSessionTitle,
 } from "@herta/core";
 import {
   type DreamSessionInput,
@@ -41,6 +47,7 @@ import {
   type SessionSearchHit,
   searchSessionTranscripts,
 } from "./session-search.js";
+import { cleanUserTitle } from "./session-titler.js";
 import { cachedRecapBoundary } from "./session-wiring.js";
 import type {
   AppServerConfig,
@@ -48,6 +55,7 @@ import type {
   ListSessionsOpts,
   OpenSessionOpts,
   Session,
+  SessionExportSource,
   SessionHost,
   SessionMetadata,
 } from "./types.js";
@@ -627,6 +635,81 @@ class SessionHostImpl implements SessionHost {
     return { ok: true, wasActive, removed: true };
   }
 
+  /**
+   * Name a session by hand (ADR 0072 §3). Serialized with the lifecycle ops:
+   * a session opening concurrently reads the sidecar as it loads, and a
+   * rename written in between would be overwritten by its titler's next
+   * write. The open session is renamed through its titler (which fences out
+   * a generation in flight); any other gets its sidecar rewritten with its
+   * topics kept.
+   */
+  renameSession(
+    sessionId: string,
+    title: string,
+  ): Promise<{ ok: true; title: string } | { ok: false }> {
+    return this.serializeLifecycle(async () => {
+      const clean = cleanUserTitle(title);
+      if (clean === null) return { ok: false } as const;
+      try {
+        const active = this._active;
+        if (active !== null && active.sessionId === sessionId) {
+          if (active.renameTitle === undefined) return { ok: false } as const;
+          active.renameTitle(clean);
+          return { ok: true, title: clean } as const;
+        }
+        // Never a sidecar for a session that does not exist.
+        await access(join(this.config.transcriptDir, `${sessionId}.jsonl`));
+        writeSessionTitle(
+          this.config.transcriptDir,
+          sessionId,
+          clean,
+          readSessionTopics(this.config.transcriptDir, sessionId),
+          { userSet: true },
+        );
+        return { ok: true, title: clean } as const;
+      } catch (err) {
+        console.warn(`[herta] renaming session ${sessionId} failed:`, err);
+        return { ok: false } as const;
+      }
+    });
+  }
+
+  async readSessionForExport(
+    sessionId: string,
+  ): Promise<SessionExportSource | null> {
+    try {
+      const active = this._active;
+      if (active !== null && active.sessionId === sessionId) {
+        return {
+          sessionId,
+          title: active.title,
+          lang: active.lang,
+          record: exportRecord(active.record),
+        };
+      }
+      const { meta, record } = await readSessionFileAsync(
+        join(this.config.transcriptDir, `${sessionId}.jsonl`),
+      );
+      const title = readSessionTitle(this.config.transcriptDir, sessionId);
+      return {
+        sessionId,
+        // What the sidebar shows: a generated title whose every user turn was
+        // rewound away is not the session's (loadSessionTitleState).
+        title:
+          title !== undefined &&
+          (record.some((b) => b.kind === "user") ||
+            readSessionTitleUserSet(this.config.transcriptDir, sessionId))
+            ? title
+            : null,
+        lang: meta.lang ?? "zh",
+        record: exportRecord(record),
+      };
+    } catch (err) {
+      console.warn(`[herta] reading session ${sessionId} for export:`, err);
+      return null;
+    }
+  }
+
   closeActiveSession(): Promise<void> {
     return this.serializeLifecycle(() => this.closeActiveInner());
   }
@@ -663,6 +746,27 @@ export function makeLifecycleSerializer(): <T>(
     tail = run.catch(() => undefined);
     return run;
   };
+}
+
+/**
+ * The record as an export reads it (ADR 0072 §3): what the window shows.
+ * Herta's thoughts are never shown, and a system block's evidence sections
+ * are the prompt's and the expander's — an export prints one line per
+ * block, and a command's output tail or an attachment's head excerpt can
+ * run to megabytes on the way over IPC. Exported for testing.
+ */
+export function exportRecord(record: TerminalRecord): TerminalRecord {
+  const out: TerminalRecordBlock[] = [];
+  for (const block of record) {
+    if (block.kind === "herta" && block.surface === "thought") continue;
+    if (block.kind === "system") {
+      const { evidenceDetail: _detail, evidence: _evidence, ...rest } = block;
+      out.push(rest);
+      continue;
+    }
+    out.push(block);
+  }
+  return out;
 }
 
 /** The dream trigger's activity surface (structural — tests pass a fake). */

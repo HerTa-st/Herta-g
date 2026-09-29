@@ -341,7 +341,8 @@
   color: #ffc46b;
   background: rgba(217, 119, 6, 0.22);
 }
-:root[data-theme="dark"] button.session-item__badge--dismiss {
+:root[data-theme="dark"] button.session-item__badge--dismiss,
+:root[data-theme="dark"] .session-item__badge--notice.is-error {
   color: #ff9d92;
   background: rgba(214, 90, 80, 0.2);
 }
@@ -2161,6 +2162,21 @@ button.agent-preview {
   cursor: default;
   background: transparent;
 }
+/* The sidebar session card's menu (ADR 0072 §3): this frame and these items,
+   fitted to its few short items and opened at the pointer, so it grows from
+   its top-left corner. The keyboard's highlight is the pointer's. */
+.session-menu.card-menu-tooltip[role="menu"] {
+  /* The frame's `right: 0` would stretch a box placed by its `left` to the
+     window's edge (stopped only by its 280px max). */
+  right: auto;
+  width: auto;
+  min-width: 168px;
+  transform-origin: top left;
+}
+.session-menu .card-menu-item:focus-visible {
+  outline: none;
+  background: var(--ink-a06);
+}
 .card-menu-error {
   padding: 6px 12px 8px;
   font-size: 11px;
@@ -3514,6 +3530,31 @@ button.agent-preview {
   );
   mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
 }
+/* Rename in place (ADR 0072 §3): the title becomes a field, so the fade
+   mask and the clip come off — the field's own edge is the edge. The field
+   keeps the title's type, so nothing shifts as it opens. */
+.session-item__title.is-editing {
+  overflow: visible;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.session-item__rename {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: -2px 0;
+  padding: 1px 6px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--card-solid);
+  font: inherit;
+  color: inherit;
+  outline: none;
+}
+.session-item__rename:focus {
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
 /* Full-title pop-out (user 2026-07-16): the fade mask above hides a long
    title's tail with no way to read it — resting the pointer on the card (or
    keyboard-focusing it) shows the WHOLE title in a fixed tip beside the
@@ -3713,6 +3754,20 @@ button.agent-preview {
    fallback — a sudden pop out of nowhere). It appears under the cursor
    (the failed click) so the reveal is immediate; leaving the card fades it
    out in place and the leave timer swaps in the trash once invisible. */
+/* A menu action's notice (ADR 0072 §3): 已导出 in the plain badge's blue, a
+   failure in the dismiss badge's red. It pops in like the plain badge and
+   fades out when its time is up, rather than vanish. */
+.session-item__badge--notice {
+  white-space: nowrap;
+  transition: opacity 150ms ease;
+}
+.session-item__badge--notice.is-error {
+  background: rgba(190, 60, 60, 0.13);
+  color: #b03a3a;
+}
+.session-item__badge--notice.is-leaving {
+  opacity: 0;
+}
 button.session-item__badge--dismiss {
   border: 0;
   font: inherit;

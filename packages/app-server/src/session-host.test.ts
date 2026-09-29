@@ -12,6 +12,9 @@ import {
   dispatchJournalDir,
   dispatchJournalPath,
   readSessionFile,
+  readSessionTitle,
+  readSessionTitleUserSet,
+  readSessionTopics,
   V2RecordPersister,
   writeSessionTitle,
 } from "@herta/core";
@@ -408,6 +411,142 @@ describe("deleteSession", () => {
     writeFileSync(join(wsDir, "x.txt"), "x");
     await host.deleteSession(s.sessionId);
     expect(existsSync(wsDir)).toBe(false);
+  });
+});
+
+// ── Rename and export (ADR 0072 §3) ──────────────────────────────────────
+
+function persistClosedSession(
+  cfg: AppServerConfig,
+  sessionId: string,
+  blocks: Parameters<V2RecordPersister["appendBlock"]>[0][],
+  lang?: "zh" | "en",
+): void {
+  const persister = V2RecordPersister.forNewSession({
+    sessionId,
+    workspaceRoot: cfg.workspaceRoot,
+    startedAt: new Date(),
+    transcriptDir: cfg.transcriptDir,
+    ...(lang !== undefined ? { lang } : {}),
+  });
+  for (const b of blocks) persister.appendBlock(b);
+}
+
+describe("renameSession", () => {
+  it("names a closed session, keeping its topics, and flags the name as the user's", async () => {
+    const cfg = mkConfig();
+    const sessionId = "to-rename";
+    persistClosedSession(cfg, sessionId, [{ kind: "user", text: "hi" }]);
+    const topics = [
+      { title: "旧标题", anchorIndex: 0, anchorText: "hi", at: "t" },
+    ];
+    writeSessionTitle(cfg.transcriptDir, sessionId, "旧标题", topics);
+    const host = createSessionHost(cfg);
+
+    const r = await host.renameSession?.(sessionId, "  新的\n名字  ");
+
+    expect(r).toEqual({ ok: true, title: "新的 名字" });
+    expect(readSessionTitle(cfg.transcriptDir, sessionId)).toBe("新的 名字");
+    expect(readSessionTitleUserSet(cfg.transcriptDir, sessionId)).toBe(true);
+    expect(readSessionTopics(cfg.transcriptDir, sessionId)).toEqual(topics);
+    // What the sidebar lists.
+    expect(host.listSessions()[0]?.title).toBe("新的 名字");
+  });
+
+  it("renames the open session through its titler", async () => {
+    const cfg = mkConfig();
+    const host = createSessionHost(cfg);
+    const s = await host.createSession({});
+
+    const r = await host.renameSession?.(s.sessionId, "我起的名字");
+
+    expect(r).toEqual({ ok: true, title: "我起的名字" });
+    expect(s.title).toBe("我起的名字");
+    expect(readSessionTitleUserSet(cfg.transcriptDir, s.sessionId)).toBe(true);
+    await host.closeActiveSession();
+  });
+
+  it("refuses an empty name and a session that does not exist, writing nothing", async () => {
+    const cfg = mkConfig();
+    persistClosedSession(cfg, "real", [{ kind: "user", text: "hi" }]);
+    const host = createSessionHost(cfg);
+
+    expect(await host.renameSession?.("real", "   ")).toEqual({ ok: false });
+    expect(await host.renameSession?.("ghost", "名字")).toEqual({ ok: false });
+    expect(existsSync(join(cfg.transcriptDir, "real.title.json"))).toBe(false);
+    expect(existsSync(join(cfg.transcriptDir, "ghost.title.json"))).toBe(false);
+  });
+
+  it("caps a long name", async () => {
+    const cfg = mkConfig();
+    persistClosedSession(cfg, "long", [{ kind: "user", text: "hi" }]);
+    const host = createSessionHost(cfg);
+    const r = await host.renameSession?.("long", "名".repeat(200));
+    expect(r?.ok && [...r.title].length).toBe(80);
+  });
+});
+
+describe("readSessionForExport", () => {
+  it("reads a closed session as the window shows it: no thoughts, no evidence sections", async () => {
+    const cfg = mkConfig();
+    const sessionId = "to-export";
+    persistClosedSession(
+      cfg,
+      sessionId,
+      [
+        { kind: "user", text: "hi" },
+        { kind: "herta", surface: "thought", text: "（想）" },
+        { kind: "herta", surface: "speech", text: "你好。" },
+        {
+          kind: "system",
+          label: "差分协处理器",
+          body: "完成",
+          role: "done-marker",
+          evidenceDetail: "↳ 输出:\n很长的输出",
+          evidence: [{ kind: "output", text: "很长的输出" }],
+        },
+      ],
+      "en",
+    );
+    writeSessionTitle(cfg.transcriptDir, sessionId, "导出的会话");
+    const host = createSessionHost(cfg);
+
+    const src = await host.readSessionForExport?.(sessionId);
+
+    expect(src?.title).toBe("导出的会话");
+    expect(src?.lang).toBe("en");
+    expect(src?.record.map((b) => b.kind)).toEqual(["user", "herta", "system"]);
+    const marker = src?.record[2];
+    expect(marker).toMatchObject({ kind: "system", body: "完成" });
+    expect(marker).not.toHaveProperty("evidenceDetail");
+    expect(marker).not.toHaveProperty("evidence");
+    expect(host.activeSession).toBeNull();
+  });
+
+  it("leaves out a generated title the record no longer supports, as the sidebar does", async () => {
+    const cfg = mkConfig();
+    persistClosedSession(cfg, "rewound", []);
+    writeSessionTitle(cfg.transcriptDir, "rewound", "被撤回的标题");
+    persistClosedSession(cfg, "named", []);
+    writeSessionTitle(cfg.transcriptDir, "named", "我起的名字", [], {
+      userSet: true,
+    });
+    const host = createSessionHost(cfg);
+    expect((await host.readSessionForExport?.("rewound"))?.title).toBeNull();
+    expect((await host.readSessionForExport?.("named"))?.title).toBe(
+      "我起的名字",
+    );
+  });
+
+  it("reads the open session from memory, and answers null for one that cannot be read", async () => {
+    const cfg = mkConfig();
+    const host = createSessionHost(cfg);
+    const s = await host.createSession({ lang: "zh" });
+    const src = await host.readSessionForExport?.(s.sessionId);
+    expect(src?.sessionId).toBe(s.sessionId);
+    expect(src?.lang).toBe("zh");
+    expect(await host.readSessionForExport?.("ghost")).toBeNull();
+    await host.closeActiveSession();
   });
 });
 

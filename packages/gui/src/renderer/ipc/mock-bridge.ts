@@ -10,6 +10,7 @@ import type {
   RewindResult,
   SessionAgentEvent,
   SessionDeletedEvent,
+  SessionExportSource,
   SessionMetadata,
   SessionSearchHit,
   SteerTextResult,
@@ -118,6 +119,22 @@ export interface MockHertaBridgeOpts {
    *  §2). UNDEFINED (the default) omits the surface — `@` completes only
    *  `@板砖`, like the website demo. */
   readonly workspaceFiles?: readonly string[];
+  /** The sidebar session menu's surface (ADR 0072 §3): rename, and the
+   *  export's read and save. UNDEFINED (the default) omits all three — the
+   *  menu offers nothing, like the website demo. Rename answers the trimmed
+   *  title unless `renameResult` says otherwise; the read answers
+   *  `exportSource` (null = unreadable); the save answers `saveResult`
+   *  (default saved). */
+  readonly sessionActions?: {
+    readonly renameResult?:
+      | { readonly ok: true; readonly title: string }
+      | { readonly ok: false };
+    readonly exportSource?: SessionExportSource | null;
+    readonly saveResult?: {
+      readonly saved: boolean;
+      readonly failed?: boolean;
+    };
+  };
   /** Seed for getTheme (Settings → Window appearance). Default "light". */
   readonly themeResult?: ThemePref;
   /** Seed for getDeviceScene (Settings → 差分协处理器 → 3D device, ADR
@@ -234,6 +251,9 @@ export interface MockHertaBridge {
     setCloseToTray: boolean[];
     setAttention: Partial<AttentionSettings>[];
     listWorkspaceFiles: number;
+    renameSession: Array<[string, string]>;
+    readSessionForExport: string[];
+    saveSessionExport: Array<[string, string]>;
     setTheme: ThemePref[];
     setDeviceScene: boolean[];
     getInteractionLanguage: number;
@@ -348,6 +368,9 @@ export function createMockHertaBridge(
     setCloseToTray: [],
     setAttention: [],
     listWorkspaceFiles: 0,
+    renameSession: [],
+    readSessionForExport: [],
+    saveSessionExport: [],
     setTheme: [],
     setDeviceScene: [],
     getInteractionLanguage: 0,
@@ -786,6 +809,30 @@ export function createMockHertaBridge(
               files: [...(opts.workspaceFiles as readonly string[])],
               truncated: false,
             };
+          },
+        }
+      : {}),
+    ...(opts.sessionActions !== undefined
+      ? {
+          renameSession: async (id: string, title: string) => {
+            calls.renameSession.push([id, title]);
+            const r = opts.sessionActions?.renameResult;
+            if (r !== undefined) return r;
+            const clean = title.trim();
+            return clean === ""
+              ? { ok: false as const }
+              : { ok: true as const, title: clean };
+          },
+          readSessionForExport: async (id: string) => {
+            calls.readSessionForExport.push(id);
+            const src = opts.sessionActions?.exportSource;
+            return src === undefined
+              ? { sessionId: id, title: null, lang: "zh" as const, record: [] }
+              : src;
+          },
+          saveSessionExport: async (name: string, markdown: string) => {
+            calls.saveSessionExport.push([name, markdown]);
+            return opts.sessionActions?.saveResult ?? { saved: true };
           },
         }
       : {}),

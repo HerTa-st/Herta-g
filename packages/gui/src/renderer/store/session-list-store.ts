@@ -109,6 +109,20 @@ export class SessionListStore {
     for (const l of this.listeners) l();
   }
 
+  /** The user renamed a session (ADR 0072 §3): its card shows the name at
+   *  once. No type-in — the user just typed it — and a generated title that
+   *  was still typing in on that card stops. */
+  applyUserTitle(sessionId: string, title: string | null): void {
+    this.sessions = this.sessions.map((s) => {
+      if (s.sessionId !== sessionId) return s;
+      // null: a failed rename going back to no title at all.
+      const { title: _old, ...rest } = s;
+      return title === null ? rest : { ...rest, title };
+    });
+    if (this.liveTitle?.sessionId === sessionId) this.liveTitle = null;
+    for (const l of this.listeners) l();
+  }
+
   dispose(): void {
     this.disconnect();
     this.listeners.clear();

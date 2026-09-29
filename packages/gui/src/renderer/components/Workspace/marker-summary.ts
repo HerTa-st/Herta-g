@@ -21,12 +21,24 @@ const STATE_KEY: Record<DoneMarkerSummary["state"], MessageKey> = {
  * through verbatim — it is already canonical mixed-locale text and there is
  * nothing structured left to translate.
  */
-export function composeMarkerSummary(summary: ActivitySummary, t: TFn): string {
+export function composeMarkerSummary(
+  summary: ActivitySummary,
+  t: TFn,
+  opts?: {
+    /** Put the run's `+N −M` into the text, after the file count — for a
+     *  reader with no DiffStat element beside it (the Markdown export, ADR
+     *  0072 §3). */
+    readonly withLines?: boolean;
+  },
+): string {
   if (summary.kind === "raw") return summary.text;
   if (summary.kind === "noop") return t("record.marker.noop");
 
   const m = summary.marker;
   return composeDoneMarker(m, {
+    ...(opts?.withLines === true
+      ? { lines: (add: number, del: number) => `+${add} −${del}` }
+      : {}),
     stateWord: t(STATE_KEY[m.state]),
     file: (n) =>
       n === 1
@@ -40,7 +52,7 @@ export function composeMarkerSummary(summary: ActivitySummary, t: TFn): string {
       n === 1
         ? t("record.marker.risk", { n: 1 })
         : t("record.marker.risks", { n }),
-    // `lines` is deliberately NOT supplied here. The GUI renders the roll-up's
+    // `lines` is left out unless asked for (above). The GUI renders the roll-up's
     // `+187 −42` as an ELEMENT beside this string (the digits count up), so
     // composing it into the text too would print it twice. The canonical body
     // and the CLI both include it — see CN_MARKER_LABELS and system-localize.

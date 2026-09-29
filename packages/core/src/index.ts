@@ -180,12 +180,15 @@ export {
 export {
   type LastTurnEnd,
   readSessionFile,
+  readSessionFileAsync,
+  type SessionFileContents,
   SessionFileError,
   type SessionFileErrorCode,
   type SessionMeta,
 } from "./session-io/read-session-file.js";
 export {
   readSessionTitle,
+  readSessionTitleUserSet,
   readSessionTopics,
   type SessionTopic,
   writeSessionTitle,

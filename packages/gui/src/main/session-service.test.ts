@@ -39,6 +39,9 @@ describe("countsAsUserActivity — what tells a running dream pass the user is b
       CMD.recordSlice,
       CMD.setDreamConfig,
       CMD.setLocale,
+      // The session menu (ADR 0072 §3).
+      CMD.renameSession,
+      CMD.saveSessionExport,
     ]) {
       expect(countsAsUserActivity(channel), channel).toBe(true);
     }

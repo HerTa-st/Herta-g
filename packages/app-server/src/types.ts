@@ -476,6 +476,17 @@ export type VoiceCueEvent =
  *  drop the card (always) and blank the main panel (if it was the open one). */
 export type SessionDeletedEvent = { readonly sessionId: string };
 
+/** What an export is built from (ADR 0072 §3). `record` is what the window
+ *  shows: Herta's thoughts are left out, and so are the system blocks'
+ *  evidence sections (`evidenceDetail`, `evidence`), which the export does
+ *  not print and which can run to megabytes. */
+export interface SessionExportSource {
+  readonly sessionId: string;
+  readonly title: string | null;
+  readonly lang: "zh" | "en";
+  readonly record: TerminalRecord;
+}
+
 // ───── SessionHost / Session interfaces ─────
 
 export interface SessionHost {
@@ -499,6 +510,20 @@ export interface SessionHost {
   deleteSession(
     sessionId: string,
   ): Promise<{ ok: boolean; wasActive: boolean; removed?: boolean }>;
+  /** Name a session by hand, open or not (ADR 0072 §3). The title is
+   *  cleaned (one line, capped); an empty one, an unknown session or a
+   *  failed write answers `ok: false`. Optional: a host without the GUI's
+   *  sidebar omits it. */
+  renameSession?(
+    sessionId: string,
+    title: string,
+  ): Promise<
+    { readonly ok: true; readonly title: string } | { readonly ok: false }
+  >;
+  /** A session's record, title and language for an export (ADR 0072 §3):
+   *  the open one's from memory, any other's read off the event loop. Null
+   *  when it cannot be read. Optional like `renameSession`. */
+  readSessionForExport?(sessionId: string): Promise<SessionExportSource | null>;
   closeActiveSession(): Promise<void>;
   /** Release host-level resources (clears the idle trigger interval, if any).
    *  Call on app shutdown. Idempotent. */
@@ -566,8 +591,14 @@ export interface Session {
   readonly record: TerminalRecord;
   /** Synchronous snapshot of the current pending overlay, or null when idle. */
   readonly overlay: ApprovalOverlayState | null;
-  /** Current session title (generated after the first turn), or null. */
+  /** Current session title (generated after the first turn, or the user's
+   *  own), or null. */
   readonly title: string | null;
+  /** The user renamed the session (ADR 0072 §3): `title` is already cleaned
+   *  (`cleanUserTitle`). The automatic retitle leaves it alone from here on.
+   *  Throws when the title sidecar cannot be written. Optional: only the GUI
+   *  SessionImpl implements it. */
+  renameTitle?(title: string): void;
   /** The session's topic history (title changes anchored at the user block
    *  that started each topic) — the topic rail's jump targets. Empty until
    *  a title exists. */

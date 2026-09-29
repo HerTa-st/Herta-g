@@ -6,6 +6,7 @@ import type {
 import {
   errorMessage,
   readSessionTitle,
+  readSessionTitleUserSet,
   readSessionTopics,
   writeSessionTitle,
 } from "@herta/core";
@@ -126,22 +127,45 @@ export function loadSessionTitleState(
   transcriptDir: string,
   sessionId: string,
   loadedRecord: TerminalRecord,
-): { title: string | null; topics: readonly SessionTopic[] } {
+): {
+  title: string | null;
+  topics: readonly SessionTopic[];
+  userSet: boolean;
+} {
   let title = readSessionTitle(transcriptDir, sessionId) ?? null;
   let topics: readonly SessionTopic[] = readSessionTopics(
     transcriptDir,
     sessionId,
   );
+  // A name the user gave (ADR 0072 §3) describes the session, not a window
+  // of it: it outlives a rewind to empty, where a generated title does not.
+  const userSet =
+    title !== null && readSessionTitleUserSet(transcriptDir, sessionId);
   if (!loadedRecord.some((b) => b.kind === "user")) {
     // No surviving user turn: whatever the sidecar describes is gone.
-    title = null;
+    if (!userSet) title = null;
     topics = [];
   } else {
     topics = pruneTopics(topics, loadedRecord.length);
   }
   const synthesized = synthesizeInitialTopic(title, topics, loadedRecord);
   if (synthesized !== null) topics = [synthesized];
-  return { title, topics };
+  return { title, topics, userSet };
+}
+
+/** Longest title a rename keeps, in characters (a generated one is a short
+ *  phrase; the sidebar masks anything past its width anyway). */
+export const MAX_USER_TITLE_CHARS = 80;
+
+/** A typed title made fit to keep: one line, spaces collapsed, trimmed,
+ *  capped by code point. Null when nothing is left. */
+export function cleanUserTitle(raw: string): string | null {
+  const one = raw.replace(/\s+/g, " ").trim();
+  if (one === "") return null;
+  const chars = [...one];
+  return chars.length <= MAX_USER_TITLE_CHARS
+    ? one
+    : chars.slice(0, MAX_USER_TITLE_CHARS).join("").trimEnd();
 }
 
 export interface SessionTitlerDeps {
@@ -157,10 +181,15 @@ export interface SessionTitlerDeps {
   readonly emit: (event: TitleEvent) => void;
   readonly initialTitle: string | null;
   readonly initialTopics: readonly SessionTopic[];
+  /** The initial title is the user's own (ADR 0072 §3). */
+  readonly initialUserSet?: boolean;
 }
 
 export class SessionTitler {
   private _title: string | null;
+  /** The user named the session (ADR 0072 §3): no automatic (re)title from
+   *  here on, and a rewind to empty keeps the name. */
+  private userSet: boolean;
   /** Topic history (title changes anchored at their window's first user
    *  block) — the rail's jump targets. Loaded from the sidecar; appended by
    *  a landed title; pruned by rewind. */
@@ -187,7 +216,8 @@ export class SessionTitler {
   constructor(private readonly deps: SessionTitlerDeps) {
     this._title = deps.initialTitle;
     this._topics = deps.initialTopics;
-    this.reEntryRetitlePending = deps.initialTitle !== null;
+    this.userSet = deps.initialUserSet === true && deps.initialTitle !== null;
+    this.reEntryRetitlePending = deps.initialTitle !== null && !this.userSet;
   }
 
   get title(): string | null {
@@ -199,6 +229,29 @@ export class SessionTitler {
   }
 
   /**
+   * The user renamed the session (ADR 0072 §3). The name is persisted with
+   * its flag and kept: the periodic retitle stops, so the topic rail keeps
+   * the topics it has and gains no new ones. A generation already in flight
+   * is fenced out like a rewind's — it would land a title over the one just
+   * typed. `title` is already cleaned (`cleanUserTitle`). Throws when the
+   * sidecar cannot be written, so the caller can say the rename failed.
+   */
+  setUserTitle(title: string): void {
+    writeSessionTitle(
+      this.deps.transcriptDir,
+      this.deps.sessionId,
+      title,
+      this._topics,
+      { userSet: true },
+    );
+    this.epoch += 1;
+    this._title = title;
+    this.userSet = true;
+    this.reEntryRetitlePending = false;
+    this.turnsSinceTitle = 0;
+  }
+
+  /**
    * Decide whether the user turn that just finished should (re)generate the
    * title, and if so kick it off (fire-and-forget). Triggers: no title yet
    * (new session or a prior failed attempt), a re-opened titled session's
@@ -207,6 +260,8 @@ export class SessionTitler {
    * retry next turn.
    */
   afterUserTurn(): void {
+    // The user's own name stands (ADR 0072 §3).
+    if (this.userSet) return;
     this.turnsSinceTitle += 1;
     const shouldRetitle =
       (this._title === null && this.attempts < MAX_INITIAL_TITLE_ATTEMPTS) ||
@@ -230,7 +285,9 @@ export class SessionTitler {
    */
   onRewind(recordLength: number, hasUserTurn: boolean): void {
     this.epoch += 1;
-    if (!hasUserTurn) {
+    // A name the user gave survives (ADR 0072 §3): it names the session, not
+    // the exchange the rewind withdrew.
+    if (!hasUserTurn && !this.userSet) {
       this._title = null;
       this.reEntryRetitlePending = false;
       this.turnsSinceTitle = 0;
@@ -245,6 +302,7 @@ export class SessionTitler {
           this.deps.sessionId,
           this._title,
           this._topics,
+          { userSet: this.userSet },
         );
       }
     }

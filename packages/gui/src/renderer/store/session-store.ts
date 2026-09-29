@@ -569,6 +569,15 @@ export class SessionStore {
     this.emit({ ...this.snapshot, pendingJump: null });
   }
 
+  /** The user renamed a session (ADR 0072 §3). The open one's header takes
+   *  the name at once, without the reveal a generated title gets; main
+   *  sends no title event for a rename. Any other session is not shown
+   *  here. */
+  applyUserTitle(sessionId: string, title: string | null): void {
+    if (this.snapshot.sessionId !== sessionId) return;
+    this.emit({ ...this.snapshot, title, titleAnimate: false });
+  }
+
   /** Single-flight guard for loadOlderBlocks. */
   private loadingOlder = false;
 

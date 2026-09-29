@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readSessionFile, SessionFileError } from "./read-session-file.js";
+import {
+  readSessionFile,
+  readSessionFileAsync,
+  SessionFileError,
+} from "./read-session-file.js";
 
 const HEADER = (overrides: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -262,6 +266,26 @@ describe("readSessionFile", () => {
     expect(latestWorkspaceSet).toBe("/ws/two");
     expect(record).toHaveLength(1);
     expect(record[0]).toEqual({ kind: "user", text: "hi" });
+  });
+
+  it("the async read parses exactly what the sync read does (ADR 0072 §3)", async () => {
+    const path = write(
+      [
+        HEADER({ lang: "en" }),
+        '{"kind":"user","text":"hi","at":"2026-06-18T09:30:00.000Z"}',
+        '{"kind":"herta","text":"好"}',
+        '{"_kind":"turn_end","outcome":"completed"}',
+        '{"_kind":"workspace_set","path":"/ws/one"}',
+        "",
+      ].join("\n"),
+    );
+    expect(await readSessionFileAsync(path)).toEqual(readSessionFile(path));
+  });
+
+  it("the async read names a missing file not-found", async () => {
+    await expect(
+      readSessionFileAsync(join(tmp, "missing.jsonl")),
+    ).rejects.toMatchObject({ code: "not-found" });
   });
 });
 

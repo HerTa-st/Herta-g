@@ -15,6 +15,7 @@ import {
   type ProviderAdapter,
   type ProviderEvent,
   readSessionTitle,
+  readSessionTitleUserSet,
   type TerminalRecord,
   V2RecordPersister,
   writeSessionTitle,
@@ -503,6 +504,92 @@ describe("SessionImpl — title generation", () => {
     expect(session.title).toBe("排查解析报错");
     expect(session.topics).toHaveLength(1);
     await session.close();
+  });
+
+  it("a rename mid-generation drops the late title — the user's name stands (ADR 0072 §3)", async () => {
+    const cfg = mkConfig();
+    const sessionId = randomUUID();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((res) => {
+      release = res;
+    });
+    const slowTitle: ProviderAdapter = {
+      streamChat() {
+        return (async function* () {
+          await gate;
+          yield { type: "text-delta", text: "生成的标题" } as ProviderEvent;
+          yield { type: "finish", reason: "stop" } as ProviderEvent;
+        })();
+      },
+    };
+    const session = await mkSession(cfg, sessionId, slowTitle);
+    await session.submitText("hi");
+    // The first title is being generated when the user names the session.
+    session.renameTitle("我起的名字");
+    release?.();
+    await session.whenTitleSettled();
+    expect(session.title).toBe("我起的名字");
+    expect(readSessionTitle(cfg.transcriptDir, sessionId)).toBe("我起的名字");
+    expect(readSessionTitleUserSet(cfg.transcriptDir, sessionId)).toBe(true);
+    await session.close();
+  });
+
+  it("a renamed session is never retitled — not periodically, not on re-entry (ADR 0072 §3)", async () => {
+    const cfg = mkConfig();
+    const sessionId = randomUUID();
+    let calls = 0;
+    const counting: ProviderAdapter = {
+      streamChat() {
+        calls += 1;
+        const n = calls;
+        return (async function* () {
+          yield { type: "text-delta", text: `标题${n}` };
+          yield { type: "finish", reason: "stop" };
+        })();
+      },
+    };
+    const session = await mkSession(cfg, sessionId, counting);
+    await session.submitText("msg 0");
+    await session.whenTitleSettled();
+    expect(calls).toBe(1);
+    session.renameTitle("我起的名字");
+    // Seven more turns: past the periodic window (six) that would retitle.
+    for (let i = 1; i <= 7; i++) {
+      await session.submitText(`msg ${i}`);
+      await session.whenTitleSettled();
+    }
+    expect(calls).toBe(1);
+    expect(session.title).toBe("我起的名字");
+    await session.close();
+
+    // Reopened: the flag holds, so the re-entry retitle does not fire.
+    const reopened = await mkSession(cfg, sessionId, counting, [
+      { kind: "user", text: "msg 0" },
+      { kind: "herta", surface: "speech", text: "嗯。" },
+    ] as TerminalRecord);
+    expect(reopened.title).toBe("我起的名字");
+    await reopened.submitText("again");
+    await reopened.whenTitleSettled();
+    expect(calls).toBe(1);
+    expect(reopened.title).toBe("我起的名字");
+    await reopened.close();
+  });
+
+  it("a rewind to empty keeps the user's name, in the session and on reopen (ADR 0072 §3)", async () => {
+    const cfg = mkConfig();
+    const sessionId = randomUUID();
+    const session = await mkSession(cfg, sessionId, stubChatProvider([]));
+    await session.submitText("hi");
+    await session.whenTitleSettled();
+    session.renameTitle("我起的名字");
+    const result = await session.rewindLastTurn();
+    expect(result.ok).toBe(true);
+    expect(session.title).toBe("我起的名字");
+    await session.close();
+
+    const reopened = await mkSession(cfg, sessionId, stubChatProvider([]), []);
+    expect(reopened.title).toBe("我起的名字");
+    await reopened.close();
   });
 
   it("the initial title's prompt carries no incumbent contract", async () => {
