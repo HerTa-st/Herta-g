@@ -35,10 +35,11 @@ describe("captureWindowState", () => {
   });
 });
 
-describe("MIN_WINDOW_* (band threshold, measured 2026-08-04)", () => {
-  it("sits exactly at the measured band threshold", () => {
-    // The bottom-edge gradient band is WIDTH-driven: 1280x720 renders clean,
-    // 1200x800 leaves .app 96px short of the viewport. Height is free.
+describe("MIN_WINDOW_* (the floor)", () => {
+  it("stays at 1280x720", () => {
+    // Set against a bottom-edge band that turned out to be a stylesheet rule
+    // (removed 2026-09-29; app-frame-clip.test.ts). Width is a layout call now;
+    // raising it is what put the floor above real laptops (B1).
     expect(MIN_WINDOW_W).toBe(1280);
     expect(MIN_WINDOW_H).toBeLessThanOrEqual(720);
   });
@@ -60,7 +61,7 @@ describe("MIN_WINDOW_* (band threshold, measured 2026-08-04)", () => {
       width: MIN_WINDOW_W,
       height: MIN_WINDOW_H,
     });
-    // A 1024x768 runner/VM: width yields below the band threshold on purpose.
+    // A 1024x768 runner/VM: width yields below the floor on purpose.
     expect(fitMinimum({ x: 0, y: 0, width: 1024, height: 768 })).toEqual({
       width: 1024,
       height: 720,

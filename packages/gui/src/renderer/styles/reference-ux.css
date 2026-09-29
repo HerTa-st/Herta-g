@@ -2268,23 +2268,6 @@ button.agent-preview {
   outline-offset: -2px;
 }
 
-/* Slice 3.1 — WCO caption-button clearance (SPEC v0.3 §5.1.1).
-   The native min/max/close buttons render at the window's top-right,
-   ~40px tall (titleBarOverlay.height). The card's top-right column is
-   the utility rail, whose DeviceCard has an interactive ⋯ menu near the
-   top. To keep the buttons floating in the green gutter ABOVE the card
-   (never over card content), the top gutter must stay ≥ the button
-   height. The full-size layout leaves ~52px, but the lifted
-   @media(max-width:1200px) rule shrinks the card margin to 18px — this
-   override restores ≥48px of vertical gutter (24px top) at that
-   breakpoint. Overrides only `height`; the lifted rule's width and
-   grid-template-columns still apply (later same-specificity rule wins). */
-@media (max-width: 1200px) {
-  .app {
-    height: calc(100vh - 96px);
-  }
-}
-
 /* Control-button styling. Shared by the TopBar buttons (the controls moved
    out of the sidebar into the full-width top bar on 2026-06-01); the class
    name is retained for low-churn reuse. */

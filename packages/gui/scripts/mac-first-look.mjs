@@ -8,8 +8,9 @@
  * This attaches to the packaged app over CDP instead and captures the RENDERER
  * at chosen sizes, independent of the runner's screen. It also re-runs the
  * band measurement (does `.app` cover the viewport?) that was only ever done
- * on Windows — the bottom-edge gradient band is what set MIN_WINDOW_W, and
- * macOS frameless windows are a different implementation.
+ * on Windows. The bottom-edge gradient band it looks for turned out to be a
+ * stylesheet rule, not the frameless window (removed 2026-09-29); the check
+ * stays as a cheap guard.
  *
  *   node mac-first-look.mjs <outDir> [port]
  *
@@ -26,8 +27,8 @@ mkdirSync(OUT, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Sizes to render the UI at. 1280x800 is the darwin minimum (and the measured
- *  band threshold); 1440x900 is the Windows default footprint. */
+/** Sizes to render the UI at. 1280x800 is the darwin default footprint;
+ *  1440x900 is the Windows one. */
 const SIZES = [
   { label: "min-1280x800", width: 1280, height: 800 },
   { label: "default-1440x900", width: 1440, height: 900 },

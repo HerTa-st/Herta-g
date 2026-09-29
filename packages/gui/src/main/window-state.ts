@@ -19,19 +19,16 @@ export interface RectLike {
  * The app's minimum footprint — the size below which the window may not be
  * resized, subject to `fitMinimum` below.
  *
- * The floor exists because below a certain size a sliver of the raw body
- * gradient shows at the window's bottom edge (a frameless viewport-vs-content
- * quirk `.app`'s inset:0 frost fill can't chase). MEASURED 2026-08-04 by
- * seeding window bounds and relaunching the real app: the band is driven by
- * WIDTH alone, and appears below 1280 —
- *
- *     1280x800 clean · 1280x760 clean · 1280x720 clean
- *     1200x800 → .app 96px short · 1100x800 → 96px short
- *
- * confirmed again on macOS by the CI probe (run 30921312310, gap 0 at both
- * 1280x800 and 1440x900). The historical 900px height component was never
- * load-bearing, so the floor is now the measured threshold itself and is the
- * same on both platforms — per-platform TASTE moved to DEFAULT_WINDOW_*.
+ * The floor was set at 1280 against a band of raw body gradient along the
+ * window's bottom edge, MEASURED 2026-08-04 as width-driven (1280x720 clean,
+ * 1200x800 and 1100x800 → `.app` 96px short) and blamed on a frameless-window
+ * quirk. It was our own stylesheet: a leftover
+ * `@media (max-width: 1200px) { .app { height: calc(100vh - 96px) } }`.
+ * That rule is gone (2026-09-29), `.app` fills the window at every width, and
+ * app-frame-clip.test.ts keeps it that way — so 1280 no longer guards
+ * against anything; it is the narrowest width the layout has been reviewed
+ * at, the same on both platforms. Per-platform TASTE lives in
+ * DEFAULT_WINDOW_*.
  *
  * Do not raise width above 1280 to "be safe": that is what put the floor
  * above real laptop screens (audit 2026-08-05, B1).
@@ -44,7 +41,7 @@ export const MIN_WINDOW_H = 720;
  * display clamp below. Deliberately larger than the minimum: those used to be
  * the same number, which is what made the floor unfixable (lowering it to fit
  * a small laptop would also have shrunk the window on a 4K monitor). Separate
- * knobs: this one is taste, MIN_WINDOW_* is the band threshold.
+ * knobs: this one is taste, MIN_WINDOW_* is the floor.
  *
  * macOS keeps 1280x800 — the size actually verified on the CI screenshot pass
  * (run 30921312310) and a comfortable fit inside a 13" Air's ~1440x805.
@@ -64,8 +61,8 @@ export const DEFAULT_WINDOW_H = process.platform === "darwin" ? 800 : 900;
  * bar or accelerator. First-run onboarding is the specific casualty: both
  * routes to entering an API key sit in the cut-off region.
  *
- * Yes, dropping below 1280 wide brings back the bottom gradient band. A
- * visible sliver beats an unreachable composer.
+ * Below 1280 wide the layout's narrower breakpoints take over (the utility
+ * rail hides under 900); the frame still fills the window.
  */
 export function fitMinimum(area: RectLike | undefined): {
   width: number;

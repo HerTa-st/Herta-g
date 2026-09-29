@@ -44,3 +44,27 @@ describe("the app frame clips, it does not scroll", () => {
     expect(decls.at(-1)).toBe("clip");
   });
 });
+
+/**
+ * The frame fills the window at every width. A leftover rule from the
+ * caption-button gutter era set `.app { height: calc(100vh - 96px) }` under
+ * `max-width: 1200px`; against `position: fixed; inset: 0` it left the frame
+ * 96px short, and the body gradient showed as a band along the bottom — in
+ * the AppImage catalog's 800x600 screenshot (2026-09-29), and the reason
+ * MIN_WINDOW_W was set to 1280. Only the first rule may place the box.
+ */
+describe("the app frame fills the window", () => {
+  it("no later .app rule changes the frame's height or edges", () => {
+    const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+    const bodies = [...bare.matchAll(/(?:^|[{},\s])\.app\s*\{([^}]*)\}/g)].map(
+      (m) => m[1],
+    );
+    expect(appRule()).toMatch(/position\s*:\s*fixed/);
+    expect(appRule()).toMatch(/inset\s*:\s*0/);
+    for (const body of bodies.slice(1)) {
+      expect(body).not.toMatch(
+        /(?:^|[;\s])(?:(?:min-|max-)?height|top|bottom|inset)\s*:/,
+      );
+    }
+  });
+});
