@@ -15,6 +15,7 @@ import {
   insertMention,
   rankPaths,
 } from "../../lib/file-mention.js";
+import { recallLastMessage } from "../../lib/recall-last-message.js";
 import { submitMessage } from "../../lib/submit-message.js";
 import { stopAllVoice } from "../../voice/play-voice.js";
 import { Tooltip } from "../Tooltip/Tooltip.js";
@@ -1035,6 +1036,28 @@ export function Composer(): JSX.Element {
                   setMention(null);
                   return;
                 }
+              }
+              // Up-arrow recall (ADR 0072 §3): in an EMPTY composer, ↑ puts
+              // back the last message sent in this session. Anything typed
+              // keeps ↑ for moving the caret.
+              if (
+                e.key === "ArrowUp" &&
+                text.length === 0 &&
+                !e.shiftKey &&
+                !e.altKey &&
+                !e.ctrlKey &&
+                !e.metaKey
+              ) {
+                const last = recallLastMessage(
+                  sessionStore.getSnapshot().record,
+                  lang,
+                );
+                if (last !== null) {
+                  e.preventDefault();
+                  setText(last);
+                  pendingCaret.current = last.length;
+                }
+                return;
               }
               if (e.key === "Enter" && !e.shiftKey) {
                 // IME safety (Chinese input): Enter during composition confirms

@@ -1367,9 +1367,43 @@ button,
   /* Point the u-turn arrow leftward (back/rewind) rather than down. */
   transform: rotate(90deg);
 }
+/* Copy a reply (ADR 0072 §3) — Herta's action row, dressed as the user
+   bubble's rewind. Stays usable while a turn runs: copying disturbs nothing. */
+.message-copy {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -2px 0;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-3);
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease;
+}
+.message-copy:hover {
+  background: var(--wash-3);
+  color: var(--ink-2);
+}
+.message-copy:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.message-copy.is-copied {
+  color: var(--accent);
+}
+.message-copy-svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 1.8;
+}
 /* Revealed while hovering the bubble OR the row itself (so the cursor can land
-   on the rewind button); the row turns interactive only while revealed. */
+   on the rewind button); the row turns interactive only while revealed. A
+   reply that ends on a code card reveals it from the card. */
 .message-bubble:hover + .message-actions,
+.code-standalone:hover + .message-actions,
 .message-actions:hover {
   opacity: 1;
   pointer-events: auto;

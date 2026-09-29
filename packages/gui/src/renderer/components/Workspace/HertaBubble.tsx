@@ -1,9 +1,66 @@
 import { stripDisplayUnsafe } from "@herta/core/text-sanitize";
-import { memo, type RefObject } from "react";
+import { memo, type RefObject, useEffect, useState } from "react";
 import { useT } from "../../i18n/LocaleProvider.js";
 import { renderBanzhuanText } from "../../lib/banzhuan-text.js";
+import { replyProse } from "../../lib/reply-copy.js";
 import { type Segment, segmentSpeech } from "../../lib/segment-speech.js";
+import { Tooltip } from "../Tooltip/Tooltip.js";
 import { BubbleTime } from "./BubbleTime.js";
+
+/** How long the copy button says "copied" before it reads "copy" again. */
+const COPIED_MS = 1500;
+
+/**
+ * Copy the reply (ADR 0072 §3): her prose only — the code cards keep their
+ * deliberate lack of a copy affordance (Slice 5 Q1, `replyProse`). Beside
+ * the timestamp in the hover-revealed action row, dressed as the user
+ * bubble's rewind; it confirms with a check for a moment.
+ */
+function CopyReply(props: { readonly text: string }): JSX.Element {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = window.setTimeout(() => setCopied(false), COPIED_MS);
+    return () => window.clearTimeout(id);
+  }, [copied]);
+  const label = t(copied ? "workspace.copied" : "workspace.copyReply");
+  return (
+    <Tooltip label={label} placement="bottom">
+      <button
+        type="button"
+        className={`message-copy${copied ? " is-copied" : ""}`}
+        aria-label={label}
+        onClick={() => {
+          void navigator.clipboard?.writeText(props.text).then(
+            () => setCopied(true),
+            () => undefined,
+          );
+        }}
+      >
+        <svg
+          className="message-copy-svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          {copied ? (
+            <path d="m5 12.5 4.5 4.5L19 7.5" />
+          ) : (
+            <>
+              <rect x="8.5" y="8.5" width="11" height="11" rx="2.5" />
+              <path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
+            </>
+          )}
+        </svg>
+      </button>
+    </Tooltip>
+  );
+}
 
 export interface HertaBubbleProps {
   readonly text: string;
@@ -95,8 +152,11 @@ export const HertaBubble = memo(function HertaBubble(
   // stripDisplayUnsafe: render-side scrub for bidi/control chars — covers
   // disk-loaded legacy blocks the commit-side sanitizer (slice 2) never saw.
   // Identity for normal text.
-  const segments = segmentSpeech(stripDisplayUnsafe(props.text));
+  const safe = stripDisplayUnsafe(props.text);
+  const segments = segmentSpeech(safe);
   if (segments.length === 0) return null;
+  const prose = replyProse(safe, props.lang ?? "zh");
+  const hasActions = prose.length > 0 || props.at !== undefined;
   return (
     <>
       {segments.map((seg, i) => {
@@ -109,11 +169,12 @@ export const HertaBubble = memo(function HertaBubble(
           >
             <SegmentBody seg={seg} lang={props.lang} />
             {/* Hover-revealed action row below the bubble — once per
-                utterance, on the stack tail (Herta turns carry only the
-                timestamp; rewind is a user-turn affordance). */}
-            {isLast && props.at !== undefined && (
+                utterance, on the stack tail: copy (her prose; ADR 0072 §3)
+                and the timestamp. Rewind is a user-turn affordance. */}
+            {isLast && hasActions && (
               <div className="message-actions">
-                <BubbleTime at={props.at} />
+                {prose.length > 0 && <CopyReply text={prose} />}
+                {props.at !== undefined && <BubbleTime at={props.at} />}
               </div>
             )}
           </div>

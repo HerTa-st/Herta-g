@@ -354,6 +354,9 @@ export const zh = {
   "connect.button": "接入黑塔空间站",
   "connect.failed": "会话建立失败——请重试",
   "workspace.rewind": "回到此处",
+  // Copy a reply (ADR 0072 §3): her prose, without the code.
+  "workspace.copyReply": "复制回复",
+  "workspace.copied": "已复制",
   "workspace.editsNotReverted": "改动的文件未撤销",
   "workspace.rewindFailed": "撤回失败",
   "workspace.processing": "处理中…",

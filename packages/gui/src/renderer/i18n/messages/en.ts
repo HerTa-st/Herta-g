@@ -373,6 +373,9 @@ export const en = {
   "connect.button": "Connect to Herta",
   "connect.failed": "Session start failed — try again",
   "workspace.rewind": "Rewind to here",
+  // Copy a reply (ADR 0072 §3): her prose, without the code.
+  "workspace.copyReply": "Copy reply",
+  "workspace.copied": "Copied",
   "workspace.editsNotReverted": "Edited files were not reverted",
   "workspace.rewindFailed": "Rewind failed",
   "workspace.processing": "Working…",

@@ -91,6 +91,8 @@ export const DOM_FREE_TESTS = [
   "src/renderer/ipc/mock-bridge.test.ts",
   "src/renderer/lib/banzhuan-mention.test.ts",
   "src/renderer/lib/file-mention.test.ts",
+  "src/renderer/lib/recall-last-message.test.ts",
+  "src/renderer/lib/reply-copy.test.ts",
   "src/renderer/lib/incremental-strip.test.ts",
   // NOT now-tick.test.ts: the test's own text mentions no DOM, but the module
   // it exercises calls `window.setInterval`. Need comes from the import

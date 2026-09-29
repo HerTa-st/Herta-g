@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithLocale } from "../../i18n/test-util.js";
 import { GalaxyTravelRow } from "./GalaxyTravelRow.js";
@@ -210,10 +210,38 @@ describe("HertaBubble", () => {
     ).toBe("就一句。");
   });
 
-  it("hides the action row when no timestamp is given (pre-timestamp block)", () => {
+  it("a pre-timestamp block shows no time — its action row carries the copy only", () => {
     renderWithLocale(<HertaBubble text="certainly" />);
     expect(screen.getByText("certainly")).toBeInTheDocument();
-    expect(document.querySelector(".message-actions")).toBeNull();
+    expect(document.querySelector(".message-actions__time")).toBeNull();
+    expect(screen.getByLabelText("Copy reply")).toBeInTheDocument();
+  });
+
+  it("copies her prose only — the code stays behind (ADR 0072 §3) — and confirms", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderWithLocale(
+      <HertaBubble
+        text={"改好了。\n\n```ts\nconst x = 1;\n```\n\n测试也过了。"}
+        at={justNow()}
+      />,
+    );
+    // Once per utterance, on the stack's last row.
+    expect(screen.getAllByLabelText("Copy reply")).toHaveLength(1);
+    fireEvent.click(screen.getByLabelText("Copy reply"));
+    expect(writeText).toHaveBeenCalledWith("改好了。\n\n测试也过了。");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Copied")).toBeInTheDocument(),
+    );
+  });
+
+  it("a code-only reply offers no copy — its row keeps just the time", () => {
+    renderWithLocale(<HertaBubble text={"```\nplain()\n```"} at={justNow()} />);
+    expect(screen.queryByLabelText("Copy reply")).toBeNull();
+    expect(document.querySelector(".message-actions")).not.toBeNull();
   });
 
   it("places the timestamp BELOW the bubble in an action row, and never a rewind button", () => {

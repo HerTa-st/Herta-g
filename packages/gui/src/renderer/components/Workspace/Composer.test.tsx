@@ -1620,6 +1620,44 @@ describe("Composer — attachments (ADR 0033)", () => {
   });
 });
 
+describe("Composer — Up-arrow recall (ADR 0072 §3)", () => {
+  function recallComposer() {
+    const mock = createMockHertaBridge();
+    const r = renderComposer(mock);
+    act(() =>
+      mock.emitReset({
+        sessionId: "s-r",
+        workspaceRoot: "/r",
+        record: [
+          { kind: "user", text: "先看看 parser" },
+          { kind: "herta", surface: "speech", text: "好。" },
+          { kind: "user", text: "再跑一遍测试" },
+        ],
+        overlay: null,
+        backendWorkspace: "/r",
+        backendWorkspaceIsDefault: true,
+      }),
+    );
+    const input = screen.getByPlaceholderText(
+      "Message Herta…",
+    ) as HTMLTextAreaElement;
+    return { ...r, mock, input };
+  }
+
+  it("↑ in an empty composer puts back the last message sent", () => {
+    const { input } = recallComposer();
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("再跑一遍测试");
+  });
+
+  it("↑ with text already typed leaves it alone", () => {
+    const { input } = recallComposer();
+    fireEvent.change(input, { target: { value: "新的一句" } });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(input.value).toBe("新的一句");
+  });
+});
+
 describe("Composer — @-file mentions (ADR 0072 §2)", () => {
   const FILES = ["README.md", "src/parser.ts", "docs/parsers.md", "build.ts"];
 
