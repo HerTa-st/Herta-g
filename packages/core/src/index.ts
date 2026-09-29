@@ -133,6 +133,10 @@ export {
   type PathApi,
   type PathContainmentOptions,
 } from "./path-containment.js";
+export {
+  CALL_ERROR_DENY_CODES,
+  REFUSAL_DENY_CODES,
+} from "./permission-deny-codes.js";
 export type {
   AskResolver,
   CommandConsequence,

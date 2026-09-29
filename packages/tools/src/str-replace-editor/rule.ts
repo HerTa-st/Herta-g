@@ -27,8 +27,10 @@ export interface StrReplaceEditorRuleDeps {
   bashPath: string | null;
 }
 
-/** A rule deny whose message the model sees verbatim (trained strings). */
-function deny(code: string, message: string): RuleVerdict {
+/** A rule deny whose message the model sees verbatim (trained strings).
+ *  `read` marks a refused `view` — a withheld read, not a refused mutation,
+ *  so it does not cap the run's status (ADR 0047 §2, as the reader guards). */
+function deny(code: string, message: string, read = false): RuleVerdict {
   const suggestion = STR_REPLACE_EDITOR_SUGGESTIONS[code];
   return {
     kind: "deny",
@@ -36,6 +38,7 @@ function deny(code: string, message: string): RuleVerdict {
     reason: message,
     modelText: message,
     ...(suggestion !== undefined ? { suggestion } : {}),
+    ...(read ? { risk: "workspace_read" as const } : {}),
   };
 }
 
@@ -79,7 +82,8 @@ export function makeStrReplaceEditorRule(
       wsShell,
       input.command === "view",
     );
-    if (!target.ok) return deny(target.code, target.message);
+    if (!target.ok)
+      return deny(target.code, target.message, input.command === "view");
     if (input.command === "view") return { kind: "allow" };
 
     if (input.command === "create") {

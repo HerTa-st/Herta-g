@@ -9,6 +9,7 @@ import type {
 import type { EventBus } from "../event-bus.js";
 import { FindingsLedger } from "../findings-ledger.js";
 import type { MemoryManager } from "../memory-manager.js";
+import { CALL_ERROR_DENY_CODES } from "../permission-deny-codes.js";
 import type { PermissionEngine, RiskLevel } from "../permission-engine.js";
 import { ReadLedger } from "../read-ledger.js";
 import { countDiffLines } from "../text/diff-lines.js";
@@ -577,18 +578,23 @@ export class CodingAgentRuntime {
             // must not report 完成. The intent has always named MUTATIONS
             // (git-dev lab 2026-08-26): a withheld READ (the reader guard
             // refusing a `.git`/`.herta` probe the model then routed around)
-            // and a malformed call (`invalid_input` — bad argument shape,
-            // retried, not a refusal of anything) capped fully completed
-            // briefs at 部分完成. A user deny carries its risk on the
-            // request; a rule-deny now carries it on the event; anything
-            // without a stated risk still counts, conservatively.
+            // and a call error capped fully completed briefs at 部分完成. A
+            // call error is a rule-deny whose same change, asked correctly,
+            // would be allowed — a malformed argument, an edit anchor that
+            // does not match, a file not read first (the one set that says
+            // which codes: permission-deny-codes.ts, ADR 0047 amendment
+            // 2026-09-29). A user deny carries its risk on the request; a
+            // rule-deny carries it on the event; anything without a stated
+            // risk or a decided code still counts, conservatively.
             if (event.decision === "deny" || event.decision === "blocked") {
               const refusedRisk =
                 event.decision === "deny" ? pending?.risk : event.risk;
               const withheldRead = refusedRisk === "workspace_read";
-              const malformed =
-                event.decision === "blocked" && event.code === "invalid_input";
-              if (!withheldRead && !malformed) deniedPermissions += 1;
+              const callError =
+                event.decision === "blocked" &&
+                event.code !== undefined &&
+                CALL_ERROR_DENY_CODES.has(event.code);
+              if (!withheldRead && !callError) deniedPermissions += 1;
             }
             pendingPermissions.delete(event.id);
             break;

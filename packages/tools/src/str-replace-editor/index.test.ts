@@ -542,4 +542,34 @@ describe("str_replace_editor rule", () => {
     );
     expect(outside.kind).toBe("deny");
   });
+
+  it("a `view` refused for its path is a withheld read; the same path refused for a write is not (ADR 0047 amendment 2026-09-29)", async () => {
+    ws = await mkTmpWorkspace({ "a.txt": "alpha\n" });
+    const engine = new RulePermissionEngine({
+      ask: { present: async () => "allow" },
+    });
+    registerStrReplaceEditorRule(engine, { bashPath: null });
+    const ctx = ctxFor(ws.root);
+    const outside = join(ws.root, "..", "x.txt");
+
+    const view = await engine.check(
+      call({ command: "view", path: outside }),
+      ctx,
+    );
+    expect(view).toMatchObject({
+      kind: "deny",
+      code: "path_outside_workspace",
+      risk: "workspace_read",
+    });
+
+    const write = await engine.check(
+      call({ command: "create", path: outside, file_text: "n" }),
+      ctx,
+    );
+    expect(write.kind).toBe("deny");
+    if (write.kind === "deny") {
+      expect(write.code).toBe("path_outside_workspace");
+      expect(write.risk).toBeUndefined();
+    }
+  });
 });
