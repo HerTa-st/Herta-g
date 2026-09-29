@@ -91,6 +91,8 @@ const bridge: HertaBridge = {
     ipcRenderer.invoke(CMD.setInteractionLanguage, choice),
   getCloseToTray: () => ipcRenderer.invoke(CMD.getCloseToTray),
   setCloseToTray: (enabled) => ipcRenderer.invoke(CMD.setCloseToTray, enabled),
+  getAttention: () => ipcRenderer.invoke(CMD.getAttention),
+  setAttention: (prefs) => ipcRenderer.invoke(CMD.setAttention, prefs),
   getAutoUpdate: () => ipcRenderer.invoke(CMD.getAutoUpdate),
   setAutoUpdate: (enabled) => ipcRenderer.invoke(CMD.setAutoUpdate, enabled),
   getTheme: () => ipcRenderer.invoke(CMD.getTheme),

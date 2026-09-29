@@ -44,6 +44,7 @@ import { slimAgentEventForRenderer } from "../shared/agent-event-wire.js";
 import type { VoiceEngine } from "./app-global-settings.js";
 import {
   type InteractionLang,
+  type Locale,
   osLocale,
   readGlobalSettings,
   resolveInitialLocale,
@@ -57,6 +58,12 @@ import {
   normalizeModelChoice,
   readAppSettings,
 } from "./app-settings.js";
+import {
+  type AttentionPrefs,
+  DEFAULT_ATTENTION_PREFS,
+  watchAttention,
+} from "./attention.js";
+import { createElectronAttentionHost } from "./attention-electron.js";
 import { installMode } from "./install-mode.js";
 import {
   readDeepSeekKeyPlain,
@@ -70,6 +77,7 @@ import {
 } from "./read-workspace-file.js";
 import { createSessionActivation } from "./session-activation.js";
 import {
+  attentionSettingsOf,
   registerSettingsHandlers,
   type SettingsHooks,
 } from "./settings-ipc.js";
@@ -605,6 +613,22 @@ export function createSessionService(
     if (!wc.isDestroyed()) wc.send(ch, payload);
   };
 
+  // When the user is away from the window (ADR 0072 §1): notifications and
+  // keep-awake for the active session. Both settings and the UI language are
+  // cached here (seeded at bootstrap, kept by the Settings hooks) because the
+  // watcher reads them at every event.
+  let attentionPrefs: AttentionPrefs = DEFAULT_ATTENTION_PREFS;
+  let uiLocale: Locale = "en";
+  const refreshUiLocale = async (): Promise<void> => {
+    const s = await readGlobalSettings(app.getPath("userData"));
+    uiLocale = resolveInitialLocale(s, osLocale(process.platform, app));
+  };
+  const attentionHost = createElectronAttentionHost({
+    win,
+    prefs: () => attentionPrefs,
+    locale: () => uiLocale,
+  });
+
   // Interaction language (slice 4): resolved FRESH here per activation (like
   // getTheme reads per call) — stored choice, else follow the UI locale.
   // Threaded into the host so the session builds its static prefix, openings,
@@ -627,7 +651,17 @@ export function createSessionService(
   const activation = createSessionActivation({
     host: () => host,
     send,
-    startForwarders,
+    // The window's forwarders, and beside them the attention watcher — which
+    // therefore always concerns the session the window shows, and stops
+    // (releasing any keep-awake hold) when the window points elsewhere.
+    startForwarders: (session, sendTo) => {
+      const stopForwarders = startForwarders(session, sendTo);
+      const stopAttention = watchAttention(session, attentionHost);
+      return () => {
+        stopForwarders();
+        stopAttention();
+      };
+    },
     snapshot,
     lang: currentInteractionLang,
   });
@@ -1110,7 +1144,17 @@ export function createSessionService(
     // getters and setters below.
     registerSettingsHandlers({
       handle,
-      hooks,
+      hooks: {
+        ...hooks,
+        onAttentionChanged: (prefs) => {
+          attentionPrefs = prefs;
+          hooks.onAttentionChanged?.(prefs);
+        },
+        onLocaleChanged: () => {
+          void refreshUiLocale();
+          hooks.onLocaleChanged?.();
+        },
+      },
       host: () => host,
       workspaceRoot: appWorkspaceRoot,
       dreamRunning: () => dreamRunning,
@@ -1235,6 +1279,11 @@ export function createSessionService(
       // record come from settings; the key from the secure store, per call.
       const startupSettings = await readGlobalSettings(userDataPath);
       voiceEngine = startupSettings.voiceEngine ?? "local";
+      attentionPrefs = attentionSettingsOf(startupSettings);
+      uiLocale = resolveInitialLocale(
+        startupSettings,
+        osLocale(process.platform, app),
+      );
       const referencePath = resolveVoiceCloneReference({
         isPackaged: installMode().installed,
         resourcesPath: installMode().resourcesPath,

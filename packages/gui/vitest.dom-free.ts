@@ -31,6 +31,7 @@ export const DOM_FREE_TESTS = [
   "src/main/app-menu.test.ts",
   "src/main/app-settings.test.ts",
   "src/main/attachment-protocol.test.ts",
+  "src/main/attention.test.ts",
   "src/main/csp.test.ts",
   "src/main/hide-to-tray.test.ts",
   "src/main/key-store.test.ts",

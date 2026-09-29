@@ -194,6 +194,14 @@ if (process.platform === "linux") {
   app.commandLine.appendSwitch("wayland-text-input-version", "3");
 }
 
+// Windows shows a notification only for an app whose process id matches a
+// Start-menu shortcut's (ADR 0072 §1). The installer's shortcut carries the
+// builder's `appId` (electron-builder.yml), so an installed app says the
+// same; a dev run keeps Electron's own id, which Windows already knows.
+if (process.platform === "win32" && installMode().installed) {
+  app.setAppUserModelId("com.personacli.herta");
+}
+
 // Single-instance lock: two processes would write the same workspace .herta
 // transcripts, the same userData key store, and the same app settings —
 // silent last-writer-wins corruption. The second launch exits; the first

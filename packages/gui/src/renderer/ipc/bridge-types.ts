@@ -283,6 +283,14 @@ export type Locale = "zh" | "en";
  *  into new sessions. */
 export type InteractionLanguageChoice = "zh" | "en" | "follow";
 
+/** Settings → Window's attention rows (ADR 0072 §1). */
+export interface AttentionSettings {
+  /** OS notifications while the window is not attended. */
+  readonly notifications: boolean;
+  /** Keep the machine awake while 板砖 runs. */
+  readonly keepAwake: boolean;
+}
+
 /**
  * Renderer-facing auto-update state (2026-07-10), streamed over
  * `update:state` and snapshotted via getUpdateState. `version` is the
@@ -693,6 +701,13 @@ export interface HertaBridge {
   /** Persist + LIVE-apply the close-to-tray behavior (main updates its
    *  window close handler immediately — no restart). */
   setCloseToTray(enabled: boolean): Promise<void>;
+  /** Read the attention settings (Settings → Window, ADR 0072 §1): OS
+   *  notifications while the window is not attended, and keeping the
+   *  machine awake while 板砖 runs. Both default on. OPTIONAL — fakes and
+   *  the website demo omit it, and the rows hide with it. */
+  getAttention?(): Promise<AttentionSettings>;
+  /** Persist + LIVE-apply either or both attention settings. */
+  setAttention?(prefs: Partial<AttentionSettings>): Promise<void>;
   /** Read whether AUTOMATIC update checks/downloads are enabled (Settings →
    *  Update; default true). OPTIONAL — fakes and the website demo omit it,
    *  and the toggle then hides with the rest of the update surface. */

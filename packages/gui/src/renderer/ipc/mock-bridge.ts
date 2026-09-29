@@ -23,6 +23,7 @@ import type {
 } from "@herta/app-server";
 import type { WorkspaceTrust } from "@herta/core";
 import type {
+  AttentionSettings,
   BackendConfig,
   DeepSeekKeyStatus,
   DreamConfig,
@@ -108,6 +109,11 @@ export interface MockHertaBridgeOpts {
   readonly closeToTrayResult?: boolean;
   /** When true, setCloseToTray rejects (simulates a failed settings write). */
   readonly failSetCloseToTray?: boolean;
+  /** Seed for getAttention (Settings → Window, ADR 0072 §1). UNDEFINED (the
+   *  default) omits the surface — the rows hide, like the website demo. */
+  readonly attentionResult?: AttentionSettings;
+  /** When true, setAttention rejects (simulates a failed settings write). */
+  readonly failSetAttention?: boolean;
   /** Seed for getTheme (Settings → Window appearance). Default "light". */
   readonly themeResult?: ThemePref;
   /** Seed for getDeviceScene (Settings → 差分协处理器 → 3D device, ADR
@@ -222,6 +228,7 @@ export interface MockHertaBridge {
     clearDeepSeekKey: number;
     getCloseToTray: number;
     setCloseToTray: boolean[];
+    setAttention: Partial<AttentionSettings>[];
     setTheme: ThemePref[];
     setDeviceScene: boolean[];
     getInteractionLanguage: number;
@@ -334,6 +341,7 @@ export function createMockHertaBridge(
     clearDeepSeekKey: 0,
     getCloseToTray: 0,
     setCloseToTray: [],
+    setAttention: [],
     setTheme: [],
     setDeviceScene: [],
     getInteractionLanguage: 0,
@@ -764,6 +772,20 @@ export function createMockHertaBridge(
     setTheme: async (theme) => {
       calls.setTheme.push(theme);
     },
+    ...(opts.attentionResult !== undefined
+      ? {
+          getAttention: async () => {
+            const seed = opts.attentionResult as AttentionSettings;
+            return { ...seed };
+          },
+          setAttention: async (prefs: Partial<AttentionSettings>) => {
+            calls.setAttention.push(prefs);
+            if (opts.failSetAttention === true) {
+              throw new Error("write failed");
+            }
+          },
+        }
+      : {}),
     ...(opts.deviceSceneResult !== undefined
       ? {
           getDeviceScene: async () => opts.deviceSceneResult === true,

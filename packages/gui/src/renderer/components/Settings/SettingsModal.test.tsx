@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HertaBridgeProvider } from "../../context/HertaBridgeContext.js";
 import { renderWithLocale } from "../../i18n/test-util.js";
@@ -150,6 +150,57 @@ describe("SettingsModal", () => {
     fireEvent.click(toggle);
     expect(mock.calls.setCloseToTray).toEqual([false]);
     expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("shows the attention rows only where the bridge reads them, writes one flag per toggle, and snaps back on a failed write (ADR 0072 §1)", async () => {
+    // A bridge without the surface (the website demo): no rows.
+    const bare = createMockHertaBridge();
+    const first = renderWithLocale(
+      <HertaBridgeProvider bridge={bare.bridge}>
+        <SettingsModal open={true} onClose={() => {}} />
+      </HertaBridgeProvider>,
+    );
+    fireEvent.click(first.getByRole("button", { name: "Window" }));
+    await first.findByLabelText("Close to tray");
+    expect(first.queryByLabelText("Notifications")).toBeNull();
+    first.unmount();
+
+    const mock = createMockHertaBridge({
+      attentionResult: { notifications: true, keepAwake: false },
+    });
+    const second = renderWithLocale(
+      <HertaBridgeProvider bridge={mock.bridge}>
+        <SettingsModal open={true} onClose={() => {}} />
+      </HertaBridgeProvider>,
+    );
+    fireEvent.click(second.getByRole("button", { name: "Window" }));
+    const notify = await second.findByLabelText("Notifications");
+    const awake = await second.findByLabelText("Keep awake during runs");
+    await waitFor(() =>
+      expect(awake.getAttribute("aria-checked")).toBe("false"),
+    );
+    expect(notify.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(awake);
+    expect(mock.calls.setAttention).toEqual([{ keepAwake: true }]);
+    expect(awake.getAttribute("aria-checked")).toBe("true");
+    second.unmount();
+
+    const failing = createMockHertaBridge({
+      attentionResult: { notifications: true, keepAwake: true },
+      failSetAttention: true,
+    });
+    const third = renderWithLocale(
+      <HertaBridgeProvider bridge={failing.bridge}>
+        <SettingsModal open={true} onClose={() => {}} />
+      </HertaBridgeProvider>,
+    );
+    fireEvent.click(third.getByRole("button", { name: "Window" }));
+    const notify3 = await third.findByLabelText("Notifications");
+    fireEvent.click(notify3);
+    expect(failing.calls.setAttention).toEqual([{ notifications: false }]);
+    await waitFor(() =>
+      expect(notify3.getAttribute("aria-checked")).toBe("true"),
+    );
   });
 
   it("includes a Coprocessor section that switches to its pane", () => {

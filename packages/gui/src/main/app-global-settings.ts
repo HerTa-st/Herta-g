@@ -78,6 +78,11 @@ export interface GlobalSettings {
   readonly voiceEngine?: VoiceEngine;
   /** The MiniMax clone this install made, or absent when none / forgotten. */
   readonly minimaxVoice?: MiniMaxVoiceRecord;
+  /** OS notifications while the window is not attended (ADR 0072 §1).
+   *  ABSENT = on. Live: the watcher reads it at every event. */
+  readonly notifications?: boolean;
+  /** Keep the machine awake while 板砖 runs (ADR 0072 §1). ABSENT = on. */
+  readonly keepAwake?: boolean;
 }
 
 export interface WindowStateSnapshot {
@@ -113,6 +118,8 @@ export async function readGlobalSettings(
       realtimeVoice,
       voiceEngine,
       minimaxVoice,
+      notifications,
+      keepAwake,
     } = parsed as {
       locale?: unknown;
       closeToTray?: unknown;
@@ -124,7 +131,15 @@ export async function readGlobalSettings(
       realtimeVoice?: unknown;
       voiceEngine?: unknown;
       minimaxVoice?: unknown;
+      notifications?: unknown;
+      keepAwake?: unknown;
     };
+    if (notifications !== undefined && typeof notifications !== "boolean") {
+      return {};
+    }
+    if (keepAwake !== undefined && typeof keepAwake !== "boolean") {
+      return {};
+    }
     if (deviceScene !== undefined && typeof deviceScene !== "boolean") {
       return {};
     }

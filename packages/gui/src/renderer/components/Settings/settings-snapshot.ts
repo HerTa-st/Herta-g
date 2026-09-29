@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type {
+  AttentionSettings,
   BackendContractChoice,
   BackendThinking,
   DeepSeekKeyStatus,
@@ -38,6 +39,7 @@ import type {
 export interface SettingsSnapshot {
   "language.interaction": InteractionLanguageChoice;
   "window.closeToTray": boolean;
+  "window.attention": AttentionSettings;
   "update.version": string | null;
   "update.state": UpdateState;
   "update.auto": boolean;
@@ -151,6 +153,7 @@ export function primeSettings(bridge: HertaBridge): void {
   void bridge
     .getCloseToTray?.()
     .then((v) => keep("window.closeToTray", v), quiet);
+  void bridge.getAttention?.().then((v) => keep("window.attention", v), quiet);
   void bridge.getAppVersion?.().then((v) => keep("update.version", v), quiet);
   void bridge.getUpdateState?.().then((v) => keep("update.state", v), quiet);
   void bridge.getAutoUpdate?.().then((v) => keep("update.auto", v), quiet);

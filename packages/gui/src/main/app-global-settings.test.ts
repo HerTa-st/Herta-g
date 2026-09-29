@@ -99,6 +99,17 @@ describe("app-global-settings", () => {
     expect(await readGlobalSettings(dir)).toEqual({});
   });
 
+  it("round-trips the attention flags and refuses a non-boolean one (ADR 0072 §1)", async () => {
+    const dir = tmp();
+    await writeGlobalSettings(dir, { notifications: false, keepAwake: true });
+    expect(await readGlobalSettings(dir)).toEqual({
+      notifications: false,
+      keepAwake: true,
+    });
+    writeFileSync(join(dir, "settings.json"), '{"keepAwake":"on"}', "utf-8");
+    expect(await readGlobalSettings(dir)).toEqual({});
+  });
+
   it("round-trips theme and rejects invalid values (night-mode slice 2)", async () => {
     const dir = tmp();
     await writeGlobalSettings(dir, { theme: "dark" });

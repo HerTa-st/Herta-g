@@ -49,6 +49,8 @@ export const CMD = {
   setInteractionLanguage: "settings:setInteractionLanguage",
   getCloseToTray: "settings:getCloseToTray",
   setCloseToTray: "settings:setCloseToTray",
+  getAttention: "settings:getAttention",
+  setAttention: "settings:setAttention",
   getAutoUpdate: "settings:getAutoUpdate",
   setAutoUpdate: "settings:setAutoUpdate",
   getTheme: "settings:getTheme",

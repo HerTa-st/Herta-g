@@ -18,6 +18,7 @@ import { findBash } from "@herta/tools";
 import { app, type ipcMain } from "electron";
 import { CMD } from "../preload/channels.js";
 import type {
+  AttentionSettings,
   InteractionLanguageChoice,
   MiniMaxRefusalState,
   RealtimeVoiceState,
@@ -26,6 +27,7 @@ import { DEVICE_SCENE_DEFAULT } from "../shared/device-scene.js";
 import type { VoiceEngine } from "./app-global-settings.js";
 import {
   defaultCloseToTray,
+  type GlobalSettings,
   type Locale,
   osLocale,
   readGlobalSettings,
@@ -74,6 +76,10 @@ export interface SettingsHooks {
    *  window close handler lives in main's index.ts — this hook updates its
    *  cached flag so the change applies to the very next close click. */
   readonly onCloseToTrayChanged?: (enabled: boolean) => void;
+  /** Fired after Settings → Window persists an attention setting (ADR 0072
+   *  §1), with both values as they now stand — the watcher reads them at
+   *  every event, so the change applies to the next one. */
+  readonly onAttentionChanged?: (prefs: AttentionSettings) => void;
   /** Fired after Settings → Update persists the automatic-update toggle.
    *  The update service lives in main's index.ts — this hook live-applies
    *  it (cancelling or restarting the check cycle). */
@@ -121,6 +127,14 @@ export interface SettingsIpcDeps {
   /** The Dream flag the RUNNING host was built with; undefined before
    *  bootstrap. Optional for tests. */
   readonly dreamRunning?: () => boolean | undefined;
+}
+
+/** The attention settings as they stand: absent = on (ADR 0072 §1). */
+export function attentionSettingsOf(s: GlobalSettings): AttentionSettings {
+  return {
+    notifications: s.notifications ?? true,
+    keepAwake: s.keepAwake ?? true,
+  };
 }
 
 export function registerSettingsHandlers(deps: SettingsIpcDeps): void {
@@ -270,6 +284,34 @@ export function registerSettingsHandlers(deps: SettingsIpcDeps): void {
     }));
     hooks.onCloseToTrayChanged?.(enabled === true);
   });
+  // Settings → Window: attention (ADR 0072 §1). Both default on; a write
+  // carries either or both, and anything but a boolean is ignored.
+  handle(CMD.getAttention, async (): Promise<AttentionSettings> => {
+    return attentionSettingsOf(
+      await readGlobalSettings(app.getPath("userData")),
+    );
+  });
+  handle(
+    CMD.setAttention,
+    async (_e, prefs: { notifications?: unknown; keepAwake?: unknown }) => {
+      const notifications =
+        typeof prefs?.notifications === "boolean"
+          ? prefs.notifications
+          : undefined;
+      const keepAwake =
+        typeof prefs?.keepAwake === "boolean" ? prefs.keepAwake : undefined;
+      if (notifications === undefined && keepAwake === undefined) return;
+      const userData = app.getPath("userData");
+      await updateGlobalSettings(userData, (s) => ({
+        ...s,
+        ...(notifications !== undefined ? { notifications } : {}),
+        ...(keepAwake !== undefined ? { keepAwake } : {}),
+      }));
+      hooks.onAttentionChanged?.(
+        attentionSettingsOf(await readGlobalSettings(userData)),
+      );
+    },
+  );
   // Settings → Update: automatic checks/downloads. App-global and applied
   // LIVE via the hook (the update service cancels or restarts its cycle).
   handle(CMD.getAutoUpdate, async () => {

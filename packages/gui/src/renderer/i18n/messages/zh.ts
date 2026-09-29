@@ -30,7 +30,7 @@ export const zh = {
   "nav.group.general": "通用",
   "nav.group.herta": "黑塔",
   "nav.group.engine": "引擎",
-  "window.intro": "窗口的外观与开合行为。",
+  "window.intro": "窗口的外观与开合行为，以及离开窗口时的提醒。",
   "window.theme": "外观",
   "window.themeDesc": "界面的明暗主题；跟随系统时随操作系统自动切换。",
   "theme.light": "浅色",
@@ -44,6 +44,12 @@ export const zh = {
   "window.closeToTrayMac": "关闭时收进菜单栏",
   "window.closeToTrayDescMac":
     "关闭窗口时收进菜单栏，会话继续运行；关掉此项后，关闭即关窗，黑塔仍留在程序坞，按 ⌘Q 退出。",
+  // Attention (ADR 0072 §1): what notifies, and the keep-awake hold.
+  "window.notifications": "系统通知",
+  "window.notificationsDesc":
+    "窗口不在前台时，以下情况会发出系统通知：有操作等待批准，板砖的运行可以继续，回复未能完成，或者一轮有板砖参与、或耗时超过半分钟的回复已经完成。",
+  "window.keepAwake": "运行时保持唤醒",
+  "window.keepAwakeDesc": "板砖运行期间阻止电脑进入睡眠；显示器仍可关闭。",
   "window.minimize": "最小化",
   "window.maximize": "最大化",
   "window.restore": "还原",

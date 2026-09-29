@@ -33,7 +33,8 @@ export const en = {
   "nav.group.general": "General",
   "nav.group.herta": "Herta",
   "nav.group.engine": "Engine",
-  "window.intro": "How the window looks, opens, and closes.",
+  "window.intro":
+    "How the window looks, opens and closes, and what happens while you are away from it.",
   "window.theme": "Appearance",
   "window.themeDesc":
     "Light or dark interface; System follows the OS setting automatically.",
@@ -48,6 +49,13 @@ export const en = {
   "window.closeToTrayMac": "Close to menu bar",
   "window.closeToTrayDescMac":
     "Closing the window hides Herta to the menu bar and keeps her session running; turn this off to close the window instead. Herta stays in the Dock until you quit with ⌘Q.",
+  // Attention (ADR 0072 §1): what notifies, and the keep-awake hold.
+  "window.notifications": "Notifications",
+  "window.notificationsDesc":
+    "When the window is not in front, a system notification appears when an operation is waiting for approval, Brick's run can be continued, a reply could not be completed, or a reply that involved Brick or took over half a minute has finished.",
+  "window.keepAwake": "Keep awake during runs",
+  "window.keepAwakeDesc":
+    "Keeps the computer from sleeping while Brick runs; the display may still turn off.",
   "window.minimize": "Minimize",
   "window.maximize": "Maximize",
   "window.restore": "Restore",
