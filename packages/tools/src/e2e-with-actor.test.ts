@@ -27,6 +27,7 @@ import {
   registerEditFileRule,
   registerRunCommandRule,
   registerWriteNewFileRule,
+  reportFindingTool,
   runCommandTool,
   todoWriteTool,
   writeNewFileTool,
@@ -543,10 +544,11 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
     expect(final).toBe("export const value = 2;\n");
   });
 
-  it("e2e: todo_write lays out steps, updates statuses, unfinished fold into nextActions", async () => {
+  it("e2e: todo_write lays out steps, updates statuses, unfinished fold into nextActions — and cap the status at partial after the end-of-run check", async () => {
     ws = await mkTmpWorkspace({});
     const tools = new InMemoryToolRegistry();
     tools.register(todoWriteTool());
+    let endCheck = "";
     const provider = new FakeProvider({
       turns: [
         [
@@ -590,6 +592,16 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
           { type: "text-delta", text: "done" },
           { type: "finish", reason: "stop" },
         ],
+        // Stopped with an item open: one more step, with the end-of-run
+        // check (long-run study item 4). The model leaves it open.
+        (frame) => {
+          endCheck =
+            "trailingState" in frame ? (frame.trailingState ?? "") : "";
+          return [
+            { type: "text-delta", text: "the tests are still to run" },
+            { type: "finish", reason: "stop" },
+          ];
+        },
       ],
     });
     const { runtime, bus } = mkRuntime({
@@ -604,6 +616,10 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
     const report = await runtime.runBrief(brief("fix the parser"), {
       userMessages: userMessages("fix the parser"),
     });
+    expect(endCheck).toContain("收尾检查");
+    // An open item caps the status as a refusal does (owner 2026-09-29):
+    // 完成 beside ↳ 待办 would claim work the list says is not done.
+    expect(report.status).toBe("partial");
 
     // Both full-list writes publish plan.updated with the new todo payload.
     const planEvents = events.filter((e) => e.type === "plan.updated");
@@ -620,6 +636,62 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
     // The item still in_progress at brief end folds into nextActions
     // (ADR 0025 §2) — the honest unfinished list, not a claim of done.
     expect(report.nextActions).toEqual(["run parser tests"]);
+  });
+
+  it("e2e: a run that brings its list up to date after the end-of-run check reports completed", async () => {
+    ws = await mkTmpWorkspace({
+      "src/parser.ts": "export const cursor = 0;\n",
+    });
+    const tools = new InMemoryToolRegistry();
+    tools.register(todoWriteTool());
+    tools.register(reportFindingTool());
+    const write = (id: string, status: "pending" | "completed") => [
+      {
+        type: "tool-call-request" as const,
+        call: {
+          id,
+          tool: "todo_write",
+          input: { todos: [{ content: "find the cursor bug", status }] },
+        },
+      },
+      { type: "finish" as const, reason: "tool_calls" as const },
+    ];
+    const provider = new FakeProvider({
+      turns: [
+        write("t1", "pending"),
+        [
+          {
+            type: "tool-call-request",
+            call: {
+              id: "f1",
+              tool: "report_finding",
+              input: {
+                claim: "the cursor starts at 0 and is never reset",
+                cites: ["src/parser.ts:1"],
+              },
+            },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        // Did the work, forgot to mark it: the check catches exactly this.
+        [
+          { type: "text-delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+        write("t2", "completed"),
+        [
+          { type: "text-delta", text: "done" },
+          { type: "finish", reason: "stop" },
+        ],
+      ],
+    });
+    const { runtime } = mkRuntime({ provider, tools, workspaceRoot: ws.root });
+
+    const report = await runtime.runBrief(brief("fix the parser"), {
+      userMessages: userMessages("fix the parser"),
+    });
+    expect(report.status).toBe("completed");
+    expect(report.nextActions).toEqual([]);
   });
 
   it("e2e: a background command left running is reaped when the brief ends (ADR 0025 slice 4)", async () => {

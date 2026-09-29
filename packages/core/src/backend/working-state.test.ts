@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  renderEndCheck,
   renderStepNotice,
+  renderTodoNudge,
   renderWorkingState,
   STEP_NOTICE_WINDOW,
+  TODO_NUDGE_EVERY,
 } from "./working-state.js";
 
 const empty = { changedFiles: [], background: [], findings: [], steers: [] };
@@ -80,5 +83,28 @@ describe("the step notice (2026-09-29, proposal 3)", () => {
     expect(renderStepNotice(100, 100, "en")).toContain(
       "this is the last of 100 steps",
     );
+  });
+});
+
+describe("the todo reminder and the end-of-run check (2026-09-29, proposals 4–5)", () => {
+  it("reminds on every TODO_NUDGE_EVERY-th step taken, and only then", () => {
+    expect(renderTodoNudge(0, "zh")).toBe("");
+    expect(renderTodoNudge(TODO_NUDGE_EVERY - 1, "zh")).toBe("");
+    expect(renderTodoNudge(TODO_NUDGE_EVERY, "zh")).toContain(
+      `已经走了 ${TODO_NUDGE_EVERY} 步，还没有任务清单`,
+    );
+    expect(renderTodoNudge(TODO_NUDGE_EVERY + 1, "zh")).toBe("");
+    expect(renderTodoNudge(3 * TODO_NUDGE_EVERY, "en")).toContain(
+      `this run has taken ${3 * TODO_NUDGE_EVERY} steps and has no todo list`,
+    );
+  });
+
+  it("the check counts the open items and says it is given once", () => {
+    const zh = renderEndCheck(2, "zh");
+    expect(zh).toContain("还有 2 项没有完成");
+    expect(zh).toContain("这个检查只有这一次");
+    const en = renderEndCheck(1, "en");
+    expect(en).toContain("1 item(s) on the todo list are not completed");
+    expect(en).toContain("This check is given once.");
   });
 });

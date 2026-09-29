@@ -774,6 +774,7 @@ export async function runPhaseTwo(opts: {
     recapBoundaryIndex: opts.recapBoundaryIndex ?? 0,
   });
   opts.deps.onPrompt?.("phase2", prompt);
+  opts.deps.onCompletionPrompt?.(prompt);
 
   // Defer the sink for supervised speech that buffers (no live feed); a live
   // feed routes chunks to onLiveToken instead and the controller owns rendering.

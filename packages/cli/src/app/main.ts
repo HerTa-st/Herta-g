@@ -86,7 +86,8 @@ export async function main(
   // before anything writes there (audit BL6).
   ensureHertaGitignore(workspaceRoot);
   // HERTA_USAGE_LOG: each model call's token counts as the API states them,
-  // prompt-cache hits included (numbers only) — `1` writes
+  // prompt-cache hits included, plus one line per 板砖 run and Herta turn
+  // (how much trimming each needed; numbers only) — `1` writes
   // `<workspace>/.herta/usage.jsonl`, anything else is the file to write.
   // An environment knob like the CLI's model knobs; the desktop app always
   // keeps one beside its settings.

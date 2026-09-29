@@ -88,6 +88,7 @@ export function makeFireBeat(
     };
     const beatPrompt = serializeActorPrompt(beatDoc);
     deps.onPrompt?.("beat", beatPrompt);
+    deps.onCompletionPrompt?.(beatPrompt);
 
     let beatBuffered = "";
     let beatEmittedTail = 0;

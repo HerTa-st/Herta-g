@@ -155,3 +155,33 @@ export function renderStepNotice(
     ? `（步数提醒：这次运行最多 ${maxIterations} 步，这是第 ${iteration} 步，之后还剩 ${left} 步。请收尾当前这一步，把任务清单改成如实的状态，并用 report_finding 记下结论。步数用完后运行会停在原处，开拓者可以接着继续。）`
     : `（步数提醒：这是 ${maxIterations} 步里的最后一步。现在就把任务清单改成如实的状态，并用 report_finding 记下结论；这一步之后运行会停下，开拓者可以接着继续。）`;
 }
+
+/** Every this many steps without a todo list, the model is reminded. */
+export const TODO_NUDGE_EVERY = 10;
+
+/**
+ * The todo reminder (proposal 5): a run that has taken `stepsTaken` steps —
+ * a multiple of TODO_NUDGE_EVERY — and still has no list is reminded that
+ * one exists. Claude Code's pattern, made deterministic: by step count, not
+ * by a judgement. The caller shows it only while the list is empty and the
+ * session has todo_write. "" off the multiples.
+ */
+export function renderTodoNudge(stepsTaken: number, lang: "zh" | "en"): string {
+  if (stepsTaken < TODO_NUDGE_EVERY || stepsTaken % TODO_NUDGE_EVERY !== 0)
+    return "";
+  return lang === "en"
+    ? `(Reminder: this run has taken ${stepsTaken} steps and has no todo list. If the task has several steps, list the remaining ones with todo_write: the list comes with every step and survives a context trim. A lookup or a one-step job needs no list.)`
+    : `（提醒：这次运行已经走了 ${stepsTaken} 步，还没有任务清单。如果这是多步任务，用 todo_write 把剩下的步骤列出来：清单每一步都会带给你，上下文被裁剪后也不会丢。只是查看，或一步就能完成的事，不必列。）`;
+}
+
+/**
+ * The end-of-run check (proposal 4): the model stopped with `open` items on
+ * its list not completed. Given once per run; the list itself is above it in
+ * the same trailer. It asks for an honest list, not a complete one — an item
+ * left open stays on the report as unfinished.
+ */
+export function renderEndCheck(open: number, lang: "zh" | "en"): string {
+  return lang === "en"
+    ? `(End-of-run check: you stopped, but ${open} item(s) on the todo list are not completed. Continue with any you can still do; mark the ones already done as completed; remove the ones no longer needed with todo_write; leave the ones you cannot do as they are. This check is given once.)`
+    : `（收尾检查：你已经停下，但任务清单里还有 ${open} 项没有完成。还能做的就接着做；已经做完的改成已完成；不再需要的用 todo_write 从清单里去掉；做不了的保持原状态。这个检查只有这一次。）`;
+}

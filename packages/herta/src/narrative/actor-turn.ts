@@ -3,7 +3,11 @@ import type {
   TerminalRecord,
   TerminalRecordBlock,
 } from "@herta/core";
-import { errorMessage } from "@herta/core";
+import {
+  errorMessage,
+  estimatePromptTokens,
+  reportUsageNote,
+} from "@herta/core";
 import { makeFireBeat } from "./actor-turn-beat.js";
 import {
   ActorTurnAbortedError,
@@ -38,6 +42,7 @@ import {
   parseHertaBlock,
   stripBanzhuanTrigger,
 } from "./parse.js";
+import { compactThreshold } from "./session-recap.js";
 import {
   type PreparedRecap,
   prepareTurnRecap,
@@ -539,7 +544,42 @@ export function userTextPreemptsDispatch(userText: string): boolean {
   );
 }
 
+/**
+ * One actor turn, measured for the usage log (long-run study item 6): every
+ * completion prompt the turn sends is sized, and the turn reports how many
+ * there were, the first and the largest — however it ends. The recap check
+ * sizes the prompt once, at turn start; this is what the turn grew to after.
+ */
 export async function runActorCompletionTurn(
+  state: ActorTurnState,
+  userText: string,
+  deps: ActorTurnDeps,
+): Promise<ActorTurnState> {
+  const sizes: number[] = [];
+  const ownHook = deps.onCompletionPrompt;
+  try {
+    return await runTurn(state, userText, {
+      ...deps,
+      onCompletionPrompt: (prompt) => {
+        sizes.push(estimatePromptTokens(prompt));
+        ownHook?.(prompt);
+      },
+    });
+  } finally {
+    if (sizes.length > 0) {
+      const cfg = deps.recap?.config;
+      reportUsageNote({
+        kind: "actor-turn",
+        calls: sizes.length,
+        firstPrompt: sizes[0] ?? 0,
+        peakPrompt: Math.max(...sizes),
+        ...(cfg?.enabled === true ? { highWater: compactThreshold(cfg) } : {}),
+      });
+    }
+  }
+}
+
+async function runTurn(
   state: ActorTurnState,
   userText: string,
   deps: ActorTurnDeps,

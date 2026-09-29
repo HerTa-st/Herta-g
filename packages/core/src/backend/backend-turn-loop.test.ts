@@ -19,9 +19,12 @@ import { TranscriptStore } from "../transcript-store.js";
 import type { AgentEvent } from "../types/events.js";
 import type {
   ProviderAdapter,
+  ProviderEvent,
   ProviderPromptFrame,
 } from "../types/provider.js";
+import type { TodoItem } from "../types/todo.js";
 import type { HertaTool } from "../types/tool.js";
+import { setUsageNoteSink, type UsageNote } from "../usage-note.js";
 import { BackendContextBuilder } from "./backend-context-builder.js";
 import {
   partitionToolCalls,
@@ -2151,5 +2154,249 @@ describe("one permission gate for the serial and the parallel path (2026-09-03)"
     );
     expect(parallel.results[0]).toEqual(serial.results[0]);
     expect(serial.results[0]?.suggestion).toBeUndefined();
+  });
+});
+
+describe("long runs: the end-of-run check, the todo reminder, the run's note (long-run study items 4–6, 2026-09-29)", () => {
+  /** A todo_write stand-in: the real tool lives in @herta/tools. */
+  const todoWrite: HertaTool = {
+    name: "todo_write",
+    schema: () => ({ name: "todo_write", description: "", inputSchema: {} }),
+    run: async (call, ctx) => {
+      ctx.todos.replace((call.input as { todos: TodoItem[] }).todos);
+      return { ok: true, summary: "todos updated" };
+    },
+  };
+  const noop: HertaTool = {
+    name: "noop",
+    schema: () => ({ name: "noop", description: "", inputSchema: {} }),
+    run: async () => ({ ok: true, summary: "noop" }),
+  };
+  const writeTodos = (id: string, todos: TodoItem[]): ProviderEvent[] => [
+    {
+      type: "tool-call-request",
+      call: { id, tool: "todo_write", input: { todos } },
+    },
+    { type: "finish", reason: "tool_calls" },
+  ];
+  const stop = (text: string): ProviderEvent[] => [
+    { type: "text-delta", text },
+    { type: "finish", reason: "stop" },
+  ];
+  const trailerOf = (frame: ProviderPromptFrame): string =>
+    "trailingState" in frame ? (frame.trailingState ?? "") : "";
+
+  async function drain(
+    deps: Parameters<typeof runBackendTurnLoop>[0],
+  ): Promise<AgentEvent[]> {
+    const events: AgentEvent[] = [];
+    for await (const e of runBackendTurnLoop(deps, sampleBrief, {
+      signal: new AbortController().signal,
+      userMessages: sampleUserMessages,
+    })) {
+      events.push(e);
+    }
+    return events;
+  }
+
+  it("a run that stops with its list unfinished gets ONE more step, with the check in the trailer; the second stop ends it", async () => {
+    const trailers: string[] = [];
+    const provider = new FakeProvider({
+      turns: [
+        writeTodos("t1", [
+          { content: "patch parser.ts", status: "completed" },
+          { content: "run parser tests", status: "pending" },
+        ]),
+        stop("done"),
+        (frame) => {
+          trailers.push(trailerOf(frame));
+          return stop("the tests are left");
+        },
+        // A fourth call would exhaust the script and fail the turn.
+      ],
+    });
+    const deps = buildDeps(provider);
+    deps.tools.register(todoWrite);
+    const events = await drain(deps);
+
+    expect(events.map((e) => e.type)).toContain("turn.finished");
+    expect(events.map((e) => e.type)).not.toContain("turn.failed");
+    expect(trailers[0]).toContain(
+      "收尾检查：你已经停下，但任务清单里还有 1 项没有完成",
+    );
+    // The list itself leads the same trailer, so the check can point at it.
+    expect(trailers[0]?.indexOf("## 当前任务清单")).toBe(0);
+    expect(deps.todos.unfinished()).toHaveLength(1);
+  });
+
+  it("the check is not repeated: a run that marks its list after it, then stops, ends there", async () => {
+    const trailers: string[] = [];
+    const provider = new FakeProvider({
+      turns: [
+        writeTodos("t1", [{ content: "run parser tests", status: "pending" }]),
+        stop("done"),
+        (frame) => {
+          trailers.push(trailerOf(frame));
+          return writeTodos("t2", [
+            { content: "run parser tests", status: "completed" },
+          ]);
+        },
+        (frame) => {
+          trailers.push(trailerOf(frame));
+          return stop("all done");
+        },
+      ],
+    });
+    const deps = buildDeps(provider);
+    deps.tools.register(todoWrite);
+    const events = await drain(deps);
+
+    expect(events.map((e) => e.type)).toContain("turn.finished");
+    expect(trailers[0]).toContain("收尾检查");
+    expect(trailers[1]).not.toContain("收尾检查");
+    expect(deps.todos.unfinished()).toHaveLength(0);
+  });
+
+  it("no check when the list is finished, or when the run is being stopped", async () => {
+    // Finished: one todo_write, one stop, nothing more asked of the model.
+    const done = new FakeProvider({
+      turns: [
+        writeTodos("t1", [{ content: "patch", status: "completed" }]),
+        stop("done"),
+      ],
+    });
+    const doneDeps = buildDeps(done);
+    doneDeps.tools.register(todoWrite);
+    expect((await drain(doneDeps)).map((e) => e.type)).toContain(
+      "turn.finished",
+    );
+
+    // Stopped: the user presses Stop just as the model says it is done — the
+    // late steer drain after the final inference is exactly that moment.
+    const controller = new AbortController();
+    const stopping = new FakeProvider({
+      turns: [
+        writeTodos("t1", [{ content: "patch", status: "pending" }]),
+        stop("done"),
+      ],
+    });
+    const stoppingDeps = buildDeps(stopping);
+    stoppingDeps.tools.register(todoWrite);
+    let drains = 0;
+    const events: AgentEvent[] = [];
+    for await (const e of runBackendTurnLoop(stoppingDeps, sampleBrief, {
+      signal: controller.signal,
+      userMessages: sampleUserMessages,
+      takePendingUserInput: () => {
+        drains += 1;
+        if (drains === 3) controller.abort();
+        return [];
+      },
+    })) {
+      events.push(e);
+    }
+    expect(drains).toBe(3);
+    expect(events.map((e) => e.type)).toContain("turn.finished");
+  });
+
+  it("a long run with no list is reminded every 10 steps; a run with a list, or without todo_write, never is", async () => {
+    function looping(steps: number, trailers: string[]): ProviderAdapter {
+      let call = 0;
+      return {
+        async *streamChat(frame) {
+          trailers.push(trailerOf(frame));
+          call += 1;
+          if (call > steps) {
+            yield* stop("done");
+            return;
+          }
+          yield {
+            type: "tool-call-request",
+            call: { id: `c${call}`, tool: "noop", input: {} },
+          };
+          yield { type: "finish", reason: "tool_calls" };
+        },
+      };
+    }
+    const nudge = "还没有任务清单";
+
+    const trailers: string[] = [];
+    const withTool = {
+      ...buildDeps(new FakeProvider({ turns: [] })),
+      provider: looping(21, trailers),
+    };
+    withTool.tools.register(todoWrite);
+    withTool.tools.register(noop);
+    await drain(withTool);
+    const nudged = trailers
+      .map((t, i) => (t.includes(nudge) ? i : -1))
+      .filter((i) => i >= 0);
+    // Frame i is built after i steps: reminded after 10 and after 20.
+    expect(nudged).toEqual([10, 20]);
+    expect(trailers[10]).toContain("这次运行已经走了 10 步");
+
+    // Without todo_write in the session there is nothing to remind of.
+    const bare: string[] = [];
+    const noTool = buildDeps(new FakeProvider({ turns: [] }));
+    noTool.tools.register(noop);
+    await drain({ ...noTool, provider: looping(21, bare) });
+    expect(bare.some((t) => t.includes(nudge))).toBe(false);
+
+    // A run that keeps a list is not reminded.
+    const listed: string[] = [];
+    const withList = buildDeps(new FakeProvider({ turns: [] }));
+    withList.tools.register(todoWrite);
+    withList.tools.register(noop);
+    withList.todos.replace([{ content: "step", status: "completed" }]);
+    await drain({ ...withList, provider: looping(21, listed) });
+    expect(listed.some((t) => t.includes(nudge))).toBe(false);
+  });
+
+  it("reports the run's trims once, however it ends — how many frames were cleared or dropped, and how far past the budget it grew", async () => {
+    const notes: UsageNote[] = [];
+    setUsageNoteSink((n) => notes.push(n));
+    try {
+      const fat = "A".repeat(60_000);
+      const fatCall = (id: string): ProviderEvent[] => [
+        { type: "text-delta", text: fat },
+        { type: "tool-call-request", call: { id, tool: "noop", input: {} } },
+        { type: "finish", reason: "tool_calls" },
+      ];
+      const provider = new FakeProvider({
+        turns: [fatCall("c1"), fatCall("c2"), stop("done")],
+      });
+      const deps = {
+        ...buildDeps(provider),
+        budget: { budgetTokens: 20_000, keepRecentToolPayloads: 1 },
+      };
+      deps.tools.register(noop);
+      await drain(deps);
+
+      expect(notes).toHaveLength(1);
+      const note = notes[0];
+      if (note?.kind !== "backend-run") throw new Error("no run note");
+      expect(note.steps).toBe(3);
+      expect(note.budget).toBe(20_000);
+      // The third frame had to drop an old iteration to fit.
+      expect(note.droppedSteps).toBe(1);
+      expect(note.maxDropped).toBeGreaterThanOrEqual(1);
+      expect(note.peakSent).toBeLessThanOrEqual(20_000);
+      expect(note.peakUntrimmed).toBeGreaterThan(20_000);
+
+      // A run that fails reports too: the provider refuses its first call.
+      notes.length = 0;
+      const failing = await drain(buildDeps(new FakeProvider({ turns: [] })));
+      expect(failing.map((e) => e.type)).toContain("turn.failed");
+      expect(notes).toEqual([
+        expect.objectContaining({
+          kind: "backend-run",
+          steps: 1,
+          clearedSteps: 0,
+          droppedSteps: 0,
+        }),
+      ]);
+    } finally {
+      setUsageNoteSink(undefined);
+    }
   });
 });

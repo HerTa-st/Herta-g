@@ -16,6 +16,7 @@ import type {
   ToolContext,
   ToolResult,
 } from "../types/tool.js";
+import { reportUsageNote } from "../usage-note.js";
 import type {
   BackendContextBuilder,
   RepoContextSnapshot,
@@ -30,6 +31,7 @@ import {
   type BackendPromptBudget,
   DEFAULT_BACKEND_PROMPT_BUDGET,
   estimateFrameBaseTokens,
+  estimateMessagesTokens,
   fitMessagesToBudget,
 } from "./context-budget.js";
 import {
@@ -42,7 +44,9 @@ import {
 } from "./stream-model-inference.js";
 import { persistOversizedResult } from "./tool-result-persistence.js";
 import {
+  renderEndCheck,
   renderStepNotice,
+  renderTodoNudge,
   renderWorkingState,
   type WorkingStateInput,
 } from "./working-state.js";
@@ -309,6 +313,17 @@ export async function* runBackendTurnLoop(
   // Note: user history is system-level context. We do NOT append it to transcript.
 
   const sleep = deps.sleep ?? defaultBackoffSleep;
+  const budget = deps.budget ?? DEFAULT_BACKEND_PROMPT_BUDGET;
+  // What the run's frames needed of the budget trim, for the usage log
+  // (long-run study item 6) — reported once, however the run ends.
+  const trims = {
+    steps: 0,
+    clearedSteps: 0,
+    droppedSteps: 0,
+    maxDropped: 0,
+    peakSent: 0,
+    peakUntrimmed: 0,
+  };
   try {
     // L2 (audit 2026-07-09): everything in the frame EXCEPT `messages` is
     // invariant across the turn's iterations — the execution contract, the
@@ -334,6 +349,11 @@ export async function* runBackendTurnLoop(
     });
 
     let iterations = 0;
+    // The end-of-run check (long-run study item 4): given once, on the
+    // iteration after the model first stops with its list unfinished.
+    let endCheckGiven = false;
+    let endCheckDue = false;
+    const hasTodoTool = deps.tools.get("todo_write") !== undefined;
     while (true) {
       if (iterations >= MAX_TURN_ITERATIONS) {
         // The step limit ends the run where it stands — like an interruption,
@@ -363,16 +383,25 @@ export async function* runBackendTurnLoop(
       // The state trailer, recomputed each call and appended by the translate
       // layer AFTER the transcript, so the cache-stable prefix is untouched:
       // the todo list (ADR 0025 §2), the working state once old iterations
-      // are dropped (below), and the steps left near the limit.
+      // are dropped (below), a reminder when a long run has no list, the
+      // steps left near the limit, and the end-of-run check.
       const lang = handle.lang ?? "zh";
       const todoState = renderTodoState(deps.todos.all(), lang);
+      const todoNudge =
+        hasTodoTool && deps.todos.all().length === 0
+          ? renderTodoNudge(iterations - 1, lang)
+          : "";
       const stepNotice = renderStepNotice(
         iterations,
         MAX_TURN_ITERATIONS,
         lang,
       );
+      const endCheck = endCheckDue
+        ? renderEndCheck(deps.todos.unfinished().length, lang)
+        : "";
+      endCheckDue = false;
       const trailerWith = (workingState: string): string =>
-        [todoState, workingState, stepNotice]
+        [todoState, workingState, todoNudge, stepNotice, endCheck]
           .filter((s) => s.length > 0)
           .join("\n\n");
       let trailingState = trailerWith("");
@@ -382,7 +411,6 @@ export async function* runBackendTurnLoop(
       // groups). The durable transcript is untouched — every iteration
       // re-derives the projection. Pre-flight, so a bloated frame is fixed
       // BEFORE a provider call is burned on it.
-      const budget = deps.budget ?? DEFAULT_BACKEND_PROMPT_BUDGET;
       let fit = fitMessagesToBudget({
         messages: deps.transcript.all(),
         baseTokens: estimateFrameBaseTokens(baseFrame, trailingState),
@@ -403,6 +431,20 @@ export async function* runBackendTurnLoop(
           lang,
         });
       }
+      const trimmed =
+        fit.clearedPayloads > 0 || fit.droppedGroups > 0 || fit.overBudget;
+      trims.steps += 1;
+      if (fit.clearedPayloads > 0) trims.clearedSteps += 1;
+      if (fit.droppedGroups > 0) trims.droppedSteps += 1;
+      trims.maxDropped = Math.max(trims.maxDropped, fit.droppedGroups);
+      trims.peakSent = Math.max(trims.peakSent, fit.estimatedTokens);
+      trims.peakUntrimmed = Math.max(
+        trims.peakUntrimmed,
+        trimmed
+          ? estimateFrameBaseTokens(baseFrame, trailingState) +
+              estimateMessagesTokens(deps.transcript.all())
+          : fit.estimatedTokens,
+      );
       if (fit.overBudget) {
         // Even the minimal tail (marker + last group) exceeds the budget —
         // the base frame itself must be near/over it. Surface honestly
@@ -500,7 +542,25 @@ export async function* runBackendTurnLoop(
         // record already showed it delivered (the user block, Herta's
         // beat) — a message everyone but 板砖 had seen.
         const late = handle.takePendingUserInput?.() ?? [];
-        if (late.length === 0) break;
+        if (late.length === 0) {
+          // The end-of-run check (long-run study item 4): the model stopped
+          // with items on its list not completed — often work it did and
+          // never marked, sometimes work it skipped. It gets one more step,
+          // with the check in the trailer, to continue or make the list
+          // honest; the second stop ends the run whatever the list says.
+          // Not when no step is left, or the run is being stopped.
+          if (
+            !endCheckGiven &&
+            iterations < MAX_TURN_ITERATIONS &&
+            !handle.signal.aborted &&
+            deps.todos.unfinished().length > 0
+          ) {
+            endCheckGiven = true;
+            endCheckDue = true;
+            continue;
+          }
+          break;
+        }
         for (const text of late) {
           deps.transcript.appendUser(text, deps.clock());
         }
@@ -842,6 +902,14 @@ export async function* runBackendTurnLoop(
       cause: err,
     };
     yield* emit({ type: "turn.failed", error });
+  } finally {
+    if (trims.steps > 0) {
+      reportUsageNote({
+        kind: "backend-run",
+        ...trims,
+        budget: budget.budgetTokens,
+      });
+    }
   }
 }
 

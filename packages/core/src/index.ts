@@ -253,4 +253,12 @@ export {
 export type * from "./types/todo.js";
 export type * from "./types/tool.js";
 export type * from "./types/transcript.js";
+export {
+  type ActorTurnNote,
+  type BackendRunNote,
+  reportUsageNote,
+  setUsageNoteSink,
+  type UsageNote,
+  type UsageNoteSink,
+} from "./usage-note.js";
 export { trustCovers, WORKSPACE_TRUST_CODES } from "./workspace-trust.js";

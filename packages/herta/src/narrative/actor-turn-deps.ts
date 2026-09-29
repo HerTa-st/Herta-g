@@ -162,6 +162,13 @@ export interface ActorTurnDeps {
     prompt: string,
   ) => void;
   /**
+   * Fires with every completion prompt the turn asks for — each thought and
+   * speech (the phase-2 funnel, an adopted speculative thought included) and
+   * each beat. `runActorCompletionTurn` sets it to measure the turn for the
+   * usage log (long-run study item 6); a caller's own hook still fires.
+   */
+  readonly onCompletionPrompt?: (prompt: string) => void;
+  /**
    * The intent router's state (Slice 13). The actor runs in two-phase
    * mood-routing mode: every iteration always thinks first (（我 想）), then
    * the soft guard forces speech on the next iteration. Required since

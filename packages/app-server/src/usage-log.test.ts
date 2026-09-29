@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reportUsageNote } from "@herta/core";
 import { reportProviderUsage } from "@herta/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installUsageLog } from "./usage-log.js";
@@ -64,6 +65,59 @@ describe("installUsageLog", () => {
       .map((l) => JSON.parse(l));
     expect(rows[0]).not.toHaveProperty("source");
     expect(rows[1]).toMatchObject({ endpoint: "chat", source: "dream" });
+  });
+
+  it("writes a run's and a turn's measurements beside the calls, told apart by `note` (long-run study item 6)", async () => {
+    const file = join(dir, "usage.jsonl");
+    const uninstall = installUsageLog(file);
+    reportProviderUsage(call(1));
+    reportUsageNote({
+      kind: "backend-run",
+      steps: 37,
+      clearedSteps: 12,
+      droppedSteps: 3,
+      maxDropped: 16,
+      peakSent: 198_000,
+      peakUntrimmed: 260_000,
+      budget: 200_000,
+    });
+    reportUsageNote({
+      kind: "actor-turn",
+      calls: 4,
+      firstPrompt: 21_930,
+      peakPrompt: 38_000,
+    });
+    await uninstall();
+    reportUsageNote({
+      kind: "actor-turn",
+      calls: 1,
+      firstPrompt: 1,
+      peakPrompt: 1,
+    });
+    const rows = readFileSync(file, "utf8")
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).not.toHaveProperty("note");
+    expect(rows[1]).toEqual({
+      at: rows[1].at,
+      note: "backend-run",
+      steps: 37,
+      clearedSteps: 12,
+      droppedSteps: 3,
+      maxDropped: 16,
+      peakSent: 198_000,
+      peakUntrimmed: 260_000,
+      budget: 200_000,
+    });
+    expect(rows[2]).toEqual({
+      at: rows[2].at,
+      note: "actor-turn",
+      calls: 4,
+      firstPrompt: 21_930,
+      peakPrompt: 38_000,
+    });
   });
 
   it("moves an oversized log aside once, at install, and starts a fresh one", async () => {

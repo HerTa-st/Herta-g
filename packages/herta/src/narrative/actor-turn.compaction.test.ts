@@ -4,14 +4,18 @@ import {
   type CompletionEvent,
   type CompletionProviderAdapter,
   type CompletionRequest,
+  estimatePromptTokens,
   type HertaToAgentBrief,
   InMemoryEventBus,
+  setUsageNoteSink,
   type TerminalRecord,
+  type UsageNote,
 } from "@herta/core";
 import { describe, expect, it } from "vitest";
 import { type ActorTurnDeps, runActorCompletionTurn } from "./actor-turn.js";
 import {
   type CompactionConfig,
+  compactThreshold,
   DEFAULT_COMPACTION_CONFIG,
   type RecapCache,
 } from "./session-recap.js";
@@ -167,6 +171,78 @@ describe("runActorCompletionTurn — long-session compaction wiring", () => {
     for (const prompt of prompts) {
       expect(prompt).toContain("第一段：我们聊过流萤的设定细节很久了对吧");
       expect(prompt).not.toContain("### 记录：先前");
+    }
+  });
+});
+
+describe("runActorCompletionTurn — the turn's note for the usage log (long-run study item 6)", () => {
+  it("reports every completion prompt the turn sent — count, first, largest — against the recap's high-water mark", async () => {
+    const notes: UsageNote[] = [];
+    setUsageNoteSink((n) => notes.push(n));
+    try {
+      const { provider, prompts } = mkProvider();
+      const seen: string[] = [];
+      const deps = {
+        ...mkDeps(provider, mkRecapRuntime()),
+        // A caller's own hook still fires.
+        onCompletionPrompt: (p: string) => seen.push(p),
+      };
+      await runActorCompletionTurn({ record: priorRecord() }, "现在呢？", deps);
+
+      expect(seen).toEqual(prompts);
+      const sizes = prompts.map((p) => estimatePromptTokens(p));
+      expect(notes).toEqual([
+        {
+          kind: "actor-turn",
+          calls: 2,
+          firstPrompt: sizes[0],
+          peakPrompt: Math.max(...sizes),
+          highWater: compactThreshold(TINY_COMPACT_CONFIG),
+        },
+      ]);
+
+      // No compaction configured: no high-water mark to report.
+      notes.length = 0;
+      const bare = mkProvider();
+      await runActorCompletionTurn(
+        { record: priorRecord() },
+        "现在呢？",
+        mkDeps(bare.provider),
+      );
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).not.toHaveProperty("highWater");
+    } finally {
+      setUsageNoteSink(undefined);
+    }
+  });
+
+  it("a turn that fails still reports the prompts it sent", async () => {
+    const notes: UsageNote[] = [];
+    setUsageNoteSink((n) => notes.push(n));
+    try {
+      let calls = 0;
+      const provider: CompletionProviderAdapter = {
+        streamCompletion(): AsyncIterable<CompletionEvent> {
+          calls += 1;
+          if (calls > 1) throw new Error("provider down");
+          return streamOf([
+            { type: "text-delta", text: "想想看。（/我 想）" },
+            { type: "finish", reason: "stop" },
+          ]);
+        },
+      };
+      await expect(
+        runActorCompletionTurn(
+          { record: priorRecord() },
+          "现在呢？",
+          mkDeps(provider),
+        ),
+      ).rejects.toThrow();
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatchObject({ kind: "actor-turn" });
+      expect((notes[0] as { calls: number }).calls).toBeGreaterThanOrEqual(1);
+    } finally {
+      setUsageNoteSink(undefined);
     }
   });
 });

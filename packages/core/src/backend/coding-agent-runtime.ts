@@ -863,8 +863,16 @@ export class CodingAgentRuntime {
         } else {
           // Only SUCCESSFUL tool results (or harvested tests/files) argue
           // for completion; a run whose evidence is all failures reports
-          // partial rather than claiming success.
-          builder.setStatus(hasOkEvidence ? "completed" : "partial");
+          // partial rather than claiming success. Open todos cap it too,
+          // as a refusal does (owner 2026-09-29, long-run study item 4):
+          // the loop gave the model one end-of-run check to finish or make
+          // the list honest, so an item still open is work left undone, and
+          // 完成 beside a ↳ 待办 line would claim otherwise.
+          builder.setStatus(
+            hasOkEvidence && todos.unfinished().length === 0
+              ? "completed"
+              : "partial",
+          );
         }
       }
 
