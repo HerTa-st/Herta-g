@@ -12,7 +12,7 @@ export const zh = {
   "update.betaNotice":
     "目前仍处于测试阶段，版本之间可能出现破坏性改动，更新后历史会话或设置未必能完整保留。",
   "update.auto": "自动更新",
-  "update.autoDesc": "关闭后将不再自动检查与下载更新，仅在手动检查时进行。",
+  "update.autoDesc": "关闭后，仅在手动检查时更新。",
   "update.currentVersion": "当前版本",
   "update.checkNow": "检查更新",
   "update.restartNow": "重启并更新",
@@ -30,26 +30,26 @@ export const zh = {
   "nav.group.general": "通用",
   "nav.group.herta": "黑塔",
   "nav.group.engine": "引擎",
-  "window.intro": "窗口的外观与开合行为，以及离开窗口时的提醒。",
+  "window.intro": "窗口的外观与行为。",
   "window.theme": "外观",
-  "window.themeDesc": "界面的明暗主题；跟随系统时随操作系统自动切换。",
+  "window.themeDesc": "界面的明暗主题；「跟随系统」随操作系统切换。",
   "theme.light": "浅色",
   "theme.dark": "深色",
   "theme.system": "跟随系统",
   "window.closeToTray": "关闭时收进托盘",
   "window.closeToTrayDesc":
-    "关闭窗口时收进系统托盘继续运行；关掉此项后，关闭即退出。",
+    "关闭窗口后，黑塔在系统托盘中继续运行；关闭此项则直接退出。",
   // macOS (2026-09-23): the icon sits in the menu bar, and a Mac app does not
   // quit when its window closes — it stays in the Dock until ⌘Q.
   "window.closeToTrayMac": "关闭时收进菜单栏",
   "window.closeToTrayDescMac":
-    "关闭窗口时收进菜单栏，会话继续运行；关掉此项后，关闭即关窗，黑塔仍留在程序坞，按 ⌘Q 退出。",
+    "关闭窗口后，黑塔在菜单栏中继续运行；关闭此项则只关闭窗口，黑塔仍留在程序坞，按 ⌘Q 退出。",
   // Attention (ADR 0072 §1): what notifies, and the keep-awake hold.
   "window.notifications": "系统通知",
   "window.notificationsDesc":
-    "窗口不在前台时，以下情况会发出系统通知：有操作等待批准，板砖的运行可以继续，回复未能完成，或者一轮有板砖参与、或耗时超过半分钟的回复已经完成。",
+    "窗口不在前台时，有事项需要处理或较长的回复完成，会发出通知。",
   "window.keepAwake": "运行时保持唤醒",
-  "window.keepAwakeDesc": "板砖运行期间阻止电脑进入睡眠；显示器仍可关闭。",
+  "window.keepAwakeDesc": "板砖运行期间阻止电脑睡眠；显示器仍可关闭。",
   "window.minimize": "最小化",
   "window.maximize": "最大化",
   "window.restore": "还原",
@@ -60,10 +60,10 @@ export const zh = {
   "settings.dialogAria": "设置",
   "settings.loadFailed": "设置读取失败——重新打开设置以重试",
   "language.rowLabel": "界面语言",
-  "language.intro": "黑塔本人的说话方式不受影响。",
+  "language.intro": "界面与对话的语言分别设置。",
   "language.interactionRowLabel": "对话语言",
   "language.interactionDesc":
-    "黑塔与你交谈所用的语言。仅对新会话生效；本版本中，英文会话没有语音。",
+    "黑塔交谈所用的语言，仅对新会话生效；英文会话暂无语音。",
   "language.follow": "跟随界面语言",
   "topbar.toggleSidebar": "切换侧栏",
   "topbar.search": "搜索会话",
@@ -154,7 +154,7 @@ export const zh = {
   "dream.enable": "开启入梦",
   // Opt-in since 2026-09-21: the pass runs while the user is away, on their
   // key — the row says so, since that is the whole reason it is a choice.
-  "dream.enableDesc": "你离开时让黑塔入梦。入梦会消耗 DeepSeek API 额度。",
+  "dream.enableDesc": "入梦会消耗 DeepSeek API 额度。",
   "dream.intro":
     "入梦是黑塔的休息时间。你离开时，她会回顾过往的会话，把那些值得记住的片刻写下来——相处越久，就越了解你。",
   // Punctuation rule (owner 2026-08-27): a single-clause LABEL or status
@@ -208,15 +208,20 @@ export const zh = {
   "device.state.awaitingApproval": "等待批准",
   "device.state.done": "完成",
   "device.state.error": "出错",
-  "banzhuan.legend.idle": "空闲——没有派活",
-  "banzhuan.legend.delegated": "板砖正在处理你的任务",
-  "banzhuan.legend.waitingApproval": "它需要你批准才能继续",
-  "banzhuan.legend.succeeded": "干净收工——亮起绿灯",
-  "banzhuan.legend.failed": "任务出错了",
+  // The Coprocessor pane is written in Herta's own hand (owner 2026-09-29) —
+  // her written register, not UI chrome: the legend below, the intro and the
+  // row descriptions. The formal-register rule for UI copy does not govern
+  // them.
+  "banzhuan.legend.idle": "没有委派，它在等。",
+  "banzhuan.legend.delegated": "在办你交代的事。",
+  "banzhuan.legend.waitingApproval": "卡在你的批准上。",
+  "banzhuan.legend.succeeded": "干净收工，亮绿灯。",
+  "banzhuan.legend.failed": "出了错；原因在记录里。",
   "banzhuan.intro":
-    "板砖替我处理代码的活。派活要写全 @板砖，那个 @ 才是真正的触发符。正面那圈光标着它此刻在干什么：",
+    "差分协处理器，我叫它板砖：代码上的粗活，归它。委派须写全 @板砖，少了 @，它不会动。正面那圈光，是它此刻的状态：",
   "banzhuan.thinking": "思考强度",
-  "banzhuan.thinkingDesc": "板砖干活时的思考强度，下次启动生效。",
+  "banzhuan.thinkingDesc":
+    "动手前想多久：越高越周全，也越慢、越贵。下次启动生效。",
   "banzhuan.thinking.low": "低",
   "banzhuan.thinking.high": "高",
   "banzhuan.thinking.max": "最高",
@@ -224,15 +229,15 @@ export const zh = {
   // one trade-off, apply semantics; the no-bash sentence only when detected.
   "banzhuan.contract": "工具契约",
   "banzhuan.contractDesc":
-    "板砖使用的工具组合。标准：一套专用工具集；极简：精简工具组，大幅降低执行成本，需要本机已安装 bash。下次启动生效。",
+    "它的工具。标准：整套专用工具；极简：bash 加一把编辑器，开销约为一半，须本机装有 bash。下次启动生效。",
   "banzhuan.contract.noBash":
-    "本机未检测到 bash，选极简也会按标准运行；装上 Git for Windows 后重启即可用。",
+    "本机没有 bash：选极简，它也照标准干。装好 Git for Windows 后重启。",
   "banzhuan.contract.standard": "标准",
   "banzhuan.contract.minimal": "极简",
   // 3D device card (ADR 0057). Same register as the rows above: what it is,
   // the one trade-off, apply semantics.
   "banzhuan.scene": "立体板砖",
-  "banzhuan.sceneDesc": "立体实物渲染，关闭则显示平面图。",
+  "banzhuan.sceneDesc": "开：一块打了光的实物；关：平面图，省显卡。",
   "approval.title": "请求权限",
   "approval.allow": "同意",
   "approval.alwaysAllow": "任务内同意",

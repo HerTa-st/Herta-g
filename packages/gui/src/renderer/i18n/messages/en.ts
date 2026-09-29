@@ -14,8 +14,7 @@ export const en = {
   "update.betaNotice":
     "still under test — releases may include breaking changes, and past sessions or settings may not fully survive an update.",
   "update.auto": "Automatic updates",
-  "update.autoDesc":
-    "When off, updates are neither checked nor downloaded automatically — only on a manual check.",
+  "update.autoDesc": "When off, updates happen only on a manual check.",
   "update.currentVersion": "Current version",
   "update.checkNow": "Check for updates",
   "update.restartNow": "Restart & update",
@@ -33,26 +32,24 @@ export const en = {
   "nav.group.general": "General",
   "nav.group.herta": "Herta",
   "nav.group.engine": "Engine",
-  "window.intro":
-    "How the window looks, opens and closes, and what happens while you are away from it.",
+  "window.intro": "How the window looks and behaves.",
   "window.theme": "Appearance",
-  "window.themeDesc":
-    "Light or dark interface; System follows the OS setting automatically.",
+  "window.themeDesc": "Light or dark; System follows the operating system.",
   "theme.light": "Light",
   "theme.dark": "Dark",
   "theme.system": "System",
   "window.closeToTray": "Close to tray",
   "window.closeToTrayDesc":
-    "Closing the window hides Herta to the system tray and keeps her running; turn this off to quit on close.",
+    "Closing the window keeps Herta running in the system tray; when this is off, closing quits.",
   // macOS (2026-09-23): the icon sits in the menu bar, and a Mac app does not
   // quit when its window closes — it stays in the Dock until ⌘Q.
   "window.closeToTrayMac": "Close to menu bar",
   "window.closeToTrayDescMac":
-    "Closing the window hides Herta to the menu bar and keeps her session running; turn this off to close the window instead. Herta stays in the Dock until you quit with ⌘Q.",
+    "Closing the window keeps Herta running in the menu bar; when this is off, it only closes the window, and Herta stays in the Dock until you quit with ⌘Q.",
   // Attention (ADR 0072 §1): what notifies, and the keep-awake hold.
   "window.notifications": "Notifications",
   "window.notificationsDesc":
-    "When the window is not in front, a system notification appears when an operation is waiting for approval, Brick's run can be continued, a reply could not be completed, or a reply that involved Brick or took over half a minute has finished.",
+    "When the window is in the background, a notification appears if something needs you or a longer reply finishes.",
   "window.keepAwake": "Keep awake during runs",
   "window.keepAwakeDesc":
     "Keeps the computer from sleeping while Brick runs; the display may still turn off.",
@@ -67,10 +64,11 @@ export const en = {
   "settings.loadFailed":
     "Could not load this setting — reopen Settings to retry",
   "language.rowLabel": "Display language",
-  "language.intro": "Herta's own voice is unaffected.",
+  "language.intro":
+    "The interface and the conversation each have their own language.",
   "language.interactionRowLabel": "Interaction language",
   "language.interactionDesc":
-    "The language Herta talks with you in. Applies to new sessions; English sessions have no voice in this release.",
+    "The language Herta speaks in. Applies to new sessions; English sessions have no voice yet.",
   "language.follow": "Follow UI language",
   "topbar.toggleSidebar": "Toggle sidebar",
   "topbar.search": "Search sessions",
@@ -174,8 +172,7 @@ export const en = {
   "voice.volume": "Volume",
   "voice.volumeDesc": "Adjust the loudness of Herta's voice.",
   "dream.enable": "Enable Dream",
-  "dream.enableDesc":
-    "Let Herta dream while you are away. Dreaming uses your DeepSeek API quota.",
+  "dream.enableDesc": "Dreaming uses your DeepSeek API quota.",
   "dream.intro":
     "Dream is Herta's downtime. While you are away, she looks back over your sessions and writes down the memorable moments — coming to know you a little better the longer you work together.",
   // Punctuation rule (owner 2026-08-27): a single-clause LABEL or status
@@ -237,30 +234,33 @@ export const en = {
   "device.state.awaitingApproval": "Awaiting approval",
   "device.state.done": "Done",
   "device.state.error": "Error",
-  "banzhuan.legend.idle": "resting — nothing delegated",
-  "banzhuan.legend.delegated": "Brick is working on your task",
-  "banzhuan.legend.waitingApproval": "it needs your approval to continue",
-  "banzhuan.legend.succeeded": "finished cleanly — a green beat",
-  "banzhuan.legend.failed": "the task errored",
-  // Herta's own first-person voice (zh: 板砖替我处理代码的活), so the UI
-  // formal-register rule — no contractions — does not apply to it.
+  "banzhuan.legend.idle": "nothing delegated; it waits",
+  "banzhuan.legend.delegated": "on the task you gave it",
+  "banzhuan.legend.waitingApproval": "held on your approval",
+  "banzhuan.legend.succeeded": "finished clean — a green light",
+  "banzhuan.legend.failed": "it failed; the record says why",
+  // The Coprocessor pane is written in Herta's own hand (owner 2026-09-29:
+  // "the banzhuan section copy should be like The Herta's writing") — her
+  // written register, not UI chrome: the intro, the row descriptions and the
+  // legend. The formal-register rule for UI copy does not govern them.
   "banzhuan.intro":
-    "The Brick handles the coding for me. To delegate, write the full @板砖 — that @ is the real trigger. The ring on its face shows what it's doing right now:",
+    "The Differential Coprocessor. I call it the Brick: the grunt work of code is its job. Delegate with the full @板砖; without the @, it does not move. The ring on its face is its state:",
   "banzhuan.thinking": "Thinking effort",
   "banzhuan.thinkingDesc":
-    "How hard Brick thinks while working. Applies on the next launch.",
+    "How long it thinks before acting: higher is more thorough, and slower and costlier. Applies on the next launch.",
   "banzhuan.thinking.low": "Low",
   "banzhuan.thinking.high": "High",
   "banzhuan.thinking.max": "Max",
   "banzhuan.contract": "Tool contract",
   "banzhuan.contractDesc":
-    "The toolset Brick works with. Standard: a full set of dedicated tools; Minimal: a lean toolset that cuts running cost sharply and needs bash installed on this machine. Applies on the next launch.",
+    "Its tools. Standard: a full set of dedicated ones. Minimal: bash and an editor, at about half the cost; needs bash on this machine. Applies on the next launch.",
   "banzhuan.contract.noBash":
-    "No bash was found on this machine; Minimal will run as Standard. Install Git for Windows and restart to enable it.",
+    "No bash on this machine: pick Minimal and it still runs Standard. Install Git for Windows, then restart.",
   "banzhuan.contract.standard": "Standard",
   "banzhuan.contract.minimal": "Minimal",
   "banzhuan.scene": "3D device",
-  "banzhuan.sceneDesc": "A lit 3D object; off shows the flat renders.",
+  "banzhuan.sceneDesc":
+    "On: a lit object. Off: a flat picture, easier on the GPU.",
   "approval.title": "Permission request",
   "approval.allow": "Allow",
   "approval.alwaysAllow": "Allow for this task",

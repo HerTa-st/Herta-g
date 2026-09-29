@@ -70,7 +70,7 @@ describe("LanguageSettings — interaction-language row (slice 4)", () => {
     // have no voice this release.
     expect(
       screen.getByText(
-        "The language Herta talks with you in. Applies to new sessions; English sessions have no voice in this release.",
+        "The language Herta speaks in. Applies to new sessions; English sessions have no voice yet.",
       ),
     ).toBeInTheDocument();
   });

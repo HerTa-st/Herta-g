@@ -35,9 +35,9 @@ describe("BanzhuanSettings", () => {
 
     it("renders the explainer, the demo card, an idle caption, and a 5-state legend", () => {
       const { container, getByText } = renderPane();
-      // The intro prose (en locale; compacted 2026-08-03 so the pane stays
-      // inside the settings card's stable height floor).
-      expect(getByText(/The Brick handles the coding/)).toBeTruthy();
+      // The intro prose (en locale; in Herta's own hand since 2026-09-29, and
+      // compact so the pane stays inside the card's stable height floor).
+      expect(getByText(/I call it the Brick/)).toBeTruthy();
       expect(container.querySelector(".settings-bz-card")).toBeTruthy();
       // Caption shows the single locale word for the current state.
       expect(captionName(container)).toBe("Idle");
@@ -170,7 +170,7 @@ describe("BanzhuanSettings", () => {
       });
       const { queryByText } = renderPane(mock);
       await waitFor(() =>
-        expect(queryByText(/No bash was found on this machine/)).toBeTruthy(),
+        expect(queryByText(/No bash on this machine/)).toBeTruthy(),
       );
       // ADR 0044: the sentence names the remedy, not just the problem.
       expect(queryByText(/Install Git for Windows/)).toBeTruthy();
