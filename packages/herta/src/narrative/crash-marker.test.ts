@@ -1,10 +1,45 @@
 import type { TerminalRecord } from "@herta/core";
 import { describe, expect, it } from "vitest";
-import { buildCrashMarker } from "./backend-record-projection.js";
+import {
+  buildCrashMarker,
+  buildDoneMarker,
+} from "./backend-record-projection.js";
 import {
   extractWorkingHistory,
   findLastDispatchBoundary,
 } from "./backend-record-slices.js";
+
+describe("a run that stopped at the step limit (2026-09-29)", () => {
+  it("is a 中断 marker that says why, with the reason first among its risks", () => {
+    const risks = [
+      "Turn stopped: reached the step limit (100 steps)",
+      ...Array.from({ length: 6 }, (_, i) => `Tool c${i} failed: it broke`),
+    ];
+    const marker = buildDoneMarker(
+      {
+        taskId: "t",
+        status: "interrupted",
+        changedFiles: [],
+        evidence: [],
+        tests: [],
+        permissions: [],
+        residualRisks: risks,
+        nextActions: [],
+        endedBy: "step_limit",
+      },
+      undefined,
+      undefined,
+    );
+    expect(marker.body).toBe("中断 · 7 风险 · 步数已达上限");
+    expect(marker.markerSummary).toMatchObject({
+      state: "interrupted",
+      stepLimit: true,
+    });
+    expect(marker.evidenceDetail).toContain(
+      "↳ 风险: Turn stopped: reached the step limit (100 steps);",
+    );
+  });
+});
 
 describe("the crash marker (ADR 0071 §1.2)", () => {
   const marker = buildCrashMarker({

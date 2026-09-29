@@ -969,11 +969,14 @@ export class SessionStore {
       // the same event. The actor's own failure branch already encodes this
       // policy ("the user did it deliberately", turnFailed below); the device
       // path just never got the exclusion.
+      // Neither is the step limit: the run stopped where it stood and can be
+      // continued (2026-09-29).
       this.emit({
         ...this.snapshot,
         backendActive: false,
         backendInFlight: 0,
-        backendError: ev.error.kind !== "interrupted",
+        backendError:
+          ev.error.kind !== "interrupted" && ev.error.kind !== "step_limit",
       });
       return;
     }

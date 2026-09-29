@@ -317,9 +317,17 @@ function unfinishedTodos(input: unknown): string[] {
  * applied — the tool's work stands; every other outcome says what did not
  * happen, or that nobody can know.
  */
-/** Why a run stopped with steps open: the app exited under it (the seal),
- *  or the user pressed Stop (closed when the run is continued). */
-export type StopCause = "app-exit" | "stop";
+/** Why a run stopped: the app exited under it (the seal), the user pressed
+ *  Stop, or it reached the step limit. A run the app exited during has its
+ *  closers from the seal; the other two are closed when it is continued. */
+export type StopCause = "app-exit" | "stop" | "step-limit";
+
+/** The journal `end`'s cause, as a stop cause: no cause is the user's Stop. */
+function causeOf(end: { readonly cause?: string }): StopCause {
+  return end.cause === "app-exit" || end.cause === "step-limit"
+    ? end.cause
+    : "stop";
+}
 
 function closerResult(
   outcome: CutoffOutcome,
@@ -330,14 +338,14 @@ function closerResult(
   cause: StopCause = "app-exit",
 ): ToolResult {
   const text = closerText(outcome, tool, path, processes, lang, cause);
-  const what = cause === "stop" ? "run stopped" : "app exited";
+  const what = cause === "app-exit" ? "app exited" : "run stopped";
   if (outcome === "write_applied") {
     return { ok: true, summary: `applied before the ${what}`, modelText: text };
   }
   return {
     ok: false,
     error: {
-      code: `${cause === "stop" ? "stopped" : "app_exit"}_${outcome}`,
+      code: `${cause === "app-exit" ? "app_exit" : "stopped"}_${outcome}`,
       message: text,
       retryable: false,
     },
@@ -356,16 +364,17 @@ function closerText(
 ): string {
   const file = path ?? (lang === "en" ? "the file" : "该文件");
   const command = COMMAND_TOOLS.has(tool);
-  // When / before / after the interruption, in the cause's words.
-  const zhWhen = cause === "stop" ? "运行被停止时" : "应用退出时";
-  const zhBefore = cause === "stop" ? "运行被停止前" : "应用退出前";
-  const zhAfter = cause === "stop" ? "运行被停止后" : "应用退出后";
-  const enWhen =
-    cause === "stop" ? "when the run was stopped" : "when the app exited";
-  const enBefore =
-    cause === "stop" ? "before the run was stopped" : "before the app exited";
-  const enAfter =
-    cause === "stop" ? "after the run was stopped" : "after the app exited";
+  // When / before / after the interruption, in the cause's words (a Stop
+  // and the step limit both stopped the run).
+  const exited = cause === "app-exit";
+  const zhWhen = exited ? "应用退出时" : "运行被停止时";
+  const zhBefore = exited ? "应用退出前" : "运行被停止前";
+  const zhAfter = exited ? "应用退出后" : "运行被停止后";
+  const enWhen = exited ? "when the app exited" : "when the run was stopped";
+  const enBefore = exited
+    ? "before the app exited"
+    : "before the run was stopped";
+  const enAfter = exited ? "after the app exited" : "after the run was stopped";
   const zh: Record<CutoffOutcome, string> = {
     not_started: `${zhWhen}这一步还没有开始执行。如仍需要，重新调用。`,
     read_interrupted: `${zhWhen}这次读取没有完成。它没有副作用，需要时重新读取。`,
@@ -418,11 +427,7 @@ export function resumableRun(
     }
   }
   if (last?.kind !== "end" || last.status !== "interrupted") return null;
-  return {
-    start: first,
-    cause: last.cause === "app-exit" ? "app-exit" : "stop",
-    recordLength,
-  };
+  return { start: first, cause: causeOf(last), recordLength };
 }
 
 /** What a continued run starts from (ADR 0071 §1.5). */
@@ -544,8 +549,7 @@ export async function planResume(
         // The segment ends: any call it left without a result is closed
         // here, where it stood. Only the last segment can have one — a
         // continued run closes its predecessor's before resuming.
-        const segmentCause: StopCause =
-          e.cause === "app-exit" ? "app-exit" : "stop";
+        const segmentCause = causeOf(e);
         for (const call of segmentCalls) {
           if (outcomes.has(call.id)) continue;
           const w = writes.get(call.id);
@@ -657,9 +661,17 @@ function resumeNote(
   hadShell: boolean,
   processLines: readonly string[],
 ): string {
+  const why: Record<StopCause, { zh: string; en: string }> = {
+    "app-exit": { zh: "应用意外退出", en: "the app exited unexpectedly" },
+    stop: { zh: "开拓者按了停止", en: "the user pressed Stop" },
+    "step-limit": {
+      zh: "达到了这次运行的步数上限",
+      en: "the run reached its step limit",
+    },
+  };
   if (lang === "en") {
     return [
-      `(The run was interrupted here: ${cause === "stop" ? "the user pressed Stop" : "the app exited unexpectedly"}. Each unfinished step above states its outcome; nothing was redone.`,
+      `(The run was interrupted here: ${why[cause].en}. Each unfinished step above states its outcome; nothing was redone.`,
       hadShell
         ? "The shell has been restarted: its working directory and environment are back to their initial state, and commands it was running in the background have ended."
         : null,
@@ -670,7 +682,7 @@ function resumeNote(
       .join(" ");
   }
   return [
-    `（运行在这里中断过：${cause === "stop" ? "开拓者按了停止" : "应用意外退出"}。上面每个未完成的步骤都已写明结果，没有任何步骤被重做。`,
+    `（运行在这里中断过：${why[cause].zh}。上面每个未完成的步骤都已写明结果，没有任何步骤被重做。`,
     hadShell
       ? "shell 已经重新启动：当前目录和环境变量都回到了初始状态，之前在后台运行的命令都已结束。"
       : null,

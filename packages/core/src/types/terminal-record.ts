@@ -151,6 +151,10 @@ export interface DoneMarkerSummary {
    *  app exited during, when its session next opened (ADR 0071 §1.2;
    *  canonical segment `应用意外退出`, state `interrupted`). */
   readonly crashed?: true;
+  /** Set (only ever `true`) when the run stopped at the harness's step limit
+   *  (state `interrupted`, continuable; canonical segment `步数已达上限`,
+   *  2026-09-29). */
+  readonly stepLimit?: true;
 }
 
 /** How a step the app exited during ended, as far as the harness can tell

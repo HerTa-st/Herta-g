@@ -63,6 +63,21 @@ function runtimeWith(provider: FakeProvider, journalPath: string) {
   });
   tools.register(tool("look", true));
   tools.register(tool("change", false));
+  // A step that fails, for the report's per-tool risks.
+  tools.register({
+    name: "broken",
+    readOnly: true,
+    schema: () => ({
+      name: "broken",
+      description: "broken",
+      inputSchema: { type: "object", properties: {} },
+    }),
+    run: async (): Promise<ToolResult> => ({
+      ok: false,
+      error: { code: "boom", message: "it broke", retryable: false },
+      summary: "failed: boom",
+    }),
+  });
   // A step that runs until the run is stopped.
   tools.register({
     name: "slow",
@@ -219,6 +234,50 @@ describe("a run keeps its journal (ADR 0071 §1.1)", () => {
       "message:assistant",
       "end",
     ]);
+  });
+
+  it("a run that reaches the step limit stops like an interruption, says why first, and is continued with a fresh budget (2026-09-29)", async () => {
+    const path = dispatchJournalPath(join(root, "sessions"), "sess");
+    let continued: ProviderPromptFrame | undefined;
+    const step = (i: number) => [
+      {
+        type: "tool-call-request" as const,
+        // Six failing steps first: their risks must not push the reason out.
+        call: { id: `c${i}`, tool: i < 6 ? "broken" : "look", input: {} },
+      },
+      { type: "finish" as const, reason: "tool_calls" as const },
+    ];
+    const provider = new FakeProvider({
+      turns: [
+        ...Array.from({ length: 100 }, (_, i) => step(i)),
+        (frame: ProviderPromptFrame) => {
+          continued = frame;
+          return [{ type: "finish", reason: "stop" }];
+        },
+      ],
+    });
+    const { runtime } = runtimeWith(provider, path);
+    const stopped = await runtime.runBrief(
+      { taskId: "task-1" },
+      { userMessages: [{ text: "keep going" }], recordLength: 3 },
+    );
+    expect(stopped.status).toBe("interrupted");
+    expect(stopped.endedBy).toBe("step_limit");
+    expect(stopped.residualRisks[0]).toBe(
+      "Turn stopped: reached the step limit (100 steps)",
+    );
+    expect(stopped.residualRisks.length).toBeGreaterThan(5);
+    const entries = (await readDispatchJournal(path)) ?? [];
+    expect(entries.at(-1)).toEqual({
+      kind: "end",
+      status: "interrupted",
+      cause: "step-limit",
+    });
+
+    // Continued from the journal: told why it stopped, and it runs on.
+    await runtime.resumeBrief({ recordLength: 6 });
+    const sent = JSON.stringify(continued ?? {});
+    expect(sent).toContain("达到了这次运行的步数上限");
   });
 
   it("will not continue a run that ended, or one started under another contract", async () => {

@@ -56,6 +56,7 @@ function composeMarkerSummaryEN(m: DoneMarkerSummary): string {
     pushed: (ref) => `pushed ${ref}`,
     aborted: "run aborted",
     crashed: "the app exited unexpectedly",
+    stepLimit: "step limit reached",
   });
 }
 

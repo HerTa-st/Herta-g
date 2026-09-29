@@ -53,5 +53,7 @@ export function composeMarkerSummary(summary: ActivitySummary, t: TFn): string {
     // A run the app exited during, sealed when its session opened (ADR 0071
     // §1.2).
     crashed: t("record.marker.crashed"),
+    // A run that stopped at the step limit (2026-09-29).
+    stepLimit: t("record.marker.stepLimit"),
   });
 }

@@ -338,9 +338,14 @@ export class CodingAgentRuntime {
       // get ENOENT. Idempotent.
       mkdirSync(this.deps.workspaceRoot, { recursive: true });
 
+      // What the user said while this run worked (ADR 0063 steers), for the
+      // working state: a steer sits in a transcript group the budget trim can
+      // drop (working-state.ts).
+      const steers: string[] = [];
       const transcript = new TranscriptStore({
         onAppend: (message) => {
           void journal?.append({ kind: "message", message });
+          if (message.role === "user") steers.push(message.text);
         },
       });
       const todos = new TodoStore();
@@ -354,6 +359,11 @@ export class CodingAgentRuntime {
       // edits it, and the freshness rule does the rest.
       if (resume !== null) {
         transcript.seed(resume.messages);
+        // The earlier segments' steers; the last seeded message is the
+        // harness's resume note, not the user's.
+        for (const m of resume.messages.slice(0, -1)) {
+          if (m.role === "user") steers.push(m.text);
+        }
         todos.replace(resume.todos);
         for (const f of resume.findings) {
           findings.add(f);
@@ -611,6 +621,16 @@ export class CodingAgentRuntime {
         reads,
         memory: this.deps.memory,
         ...(this.deps.budget !== undefined ? { budget: this.deps.budget } : {}),
+        // Read only once old iterations have been dropped (working-state.ts).
+        workingState: () => ({
+          changedFiles: [...changedByPath.values()],
+          background: bg
+            .list()
+            .filter((p) => p.isRunning())
+            .map((p) => ({ id: p.id, command: p.argv.join(" ") })),
+          findings: findings.all(),
+          steers,
+        }),
       };
       const handle = {
         signal: opts.signal ?? new AbortController().signal,
@@ -699,10 +719,15 @@ export class CodingAgentRuntime {
             // collapsing both into `failed` is what made a user's Stop read
             // as "板砖 broke".
             lastErrorKind = event.error.kind;
+            // Why the run ended leads the risks, so the done-marker's first
+            // five keep it (2026-09-29 long-run study, proposal 1).
             builder.addResidualRisk(
               event.error.kind === "interrupted"
                 ? `Turn interrupted: ${event.error.message}`
-                : `Turn failed: ${event.error.message}`,
+                : event.error.kind === "step_limit"
+                  ? `Turn stopped: ${event.error.message}`
+                  : `Turn failed: ${event.error.message}`,
+              { leading: true },
             );
           }
         }
@@ -716,6 +741,7 @@ export class CodingAgentRuntime {
       if (stoppedBackground > 0) {
         builder.addResidualRisk(
           `${stoppedBackground} background command(s) still running at brief end were stopped`,
+          { leading: true },
         );
       }
 
@@ -767,6 +793,7 @@ export class CodingAgentRuntime {
           if (carried.length > 0) {
             builder.addResidualRisk(
               `${carried.length} file(s) were already modified before this dispatch and are not attributed to it: ${carried.slice(0, 5).join(", ")}${carried.length > 5 ? ", …" : ""}`,
+              { leading: true },
             );
           }
         } else if (after !== null && after.head !== baseline.head) {
@@ -776,6 +803,7 @@ export class CodingAgentRuntime {
           // that instead of computing a difference that means nothing.
           builder.addResidualRisk(
             "HEAD moved during this dispatch, so file changes could not be attributed by comparing against the starting commit",
+            { leading: true },
           );
         }
       }
@@ -794,10 +822,15 @@ export class CodingAgentRuntime {
       }
 
       if (failed) {
-        // An interrupt is a distinct ending, not a failure (1.4).
+        // An interrupt is a distinct ending, not a failure (1.4). So is the
+        // step limit: the run stopped where it stood, and it can be
+        // continued like an interrupted one (2026-09-29, proposal 3).
         builder.setStatus(
-          lastErrorKind === "interrupted" ? "interrupted" : "failed",
+          lastErrorKind === "interrupted" || lastErrorKind === "step_limit"
+            ? "interrupted"
+            : "failed",
         );
+        if (lastErrorKind === "step_limit") builder.setEndedBy("step_limit");
       } else {
         const partialReport = this.peekReport(builder);
         // tests[] carries failing runs too (that is its job — the report
@@ -839,7 +872,14 @@ export class CodingAgentRuntime {
       // The run ended, whatever its status: the journal says so, so a later
       // open does not take it for a run the app died in (ADR 0071 §1.2).
       if (journal !== undefined) {
-        await journal.append({ kind: "end", status: report.status });
+        await journal.append({
+          kind: "end",
+          status: report.status,
+          // A continued run is told why this one stopped (journal-seal.ts).
+          ...(report.endedBy === "step_limit"
+            ? { cause: "step-limit" as const }
+            : {}),
+        });
         // Its processes were stopped above (`bg.stopAll`): nothing for a
         // relaunch to reap (ADR 0071 §1.6).
         if (this.deps.journalPath !== undefined) {

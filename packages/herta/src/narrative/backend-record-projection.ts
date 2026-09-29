@@ -750,6 +750,7 @@ const CN_MARKER_LABELS = (stateWord: string): MarkerSummaryLabels => ({
   pushed: (ref) => `推送 ${ref}`,
   aborted: "运行异常中止",
   crashed: "应用意外退出",
+  stepLimit: "步数已达上限",
 });
 
 const STATUS_WORD: Record<string, string> = {
@@ -850,6 +851,9 @@ export function buildDoneMarker(
     ...(testCounts !== undefined ? { tests: testCounts } : {}),
     ...(git !== undefined ? { git } : {}),
     riskCount,
+    // Stopped at the step limit (2026-09-29): said in the body, so the
+    // user, Herta and the next dispatch read why the run ended there.
+    ...(report.endedBy === "step_limit" ? { stepLimit: true as const } : {}),
   };
 
   // Canonical CN body, composed from the SAME structured summary through the

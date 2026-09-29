@@ -331,6 +331,26 @@ describe("NarrativeRenderer — EN system-block localization", () => {
     );
   });
 
+  it("recomposes a step-limit marker with its word (2026-09-29)", () => {
+    const { out, r } = mkEn();
+    r.update([
+      {
+        kind: "system",
+        label: "差分协处理器",
+        body: "中断 · 步数已达上限",
+        role: "done-marker",
+        markerSummary: {
+          kind: "done",
+          state: "interrupted",
+          fileCount: 0,
+          riskCount: 0,
+          stepLimit: true,
+        },
+      },
+    ]);
+    expect(out.full()).toBe("→ Coprocessor\n  Stopped · step limit reached\n");
+  });
+
   it("an unknown system label falls back to the stored label — never → undefined", () => {
     // Corrupt / hand-edited / future-version JSONL can carry a label outside
     // the union; the display must not render `→ undefined`.

@@ -1,7 +1,7 @@
 import type { HertaToAgentBrief } from "../bridge/types.js";
 import { abortError, errorMessage, isAbortError } from "../errors.js";
 import type { EventBus } from "../event-bus.js";
-import type { FindingsLedger } from "../findings-ledger.js";
+import { type FindingsLedger, MAX_FINDINGS } from "../findings-ledger.js";
 import type { MemoryManager } from "../memory-manager.js";
 import type { PermissionEngine } from "../permission-engine.js";
 import type { ReadLedger } from "../read-ledger.js";
@@ -41,6 +41,11 @@ import {
   streamModelInference,
 } from "./stream-model-inference.js";
 import { persistOversizedResult } from "./tool-result-persistence.js";
+import {
+  renderStepNotice,
+  renderWorkingState,
+  type WorkingStateInput,
+} from "./working-state.js";
 
 export interface BackendTurnDeps {
   sessionId: string;
@@ -79,6 +84,12 @@ export interface BackendTurnDeps {
    * (the CLI, tests): nothing is recorded.
    */
   journal?: DispatchJournal;
+  /**
+   * The working state the harness keeps (working-state.ts), read when old
+   * iterations have been dropped from the transcript. Absent (tests, the
+   * CLI's bare runtime): the trim marker's count is all the model gets.
+   */
+  workingState?: () => WorkingStateInput;
 }
 
 function defaultBackoffSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -325,9 +336,13 @@ export async function* runBackendTurnLoop(
     let iterations = 0;
     while (true) {
       if (iterations >= MAX_TURN_ITERATIONS) {
+        // The step limit ends the run where it stands — like an interruption,
+        // not a failure: the model was told in its last iterations, the report
+        // says so, and the run can be continued from its journal (2026-09-29
+        // long-run study, proposal 3).
         const error: AgentError = {
-          kind: "internal",
-          message: `backend turn exceeded ${MAX_TURN_ITERATIONS} iterations`,
+          kind: "step_limit",
+          message: `reached the step limit (${MAX_TURN_ITERATIONS} steps)`,
         };
         yield* emit({ type: "turn.failed", error });
         return;
@@ -345,11 +360,22 @@ export async function* runBackendTurnLoop(
         deps.transcript.appendUser(text, deps.clock());
       }
 
-      // Per-iteration todo reminder (ADR 0025 §2): recomputed each call so
-      // the model always sees the list it last wrote; appended by the
-      // translate layer AFTER the transcript, so the cache-stable prefix
-      // is untouched. Empty list → no section.
-      const todoState = renderTodoState(deps.todos.all(), handle.lang ?? "zh");
+      // The state trailer, recomputed each call and appended by the translate
+      // layer AFTER the transcript, so the cache-stable prefix is untouched:
+      // the todo list (ADR 0025 §2), the working state once old iterations
+      // are dropped (below), and the steps left near the limit.
+      const lang = handle.lang ?? "zh";
+      const todoState = renderTodoState(deps.todos.all(), lang);
+      const stepNotice = renderStepNotice(
+        iterations,
+        MAX_TURN_ITERATIONS,
+        lang,
+      );
+      const trailerWith = (workingState: string): string =>
+        [todoState, workingState, stepNotice]
+          .filter((s) => s.length > 0)
+          .join("\n\n");
+      let trailingState = trailerWith("");
 
       // Working-set budget (ADR 0025 slice 2): deterministic two-phase trim
       // of the frame COPY (clear old tool payloads, then drop oldest
@@ -357,12 +383,26 @@ export async function* runBackendTurnLoop(
       // re-derives the projection. Pre-flight, so a bloated frame is fixed
       // BEFORE a provider call is burned on it.
       const budget = deps.budget ?? DEFAULT_BACKEND_PROMPT_BUDGET;
-      const fit = fitMessagesToBudget({
+      let fit = fitMessagesToBudget({
         messages: deps.transcript.all(),
-        baseTokens: estimateFrameBaseTokens(baseFrame, todoState),
+        baseTokens: estimateFrameBaseTokens(baseFrame, trailingState),
         budget,
-        lang: handle.lang ?? "zh",
+        lang,
       });
+      // Whole iterations were dropped: the harness states what they did
+      // that the model cannot cheaply work out again (working-state.ts),
+      // and the trim is fitted again with that block counted.
+      if (fit.droppedGroups > 0 && deps.workingState !== undefined) {
+        trailingState = trailerWith(
+          renderWorkingState(deps.workingState(), lang, MAX_FINDINGS),
+        );
+        fit = fitMessagesToBudget({
+          messages: deps.transcript.all(),
+          baseTokens: estimateFrameBaseTokens(baseFrame, trailingState),
+          budget,
+          lang,
+        });
+      }
       if (fit.overBudget) {
         // Even the minimal tail (marker + last group) exceeds the budget —
         // the base frame itself must be near/over it. Surface honestly
@@ -377,7 +417,7 @@ export async function* runBackendTurnLoop(
       const frame = {
         ...baseFrame,
         messages: fit.messages,
-        ...(todoState.length > 0 ? { todoState } : {}),
+        ...(trailingState.length > 0 ? { trailingState } : {}),
       };
 
       // Bounded retry around the provider call: classify each failure to a named

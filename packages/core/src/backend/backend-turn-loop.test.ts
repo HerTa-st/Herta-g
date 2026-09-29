@@ -705,6 +705,15 @@ describe("context budget + oversized-result persistence (ADR 0025 slice 2)", () 
       ...buildDeps(provider),
       // base (~3K) + one fat group (~15K) fits; two fat groups (~33K) don't.
       budget: { budgetTokens: 20_000, keepRecentToolPayloads: 1 },
+      // What the harness keeps once iterations are dropped (2026-09-29).
+      workingState: () => ({
+        changedFiles: [
+          { path: "src/a.ts", kind: "modified" as const, diffSummary: "+3 -1" },
+        ],
+        background: [{ id: "bg-1", command: "npm run dev" }],
+        findings: [{ claim: "the cache is stale", cites: ["src/a.ts:3"] }],
+        steers: ["先别动测试"],
+      }),
     };
     deps.tools.register(blobTool(10));
 
@@ -742,6 +751,49 @@ describe("context budget + oversized-result persistence (ADR 0025 slice 2)", () 
       .map((m) => (m.role === "assistant" ? m.text : ""))
       .join("").length;
     expect(frameChars).toBeLessThan(70_000);
+
+    // Iterations were dropped, so the state trailer carries the working state
+    // the harness keeps — and the marker names where it is.
+    const trailer = "trailingState" in seen ? (seen.trailingState ?? "") : "";
+    expect(trailer).toContain("## 当前工作状态");
+    expect(trailer).toContain("- src/a.ts (修改, +3 -1)");
+    expect(trailer).toContain("- bg-1: npm run dev");
+    expect(trailer).toContain("1. the cache is stale (src/a.ts:3)");
+    expect(trailer).toContain("「先别动测试」");
+    if (first?.role === "assistant") {
+      expect(first.text).toContain("末尾的任务清单和工作状态");
+    }
+  });
+
+  it("an untrimmed frame carries no working state", async () => {
+    let seen: { trailingState?: string } | undefined;
+    const provider = new FakeProvider({
+      turns: [
+        (frame) => {
+          seen = frame as { trailingState?: string };
+          return [
+            { type: "text-delta", text: "done" },
+            { type: "finish", reason: "stop" },
+          ];
+        },
+      ],
+    });
+    const deps = {
+      ...buildDeps(provider),
+      workingState: () => ({
+        changedFiles: [],
+        background: [],
+        findings: [],
+        steers: ["x"],
+      }),
+    };
+    for await (const _ of runBackendTurnLoop(deps, sampleBrief, {
+      signal: new AbortController().signal,
+      userMessages: sampleUserMessages,
+    })) {
+      // drain
+    }
+    expect(seen?.trailingState ?? "").not.toContain("工作状态");
   });
 
   it("fails honestly (no provider call) when even the trimmed tail exceeds the budget", async () => {
@@ -1686,11 +1738,15 @@ describe("runBackendTurnLoop — provider error resilience", () => {
     expect(events.map((e) => e.type)).not.toContain("turn.finished");
   });
 
-  it("bounds a runaway tool-loop at MAX_TURN_ITERATIONS and surfaces turn.failed", async () => {
+  it("bounds a runaway tool-loop at the step limit: warned in its last steps, stopped as `step_limit` (2026-09-29)", async () => {
     // A provider that requests a tool call forever — without the iteration cap
-    // this loops indefinitely.
+    // this loops indefinitely. It keeps each frame's state trailer.
+    const trailers: Array<string | undefined> = [];
     const loopingProvider: ProviderAdapter = {
-      async *streamChat() {
+      async *streamChat(frame) {
+        trailers.push(
+          "trailingState" in frame ? frame.trailingState : undefined,
+        );
         yield {
           type: "tool-call-request",
           call: { id: "c", tool: "noop", input: {} },
@@ -1732,11 +1788,21 @@ describe("runBackendTurnLoop — provider error resilience", () => {
       events.push(e);
     }
 
+    // The run stops at the limit — not as a failure: a step_limit the
+    // runtime ends as an interruption, continuable.
     const failed = events.find((e) => e.type === "turn.failed");
-    expect(failed).toBeDefined();
-    if (failed?.type === "turn.failed") {
-      expect(failed.error.message).toContain("iterations");
-    }
+    expect(failed).toMatchObject({
+      type: "turn.failed",
+      error: {
+        kind: "step_limit",
+        message: "reached the step limit (100 steps)",
+      },
+    });
+    // Told in its last ten steps, not before.
+    expect(trailers).toHaveLength(100);
+    expect(trailers.slice(0, 90).every((t) => t === undefined)).toBe(true);
+    expect(trailers[90]).toContain("这是第 91 步，之后还剩 9 步");
+    expect(trailers[99]).toContain("这是 100 步里的最后一步");
   });
 
   it("an interrupt during a pending gate produces NO permission.resolved and NO tool result (audit finding 4)", async () => {

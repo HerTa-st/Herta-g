@@ -520,6 +520,13 @@ describe("continuing a run (ADR 0071 §1.4–§1.5)", () => {
       recordLength: 5,
     });
     expect(resumableRun([start(), stopEnd])).toMatchObject({ cause: "stop" });
+    // Stopped at the step limit (2026-09-29): continuable, and said so.
+    expect(
+      resumableRun([
+        start(),
+        { kind: "end", status: "interrupted", cause: "step-limit" },
+      ]),
+    ).toMatchObject({ cause: "step-limit" });
     // Continued, then done: nothing left to continue.
     expect(
       resumableRun([

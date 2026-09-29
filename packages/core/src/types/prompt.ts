@@ -36,13 +36,16 @@ export interface BackendPromptFrame {
   toolSchemas: ToolSchema[];
   messages: Message[];
   /**
-   * Per-iteration todo reminder (ADR 0025 §2): the rendered current todo
-   * list, recomputed by the turn loop on every provider call and appended
-   * by `translateBackend` as a trailing system message AFTER `messages`.
-   * Transient — never persisted into the durable transcript. Omitted /
-   * empty when the todo list is empty. Sits at the very end of the wire
-   * messages so the stable prefix (system + scoped + transcript) keeps
-   * its prompt-cache prefix intact.
+   * The per-iteration state trailer, recomputed by the turn loop on every
+   * provider call and appended by `translateBackend` as a trailing system
+   * message AFTER `messages`: the current todo list (ADR 0025 §2); once old
+   * iterations have been dropped from the transcript, the working state the
+   * harness keeps (files changed, live background commands, findings, the
+   * user's steers — `working-state.ts`); and, near the step limit, the
+   * steps left. Transient — never persisted into the durable transcript.
+   * Omitted / empty when there is nothing to say. Sits at the very end of
+   * the wire messages so the stable prefix (system + scoped + transcript)
+   * keeps its prompt-cache prefix intact.
    */
-  todoState?: string;
+  trailingState?: string;
 }

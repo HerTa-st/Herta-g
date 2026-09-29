@@ -189,4 +189,8 @@ export interface AgentExecutionReport {
   permissions: readonly PermissionEventSummary[];
   residualRisks: readonly string[];
   nextActions: readonly string[];
+  /** Set when the run ended at the harness's step limit rather than at the
+   *  model's own finish (2026-09-29): status `interrupted`, and continuable
+   *  like one. Absent on every other ending. */
+  endedBy?: "step_limit";
 }

@@ -587,6 +587,7 @@ export const en = {
   "record.marker.risks": "{n} risks",
   "record.marker.aborted": "run aborted",
   "record.marker.crashed": "the app exited unexpectedly",
+  "record.marker.stepLimit": "step limit reached",
   "record.marker.commit": "committed {sha}",
   "record.marker.pushed": "pushed {ref}",
   "record.marker.noop": "No output",

@@ -32,6 +32,9 @@ export interface MarkerSummaryLabels {
    *  only on the marker a session's next open wrote for a run the app
    *  exited during (`crashed: true`, ADR 0071 §1.2). */
   readonly crashed: string;
+  /** The step-limit word (step limit reached / 步数已达上限) — appended only
+   *  on the marker of a run that stopped at the step limit (`stepLimit`). */
+  readonly stepLimit: string;
 }
 
 /**
@@ -71,5 +74,6 @@ export function composeMarkerSummary(
   // 运行异常中止 segment — composed, never fabricated as a risk count.
   if (m.aborted === true) parts.push(labels.aborted);
   if (m.crashed === true) parts.push(labels.crashed);
+  if (m.stepLimit === true) parts.push(labels.stepLimit);
   return parts.join(" · ");
 }

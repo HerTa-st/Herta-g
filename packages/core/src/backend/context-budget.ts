@@ -119,12 +119,12 @@ function frameStaticTokens(frame: FrameBase): number {
 }
 
 /** Estimated tokens of everything in the frame EXCEPT `messages`. Only the
- *  todo state — which changes between iterations — is walked per call. */
+ *  state trailer — which changes between iterations — is walked per call. */
 export function estimateFrameBaseTokens(
   frame: FrameBase,
-  todoState: string,
+  trailingState: string,
 ): number {
-  return frameStaticTokens(frame) + estimatePromptTokens(todoState);
+  return frameStaticTokens(frame) + estimatePromptTokens(trailingState);
 }
 
 const CLEARED_NOTE =
@@ -155,9 +155,13 @@ function trimMarker(lang: "zh" | "en", droppedGroups: number): Message {
   return {
     role: "assistant",
     text:
+      // The task statement is in the system prompt above; the todo list and
+      // the working state the harness keeps trail the transcript, at the
+      // end (`BackendPromptFrame.trailingState`). This marker used to call
+      // the todo list "above" — wrong since the list first trailed.
       lang === "en"
-        ? `(context trimmed: ${droppedGroups} earlier tool iteration(s) removed to fit the budget — the task statement and the todo list above remain authoritative)`
-        : `（上下文已裁剪：更早的 ${droppedGroups} 轮工具调用记录已移除；上方的任务说明与任务清单仍然有效。）`,
+        ? `(context trimmed: ${droppedGroups} earlier tool iteration(s) removed to fit the budget. The task statement above, and the todo list and working state at the end, remain authoritative.)`
+        : `（上下文已裁剪：更早的 ${droppedGroups} 轮工具调用记录已移除。上方的任务说明，以及末尾的任务清单和工作状态，仍然有效。）`,
     toolCalls: [],
     ts: "",
   };

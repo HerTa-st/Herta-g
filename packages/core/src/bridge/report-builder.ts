@@ -19,7 +19,12 @@ export class ExecutionReportBuilder {
   private readonly tests: TestRunSummary[] = [];
   private readonly permissions: PermissionEventSummary[] = [];
   private readonly residualRisks: string[] = [];
+  /** Run-level risks — why the run ended, what the harness stopped, what it
+   *  could not attribute — listed ahead of the per-tool ones, so a reader
+   *  that shows only the first few (the done-marker shows five) keeps them. */
+  private readonly leadingRisks: string[] = [];
   private readonly nextActions: string[] = [];
+  private endedBy: AgentExecutionReport["endedBy"];
 
   constructor(private readonly taskId: string) {}
 
@@ -48,8 +53,18 @@ export class ExecutionReportBuilder {
     return this;
   }
 
-  addResidualRisk(risk: string): this {
-    this.residualRisks.push(risk);
+  addResidualRisk(
+    risk: string,
+    opts: { readonly leading?: boolean } = {},
+  ): this {
+    (opts.leading === true ? this.leadingRisks : this.residualRisks).push(risk);
+    return this;
+  }
+
+  /** How the run ended, when it was not the model's own finish (see
+   *  `AgentExecutionReport.endedBy`). */
+  setEndedBy(endedBy: NonNullable<AgentExecutionReport["endedBy"]>): this {
+    this.endedBy = endedBy;
     return this;
   }
 
@@ -79,8 +94,9 @@ export class ExecutionReportBuilder {
       evidence: [...this.evidence],
       tests: [...this.tests],
       permissions: [...this.permissions],
-      residualRisks: [...this.residualRisks],
+      residualRisks: [...this.leadingRisks, ...this.residualRisks],
       nextActions: [...this.nextActions],
+      ...(this.endedBy !== undefined ? { endedBy: this.endedBy } : {}),
     };
   }
 }

@@ -166,7 +166,9 @@ export type DispatchJournalEntry =
   | {
       readonly kind: "end";
       readonly status: string;
-      readonly cause?: "app-exit";
+      /** Why an `interrupted` run stopped, when it was not the user's Stop:
+       *  the app exited (the seal), or it reached the step limit. */
+      readonly cause?: "app-exit" | "step-limit";
     };
 
 const KINDS: ReadonlySet<string> = new Set([

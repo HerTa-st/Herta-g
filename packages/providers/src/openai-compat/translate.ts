@@ -106,11 +106,12 @@ export function translateBackend(
   for (const m of frame.messages) {
     messages.push(...toOpenAI(m));
   }
-  // Per-iteration todo reminder (ADR 0025 §2): trails the transcript so the
-  // stable prefix keeps its prompt-cache bytes; recomputed each call by the
-  // turn loop and never part of the durable transcript.
-  if (frame.todoState !== undefined && frame.todoState.length > 0) {
-    messages.push({ role: "system", content: frame.todoState });
+  // The per-iteration state trailer (todo list, working state, steps left):
+  // trails the transcript so the stable prefix keeps its prompt-cache bytes;
+  // recomputed each call by the turn loop and never part of the durable
+  // transcript.
+  if (frame.trailingState !== undefined && frame.trailingState.length > 0) {
+    messages.push({ role: "system", content: frame.trailingState });
   }
   const tools =
     frame.toolSchemas.length > 0 ? frame.toolSchemas.map(toTool) : undefined;

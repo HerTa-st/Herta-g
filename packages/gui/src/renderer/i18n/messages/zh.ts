@@ -578,6 +578,7 @@ export const zh = {
   "record.marker.risks": "{n} 风险",
   "record.marker.aborted": "运行异常中止",
   "record.marker.crashed": "应用意外退出",
+  "record.marker.stepLimit": "步数已达上限",
   "record.marker.commit": "提交 {sha}",
   "record.marker.pushed": "推送 {ref}",
   "record.marker.noop": "无产出",
