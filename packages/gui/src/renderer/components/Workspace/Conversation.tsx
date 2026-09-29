@@ -118,6 +118,9 @@ export const Conversation = memo(function Conversation(): JSX.Element {
     flowRef,
     isReadingHistory: () => scroll.isReadingHistory(),
     takeLaunch: () => sessionStore.takeLaunch(),
+    record,
+    recordStart,
+    sessionId,
   });
   const incoming = useIncomingMorph({
     composerRef,
@@ -284,7 +287,10 @@ export const Conversation = memo(function Conversation(): JSX.Element {
                   : {})}
               />
             )}
-            {outgoingClone !== null && pendingUser !== null && (
+            {/* Not gated on the echo: when the turn's real user block lands
+              mid-flight (a typed @板砖 — no router call heads its turn), the
+              clone flies on onto the real row (useOutgoingMorph). */}
+            {outgoingClone !== null && (
               <MorphClone
                 ref={cloneRef}
                 overlay={overlayRef}

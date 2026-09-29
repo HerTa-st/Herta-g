@@ -7,7 +7,11 @@
 // State: `outgoingClone`, `hidePendingUser`. Effects, in order: the detection
 // LAYOUT effect (the edge) and the flight effect (keyed on the clone
 // mounting) — the first two effects Conversation declares, as before.
+// If the turn's real user block replaces the echo while the clone is still in
+// the air (2026-09-30), the flight goes on onto the real row, hidden until
+// the clone parks on it, with a guard timer so it can never stay hidden.
 
+import type { TerminalRecord } from "@herta/app-server";
 import {
   type RefObject,
   useCallback,
@@ -29,6 +33,11 @@ import {
   easeOutCubic,
   useRiseAnimation,
 } from "./useRiseAnimation.js";
+
+/** How long past the flight's own end (and its landing hold) a flight that
+ *  continued onto the real row is landed by force, if the rise never says
+ *  it has landed. */
+const LANDING_GUARD_MARGIN_MS = 400;
 
 export interface OutgoingClone {
   readonly text: string;
@@ -60,6 +69,11 @@ export function useOutgoingMorph(opts: {
     readonly left: number;
     readonly top: number;
   } | null;
+  /** The record window and where it starts — to recognise the turn's real
+   *  user block landing mid-flight, and to find its row. */
+  readonly record: TerminalRecord;
+  readonly recordStart: number;
+  readonly sessionId: string | null;
 }) {
   const {
     pendingUser,
@@ -70,6 +84,9 @@ export function useOutgoingMorph(opts: {
     flowRef,
     isReadingHistory,
     takeLaunch,
+    record,
+    recordStart,
+    sessionId,
   } = opts;
   /** The lift-off point this send armed, read by the flight effect. */
   const launchRef = useRef<{ left: number; top: number } | null>(null);
@@ -109,6 +126,28 @@ export function useOutgoingMorph(opts: {
    *  clone's flight shadows fade. Cleared by every teardown path so a stale
    *  timer can't unhide a bubble a NEW flight just hid. */
   const outgoingSettleTimer = useRef<number | null>(null);
+  /** When this flight took off, and the session it took off in. */
+  const flightStartedAt = useRef(0);
+  const flightSession = useRef<string | null>(null);
+  /** The record as the previous commit saw it — to tell the turn's user block
+   *  being APPENDED from a record replaced wholesale (a reset, a switch). */
+  const prevRecord = useRef<TerminalRecord>(record);
+  /** The real user row that landed mid-flight, hidden until the clone parks
+   *  on it (owner 2026-09-30: a typed @板砖 skips the router, its user block
+   *  lands within milliseconds, and the flight was cut at lift-off — the
+   *  bubble "suddenly jumps to the target position"). */
+  const landedRow = useRef<HTMLElement | null>(null);
+  /** Lands the flight if the rise never reports it (a frozen or throttled
+   *  timeline): the row must never stay hidden behind a stuck clone. */
+  const landingGuard = useRef<number | null>(null);
+  const clearLanding = (): void => {
+    if (landingGuard.current !== null) {
+      window.clearTimeout(landingGuard.current);
+      landingGuard.current = null;
+    }
+    landedRow.current?.style.removeProperty("visibility");
+    landedRow.current = null;
+  };
 
   // Detection: on the pendingUser null→value edge, mount the flying clone +
   // hide the flow bubble. Geometry/animation happens in the effect below,
@@ -123,6 +162,57 @@ export function useOutgoingMorph(opts: {
     const appeared = prevPendingUser.current === null && pendingUser !== null;
     prevPendingUser.current = pendingUser;
     if (pendingUser === null) {
+      // The echo gave way to the turn's REAL user block while the clone was
+      // still in the air: the flight goes on, onto the real row. A typed
+      // @板砖 does this within milliseconds (no router call heads its turn),
+      // and a quick router could cut a plain send short the same way.
+      // Appended, not replaced: the block before it is the previous commit's
+      // last block — a reset or a switch lands a whole new record instead,
+      // and those still end the flight.
+      const last = record[record.length - 1];
+      const prev = prevRecord.current;
+      const appendedUser =
+        last?.kind === "user" &&
+        last.steer !== true &&
+        (prev.length === 0
+          ? record.length === 1
+          : record[record.length - 2] === prev[prev.length - 1]);
+      if (
+        outgoingClone !== null &&
+        landedRow.current === null &&
+        flightSession.current === sessionId &&
+        appendedUser
+      ) {
+        const row = flowRef.current?.querySelector<HTMLElement>(
+          `[data-abs-index="${recordStart + record.length - 1}"]`,
+        );
+        if (row !== null && row !== undefined) {
+          row.style.visibility = "hidden";
+          landedRow.current = row;
+          // What is left of the flight, the landing hold, and a margin.
+          const left = Math.max(
+            0,
+            OUTGOING_FLIGHT_MS - (performance.now() - flightStartedAt.current),
+          );
+          landingGuard.current = window.setTimeout(
+            () => {
+              landingGuard.current = null;
+              outgoingRise.cancel();
+              if (outgoingSettleTimer.current !== null) {
+                window.clearTimeout(outgoingSettleTimer.current);
+                outgoingSettleTimer.current = null;
+              }
+              clearLanding();
+              setHidePendingUser(false);
+              setOutgoingClone(null);
+              composerRef.current?.classList.remove("is-glass");
+            },
+            left + SHADOW_SETTLE_MS + LANDING_GUARD_MARGIN_MS,
+          );
+          return;
+        }
+      }
+      clearLanding();
       outgoingRise.cancel();
       if (outgoingSettleTimer.current !== null) {
         window.clearTimeout(outgoingSettleTimer.current);
@@ -143,6 +233,8 @@ export function useOutgoingMorph(opts: {
       window.clearTimeout(outgoingSettleTimer.current);
       outgoingSettleTimer.current = null;
     }
+    // …and a previous flight's landed row shows as it is.
+    clearLanding();
     if (
       overlayRef.current === null ||
       composerRef.current === null ||
@@ -168,6 +260,8 @@ export function useOutgoingMorph(opts: {
       return;
     }
     outgoingFlightArmedRef.current = true;
+    flightStartedAt.current = performance.now();
+    flightSession.current = sessionId;
     setHidePendingUser(true);
     // The clone carries the message's pictures too (set in the same store
     // emit as pendingUser, so this commit sees them): the strip's images
@@ -252,8 +346,15 @@ export function useOutgoingMorph(opts: {
         // ::after, and — user variant — the rest shadow, since the real
         // user bubble carries none), THEN swap. Unmounting on this commit
         // popped the shadows off with no transition (owner 2026-08-27).
+        // The flight reported in: its guard is not needed. A row that landed
+        // mid-flight stays hidden through the hold, as the echo would have.
+        if (landingGuard.current !== null) {
+          window.clearTimeout(landingGuard.current);
+          landingGuard.current = null;
+        }
         outgoingSettleTimer.current = window.setTimeout(() => {
           outgoingSettleTimer.current = null;
+          clearLanding();
           setHidePendingUser(false);
           setOutgoingClone(null);
         }, SHADOW_SETTLE_MS);
@@ -261,6 +362,16 @@ export function useOutgoingMorph(opts: {
     });
     return () => window.clearTimeout(glassTimer);
   }, [outgoingClone]);
+
+  // The record this commit saw, for the next commit's append check. Declared
+  // AFTER the detection effect, so that one reads the previous commit's.
+  useLayoutEffect(() => {
+    prevRecord.current = record;
+  }, [record]);
+
+  // Unmounted mid-landing: no row stays hidden, no guard fires later.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs only, on unmount
+  useEffect(() => () => clearLanding(), []);
 
   // The optimistic echo's send time, stamped once per pending message: a
   // fresh ISO string per render would change the bubble's `at` prop on every

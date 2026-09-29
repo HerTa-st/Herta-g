@@ -2131,7 +2131,67 @@ describe("Conversation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("clears a stuck outgoing clone when the user message is reconciled into the record", () => {
+  it("the flight goes on when the real user block lands mid-flight — the landed row hides until the clone parks, and a stuck flight is landed by its guard (owner 2026-09-30)", () => {
+    // A typed @板砖 heads its turn with no router call, so its user block
+    // lands within milliseconds of the send. The echo gave way, the clone
+    // was torn down with it, and the bubble jumped into place unflown.
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1); // freeze rises
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const mock = createMockHertaBridge();
+      render(<App bridge={mock.bridge} />);
+      act(() => {
+        mock.emitReset({
+          sessionId: "s",
+          workspaceRoot: "/r",
+          record: [],
+          overlay: null,
+          backendWorkspace: "/r",
+          backendWorkspaceIsDefault: true,
+        });
+      });
+      const input = screen.getByPlaceholderText(
+        "Message Herta…",
+      ) as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: "@板砖 查一下" } });
+      act(() => {
+        fireEvent.submit(input.closest("form") as HTMLFormElement);
+      });
+      expect(document.querySelector(".morph-clone")).toBeInTheDocument(); // in the air
+      act(() => {
+        mock.emitRecord({
+          kind: "block",
+          blockId: "u1",
+          block: { kind: "user", text: "@板砖 查一下" },
+        });
+      });
+      // Still flying, onto the real row — which is laid out but not shown.
+      expect(document.querySelector(".morph-clone")).toBeInTheDocument();
+      const landed = document.querySelector<HTMLElement>(
+        '.user-row[data-abs-index="0"]',
+      );
+      expect(landed).not.toBeNull();
+      expect(landed?.style.visibility).toBe("hidden");
+      // The rise is frozen here and never reports a landing: the guard lands
+      // it, so the row can never stay hidden behind a stuck clone.
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(document.querySelector(".morph-clone")).not.toBeInTheDocument();
+      expect(landed?.style.visibility).toBe("");
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a record replaced wholesale mid-flight (a switch) still ends the flight at once, and hides none of its rows", () => {
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
       addEventListener() {},
@@ -2157,16 +2217,24 @@ describe("Conversation", () => {
     act(() => {
       fireEvent.submit(input.closest("form") as HTMLFormElement);
     });
-    expect(document.querySelector(".morph-clone")).toBeInTheDocument(); // clone mounted, rise frozen
-    // The turn's real user block arrives → the store clears pendingUser → the clone self-clears.
+    expect(document.querySelector(".morph-clone")).toBeInTheDocument();
+    // A reset replaces the record wholesale (here: another session's, ending
+    // on a user block) — not the turn's user block landing.
     act(() => {
-      mock.emitRecord({
-        kind: "block",
-        blockId: "u1",
-        block: { kind: "user", text: "stuck?" },
+      mock.emitReset({
+        sessionId: "other",
+        workspaceRoot: "/r",
+        record: [{ kind: "user", text: "stuck?" }],
+        overlay: null,
+        backendWorkspace: "/r",
+        backendWorkspaceIsDefault: true,
       });
     });
     expect(document.querySelector(".morph-clone")).not.toBeInTheDocument();
+    expect(
+      document.querySelector<HTMLElement>('.user-row[data-abs-index="0"]')
+        ?.style.visibility,
+    ).toBe("");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
