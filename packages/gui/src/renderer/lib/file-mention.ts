@@ -83,15 +83,19 @@ function inOrder(text: string, q: string): boolean {
 }
 
 /** The text with `@query` (from `start` to the caret) replaced by the path
- *  and one space, and where the caret goes. */
+ *  and one space, and where the caret goes. A path with whitespace in it
+ *  goes in backticks, so where it ends is not left to the reader (review
+ *  2026-09-30: `docs/design notes.md` read as `docs/design`); the preview
+ *  surfaces strip inline ticks as they do for any code span. */
 export function insertMention(
   value: string,
   start: number,
   caret: number,
   path: string,
 ): { readonly text: string; readonly caret: number } {
+  const spelled = /\s/.test(path) ? `\`${path}\`` : path;
   const after = value.slice(caret);
   const sep = after.startsWith(" ") ? "" : " ";
-  const text = `${value.slice(0, start)}${path}${sep}${after}`;
-  return { text, caret: start + path.length + 1 };
+  const text = `${value.slice(0, start)}${spelled}${sep}${after}`;
+  return { text, caret: start + spelled.length + 1 };
 }

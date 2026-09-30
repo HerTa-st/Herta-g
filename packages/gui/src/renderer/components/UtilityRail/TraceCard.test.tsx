@@ -408,6 +408,27 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
     expect(ticker()).toBeNull();
   });
 
+  it("a second dispatch chained in the same turn opens on its first call while the record still ends at the previous marker (review 2026-09-30)", () => {
+    const h = renderWithSession(<TraceCard />);
+    h.startBackend();
+    push(h, user(), op("Reading", "a.ts"));
+    const done = { started: true, done: true, ok: true, streams: false };
+    live(h, [view({ id: "c1", ...done, ordinal: 0, summary: "view a.ts" })]);
+    // The first run ends and its marker lands: the card settles it.
+    h.finishBackend();
+    push(h, doneMarker);
+    expect(lines()).toEqual(["Explore Read a.ts"]);
+    // Herta chains @板砖 in the same turn: a new run starts and its first
+    // call — a file being written — streams before any row of it lands.
+    h.startBackend();
+    live(h, [view({ id: "c2", path: "b.ts", tail: "x", lines: 1 })], 0);
+    expect(lines()).toEqual(["Edit* Writing b.ts [1 line]"]);
+    // The ticker under it flows what the file holds so far.
+    expect(ticker()?.querySelector(".trace-ticker__line")?.textContent).toBe(
+      "x",
+    );
+  });
+
   it("the record catching up with its marker settles the whole run in that very commit — no step long done goes back in flight on the way (lab 2026-09-30)", () => {
     const h = renderWithSession(<TraceCard />);
     h.startBackend();

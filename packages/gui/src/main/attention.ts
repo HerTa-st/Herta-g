@@ -153,6 +153,16 @@ export function watchAttention(
     }
   };
 
+  // A watcher started mid-run — the window re-pointed after a reload, a
+  // resync — saw no turn.started: the session's own state seeds it, so the
+  // hold and the reply notice do not depend on having been there at the
+  // start (review 2026-09-30).
+  if (session.turnInFlight) turnStartedAt = now();
+  if (session.backendActive === true) {
+    ranBackend = true;
+    awake(true);
+  }
+
   const title = (): string => {
     const t = (session.title ?? "").trim();
     return t.length > 0

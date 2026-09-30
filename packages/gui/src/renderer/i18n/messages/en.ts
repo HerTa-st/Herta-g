@@ -547,6 +547,7 @@ export const en = {
   "trace.sum.stopMany": "Stopped {n} background commands",
   "trace.sum.sep": " · ",
   "trace.sum.failed": "{n} failed",
+  "trace.live.lineOne": "1 line",
   "trace.live.lines": "{n} lines",
   "trace.live.noOutput": "No output yet",
   "repo.card.title": "Repository",

@@ -113,6 +113,9 @@ export interface LiveToolFeedOpts {
   readonly intervalMs?: number;
   readonly setTimer?: (fn: () => void, ms: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
+  /** The feed starts while a run is already under way: it has not seen the
+   *  run's earlier calls, so it numbers none until the next run starts. */
+  readonly midRun?: boolean;
 }
 
 export interface LiveToolFeed {
@@ -150,6 +153,12 @@ export function createLiveToolFeed(
   let seq = 0;
   let order = 0;
   let startedOps = 0;
+  // Whether the ordinals can be trusted: a feed started while a run was
+  // already under way (a re-point after a reload), or one that lost events,
+  // has not seen every call the record numbers, so it numbers none until
+  // the next run starts — the card then adds nothing rather than the wrong
+  // step (review 2026-09-30).
+  let numbering = opts.midRun !== true;
   let timer: unknown = null;
   let closed = false;
   /** Something was on screen: an empty snapshot must go out once. */
@@ -204,14 +213,19 @@ export function createLiveToolFeed(
   const push = (e: SessionAgentEvent): void => {
     if (closed) return;
     if (e.kind !== "agent") {
-      // Events were lost: whatever the views say may be stale.
+      // Events were lost: whatever the views say may be stale, and the count
+      // has missed calls.
       clearAll();
+      numbering = false;
       return;
     }
     const ev: AgentEvent = e.event;
     if (ev.layer !== "backend") return;
     switch (ev.type) {
       case "turn.started":
+        clearAll();
+        numbering = true;
+        return;
       case "turn.finished":
       case "turn.failed":
         clearAll();
@@ -245,7 +259,7 @@ export function createLiveToolFeed(
             ev.tool === "str_replace_editor" &&
             /^view(\s|$)/.test(ev.inputSummary);
           // Numbered as the record will number its op row.
-          if (opVerbOf(ev.tool, viewing) !== null) {
+          if (numbering && opVerbOf(ev.tool, viewing) !== null) {
             c.ordinal = startedOps;
             startedOps += 1;
           }
@@ -275,6 +289,15 @@ export function createLiveToolFeed(
       case "tool.call.finished": {
         const c = calls.get(ev.id);
         if (c === undefined) return;
+        // A call the user did not allow never ran and has no row in the
+        // record (D7: permission is user-only); the card must not draw it
+        // as a failed step (review 2026-09-30).
+        const code = ev.result.ok ? undefined : ev.result.error?.code;
+        if (code === "permission_denied" || code === "permission_failed") {
+          calls.delete(c.id);
+          dirty();
+          return;
+        }
         c.done = true;
         c.ok = ev.result.ok;
         touch(c);

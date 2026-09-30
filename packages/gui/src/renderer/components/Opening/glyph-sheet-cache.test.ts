@@ -3,8 +3,36 @@ import {
   readCachedSheet,
   SHEET_CACHE_VERSION,
   sheetCacheKey,
+  validCachedSheet,
   writeCachedSheet,
 } from "./glyph-sheet-cache.js";
+
+describe("validCachedSheet — a stored record the player can read (review 2026-09-30)", () => {
+  const png = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
+  const entry = { px: 2, w: 9, h: 13, pos: [0, 0, 9, 0] };
+
+  it("accepts a PNG with one well-formed entry per size", () => {
+    expect(validCachedSheet({ png, entries: [entry] }, 2)).toBe(true);
+    expect(validCachedSheet({ png, entries: [] }, 2)).toBe(true);
+  });
+
+  it("refuses the shapes another build or a corruption could leave", () => {
+    for (const bad of [
+      undefined,
+      null,
+      "x",
+      { png, entries: undefined },
+      { png: "not a blob", entries: [entry] },
+      { png, entries: [{ ...entry, pos: undefined }] },
+      { png, entries: [{ ...entry, pos: [0, 0] }] }, // one glyph short
+      { png, entries: [{ ...entry, pos: [0, 0, 9, Number.NaN] }] },
+      { png, entries: [{ ...entry, w: "9" }] },
+      { png, entries: [null] },
+    ]) {
+      expect(validCachedSheet(bad, 2), JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
 
 const REQUEST = {
   sizes: [1.5, 2, 2.5],

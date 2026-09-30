@@ -934,6 +934,7 @@ export function Composer(): JSX.Element {
         )}
         {mentionOpen && (
           <div
+            id="composer-mentions"
             className="composer-mentions"
             role="listbox"
             aria-label={t("composer.mentions.aria")}
@@ -946,6 +947,7 @@ export function Composer(): JSX.Element {
               return (
                 <button
                   key={path}
+                  id={`composer-mention-${i}`}
                   type="button"
                   role="option"
                   // The caret stays in the textarea; the keys it takes move
@@ -982,6 +984,15 @@ export function Composer(): JSX.Element {
             ref={taRef}
             className="composer-input"
             placeholder={t("composer.placeholder")}
+            // The mention list is the textarea's: assistive technology hears
+            // it open and follows the highlighted option (review 2026-09-30).
+            aria-autocomplete="list"
+            aria-controls={mentionOpen ? "composer-mentions" : undefined}
+            aria-activedescendant={
+              mentionOpen && mentionMatches.length > 0
+                ? `composer-mention-${mentionIndex % mentionMatches.length}`
+                : undefined
+            }
             onFocus={() => {
               if (!quietFocus.current) setFocusWithin(true);
             }}
@@ -1048,6 +1059,10 @@ export function Composer(): JSX.Element {
                 !e.ctrlKey &&
                 !e.metaKey
               ) {
+                // An IME whose pre-edit is not in the textarea yet leaves it
+                // empty while composing: ↑ then moves its candidate, not the
+                // history (review 2026-09-30).
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                 const last = recallLastMessage(
                   sessionStore.getSnapshot().record,
                   lang,

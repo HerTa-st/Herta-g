@@ -1656,6 +1656,14 @@ describe("Composer — Up-arrow recall (ADR 0072 §3)", () => {
     fireEvent.keyDown(input, { key: "ArrowUp" });
     expect(input.value).toBe("新的一句");
   });
+
+  it("↑ while an IME composes moves its candidate, not the history — the textarea can still be empty then (review 2026-09-30)", () => {
+    const { input } = recallComposer();
+    fireEvent.keyDown(input, { key: "ArrowUp", isComposing: true });
+    expect(input.value).toBe("");
+    fireEvent.keyDown(input, { key: "ArrowUp", keyCode: 229 });
+    expect(input.value).toBe("");
+  });
 });
 
 describe("Composer — @-file mentions (ADR 0072 §2)", () => {

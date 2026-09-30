@@ -195,7 +195,9 @@ function InFlight(props: {
         </span>
         {live !== null && live.lines > 0 ? (
           <span className="trace-card__note">
-            {t("trace.live.lines", { n: String(live.lines) })}
+            {t(live.lines === 1 ? "trace.live.lineOne" : "trace.live.lines", {
+              n: String(live.lines),
+            })}
           </span>
         ) : (
           step?.note !== undefined && (

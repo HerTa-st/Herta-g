@@ -60,6 +60,8 @@ function fixture(
     prefs?: Partial<AttentionPrefs>;
     lang?: "zh" | "en";
     title?: string | null;
+    /** The watcher starts while 板砖 already runs (a re-point mid-run). */
+    midRun?: boolean;
   } = {},
 ) {
   const turn = stream<TurnLifecycleEvent>();
@@ -70,6 +72,8 @@ function fixture(
   const session = {
     title: "title" in opts ? opts.title : "修 parser 的 bug",
     lang: opts.lang ?? "zh",
+    turnInFlight: opts.midRun === true,
+    backendActive: opts.midRun === true,
     subscribeTurnLifecycle: () => turn.iterable,
     subscribeAgentEvents: () => agent.iterable,
     subscribeRecord: () => record.iterable,
@@ -132,6 +136,23 @@ const speech = (text: string): RecordEvent => ({
 });
 
 describe("the attention watcher (ADR 0072 §1)", () => {
+  it("started mid-run, it holds the machine awake at once and still notices the reply when the run ends (review 2026-09-30)", async () => {
+    const f = fixture({ midRun: true });
+    // No turn.started was seen: the session's own state seeds the watcher.
+    expect(f.awake()).toEqual({ held: 1, released: 0 });
+    f.backend("turn.finished");
+    await tick();
+    expect(f.awake()).toEqual({ held: 1, released: 1 });
+    f.record.push(speech("改好了。"));
+    f.turn.push({ kind: "finished" } as unknown as TurnLifecycleEvent);
+    await tick();
+    f.fireTimers();
+    expect(f.notices).toEqual([
+      { kind: "reply", title: "修 parser 的 bug", body: "改好了。" },
+    ]);
+    f.stop();
+  });
+
   it("notifies a waiting approval once per request, only while the window is not attended", async () => {
     const f = fixture();
     const pending = (requestId: string): OverlayEvent =>

@@ -82,4 +82,11 @@ describe("@-file mentions (ADR 0072 §2)", () => {
       caret: 14,
     });
   });
+
+  it("a path with whitespace goes in backticks, so where it ends is not left to the reader (review 2026-09-30)", () => {
+    expect(insertMention("看看 @des", 3, 7, "docs/design notes.md")).toEqual({
+      text: "看看 `docs/design notes.md` ",
+      caret: 26,
+    });
+  });
 });

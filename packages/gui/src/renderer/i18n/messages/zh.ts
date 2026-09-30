@@ -532,6 +532,7 @@ export const zh = {
   "trace.sum.stopMany": "停止 {n} 个后台命令",
   "trace.sum.sep": "，",
   "trace.sum.failed": "{n} 次失败",
+  "trace.live.lineOne": "1 行",
   "trace.live.lines": "{n} 行",
   "trace.live.noOutput": "尚无输出",
   // 仓库 rail card (ADR 0058): the workspace's repository, under the device.

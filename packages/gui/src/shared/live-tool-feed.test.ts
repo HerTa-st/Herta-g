@@ -23,11 +23,12 @@ const finished = (id: string, tool: string, ok = true) =>
   });
 
 /** A feed on a hand-cranked timer: `tick()` runs the pending flush. */
-function harness() {
+function harness(opts: { readonly midRun?: boolean } = {}) {
   const sent: LiveToolSnapshot[] = [];
   let pending: (() => void) | null = null;
   let timers = 0;
   const feed = createLiveToolFeed((s) => sent.push(s), {
+    ...opts,
     setTimer: (fn) => {
       timers += 1;
       pending = fn;
@@ -47,6 +48,52 @@ function harness() {
 }
 
 describe("createLiveToolFeed (ADR 0073)", () => {
+  it("started mid-run, or after events were lost, it numbers no call until the next run starts (review 2026-09-30)", () => {
+    const h = harness({ midRun: true });
+    h.feed.push(started("c1", "bash", "pwd"));
+    let snap = h.tick();
+    expect(snap?.views[0]?.ordinal).toBeUndefined();
+    expect(snap?.startedOps).toBe(0);
+    // The next run starts: every call from here on is seen, and numbered.
+    h.feed.push(ev({ type: "turn.started", layer: "backend" } as AgentEvent));
+    h.feed.push(started("c2", "bash", "ls"));
+    snap = h.tick();
+    expect(snap?.views.map((v) => [v.id, v.ordinal])).toEqual([["c2", 0]]);
+    expect(snap?.startedOps).toBe(1);
+    // Events lost: the count has missed calls, so numbering stops again.
+    h.feed.push({ kind: "dropped", count: 1 } as unknown as SessionAgentEvent);
+    h.feed.push(started("c3", "bash", "cat x"));
+    snap = h.tick();
+    expect(snap?.views.map((v) => [v.id, v.ordinal])).toEqual([
+      ["c3", undefined],
+    ]);
+    expect(snap?.startedOps).toBe(0);
+  });
+
+  it("a call the user did not allow leaves the views: the record has no row for it (D7)", () => {
+    const h = harness();
+    h.feed.push(started("c1", "bash", "rm x"));
+    expect(h.tick()?.views).toHaveLength(1);
+    h.feed.push(
+      ev({
+        type: "tool.call.finished",
+        layer: "backend",
+        id: "c1",
+        tool: "bash",
+        result: {
+          ok: false,
+          summary: "",
+          error: {
+            code: "permission_denied",
+            message: "denied",
+            retryable: false,
+          },
+        },
+      }),
+    );
+    expect(h.tick()?.views).toEqual([]);
+  });
+
   it("shows a new file as the model writes it: path, text, line count", () => {
     const h = harness();
     h.feed.push(

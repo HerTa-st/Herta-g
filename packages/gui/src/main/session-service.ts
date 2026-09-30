@@ -457,7 +457,11 @@ export function startForwarders(session: Session, send: Send): () => void {
   // The raw stream is a trace; the renderer wants its signals only — and,
   // folded from it, the live views of the call in flight (ADR 0073): a
   // bounded tail per call, ten times a second at most.
-  const liveFeed = createLiveToolFeed((snapshot) => send(EVT.live, snapshot));
+  const liveFeed = createLiveToolFeed((snapshot) => send(EVT.live, snapshot), {
+    // Pointed at mid-run (a reload, a resync): the calls before now were
+    // never seen, so none is numbered until the next run.
+    midRun: session.backendActive === true,
+  });
   void pump(session.subscribeAgentEvents(), EVT.agent, (e) => {
     liveFeed.push(e);
     return slimAgentEventForRenderer(e);

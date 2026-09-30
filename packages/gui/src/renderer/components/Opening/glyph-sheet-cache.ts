@@ -44,6 +44,42 @@ export interface CachedSheet {
   readonly entries: readonly OpeningSheetEntry[];
 }
 
+/**
+ * Whether a stored record is a sheet the player can read: a PNG and one
+ * entry per size, each with its cell and a position for every glyph. The
+ * key covers the pixels, not the shape — a build that changed the entry
+ * shape on the same Electron, or a corrupted record, read as valid and
+ * threw inside the draw loop (review 2026-09-30); a sheet that fails this
+ * is drawn afresh.
+ */
+export function validCachedSheet(
+  record: unknown,
+  glyphCount: number,
+): record is CachedSheet {
+  if (typeof record !== "object" || record === null) return false;
+  const r = record as { png?: unknown; entries?: unknown };
+  if (!(r.png instanceof Blob) || !Array.isArray(r.entries)) return false;
+  const finite = (v: unknown): boolean =>
+    typeof v === "number" && Number.isFinite(v);
+  return r.entries.every((e: unknown) => {
+    if (typeof e !== "object" || e === null) return false;
+    const entry = e as {
+      px?: unknown;
+      w?: unknown;
+      h?: unknown;
+      pos?: unknown;
+    };
+    return (
+      finite(entry.px) &&
+      finite(entry.w) &&
+      finite(entry.h) &&
+      Array.isArray(entry.pos) &&
+      entry.pos.length === glyphCount * 2 &&
+      entry.pos.every(finite)
+    );
+  });
+}
+
 const DB_NAME = "herta-opening";
 const STORE = "glyph-sheet";
 const ENTRY = "latest";

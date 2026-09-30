@@ -1,6 +1,7 @@
 import {
   readCachedSheet,
   sheetCacheKey,
+  validCachedSheet,
   writeCachedSheet,
 } from "./glyph-sheet-cache.js";
 import {
@@ -53,7 +54,7 @@ async function makeSheet(request: GlyphSheetRequest): Promise<void> {
   const { sizes, fontFamily, glyphs, dpr, ink } = request;
   const key = sheetCacheKey(request, navigator.userAgent);
   const cached = await readCachedSheet(key);
-  if (cached !== null) {
+  if (cached !== null && validCachedSheet(cached, glyphs.length)) {
     try {
       const bitmap = await createImageBitmap(cached.png, {
         premultiplyAlpha: "premultiply",

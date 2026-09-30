@@ -15,6 +15,7 @@ import {
   type TraceContext,
   type TraceFocus,
   type TraceOp,
+  type TraceScope,
   traceScope,
 } from "../Workspace/trace-context.js";
 import {
@@ -26,6 +27,10 @@ import { CARD_HOLD_MS, CARD_SLIDE_MS } from "./card-motion.js";
 /** Slack past the slide before the retracted card is dropped (see
  *  useRepoCard's REPO_UNMOUNT_SLACK_MS for why it runs long). */
 const TRACE_UNMOUNT_SLACK_MS = 120;
+
+/** A run whose first call is being written before any of its rows landed:
+ *  read as a first dispatch is, with nothing in the record yet. */
+const FRESH_DISPATCH: TraceScope = { kind: "absent" };
 
 const NO_PENDING: ReturnType<typeof pendingSteps> = {
   steps: [],
@@ -170,7 +175,19 @@ export function useTraceCard(): TraceCardState {
   const workspace = useSessionSelector((s) => s.backendWorkspace);
   const waiting = useApprovalPending();
   // One scan per record commit (not per streaming delta).
-  const scope = useMemo(() => traceScope(record), [record]);
+  const recordScope = useMemo(() => traceScope(record), [record]);
+  // A dispatch chained in the same actor turn: the record's last block is
+  // still the previous run's marker while the new run's first call is being
+  // written. A live view not yet done says so — the previous run's views are
+  // all done once it ended — and the card opens on the new run as it does
+  // for a first dispatch, rather than drawing the old one settled (review
+  // 2026-09-30).
+  const scope: TraceScope =
+    recordScope.kind === "ended" &&
+    backendActive &&
+    liveSnapshot.views.some((v) => !v.done)
+      ? FRESH_DISPATCH
+      : recordScope;
   // The views outlive the backend's own end until the record catches up
   // (the store keeps them); once the record says the dispatch ended, they
   // describe nothing on it — unless a new run is already writing.

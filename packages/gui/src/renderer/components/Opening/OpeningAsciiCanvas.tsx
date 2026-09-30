@@ -193,32 +193,58 @@ function createOpeningHost(
       stops.push(() => clearTimeout(timer));
       return;
     }
-    const player = createOpeningPlayer(
-      canvas,
-      ctx,
-      segment,
-      dark,
-      { onDissolve: complete, onInstant: () => complete(0) },
-      performance.now(),
-      sheet,
-    );
+    // A player that throws — a kept sheet from another build the loop cannot
+    // read — must not leave the splash up: this is the last host, and no
+    // watchdog covers it. The opening plays again from text; a second
+    // failure completes it at once (review 2026-09-30).
+    const giveUp = (): void => {
+      stopAll();
+      if (sheet !== null && !completed) playOnMainThread(segment, null);
+      else complete(0);
+    };
+    let player: ReturnType<typeof createOpeningPlayer>;
+    try {
+      player = createOpeningPlayer(
+        canvas,
+        ctx,
+        segment,
+        dark,
+        { onDissolve: complete, onInstant: () => complete(0) },
+        performance.now(),
+        sheet,
+      );
+    } catch {
+      giveUp();
+      return;
+    }
     const resize = (): void => {
       const v = viewSize();
       player.resize(v.width, v.height, v.dpr);
     };
-    resize();
-    window.addEventListener("resize", resize);
     let raf = 0;
     const step = (timeMs: number): void => {
-      const more = player.frame(timeMs);
+      let more: boolean;
+      try {
+        more = player.frame(timeMs);
+      } catch {
+        giveUp();
+        return;
+      }
       markFirstFrame({ host: "main", sheet: sheetUsed(player.usesSheet()) });
       if (more) raf = requestAnimationFrame(step);
     };
-    raf = requestAnimationFrame(step);
     stops.push(() => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
     });
+    try {
+      resize();
+    } catch {
+      giveUp();
+      return;
+    }
+    window.addEventListener("resize", resize);
+    raf = requestAnimationFrame(step);
   };
 
   // null: the main thread plays (no worker could start, or it failed).

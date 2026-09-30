@@ -28,6 +28,8 @@ let pending: Promise<OpeningSheet | null> | null = null;
 
 /** How long the worker may go on storing the sheet after answering. */
 const WORKER_GRACE_MS = 15_000;
+/** How long the worker may take to answer at all before it is ended. */
+const WORKER_CAP_MS = 60_000;
 
 /**
  * Starts drawing the opening's glyph sheet (see `glyph-sheet.worker.ts`) for
@@ -63,7 +65,12 @@ export function startOpeningGlyphSheet(
       BASE_LAYER_STYLE.foreground,
   };
   pending = new Promise<OpeningSheet | null>((resolve) => {
+    // A worker that never answers — a storage open that neither succeeds
+    // nor errors — would keep its thread and canvas for the session; the
+    // opening itself waits far less (review 2026-09-30).
+    const cap = setTimeout(() => settle(null, true), WORKER_CAP_MS);
     const settle = (sheet: OpeningSheet | null, failed: boolean): void => {
+      clearTimeout(cap);
       w.onmessage = null;
       w.onerror = null;
       w.onmessageerror = null;

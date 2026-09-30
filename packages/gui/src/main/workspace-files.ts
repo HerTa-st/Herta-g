@@ -16,6 +16,8 @@ import { join } from "node:path";
 
 export const MAX_LISTED_FILES = 5_000;
 export const MAX_VISITED_ENTRIES = 30_000;
+/** A directory with more entries than this is not sorted (see the walk). */
+export const SORTED_DIR_MAX_ENTRIES = 2_000;
 
 const SKIPPED_DIRS = new Set([
   ".git",
@@ -78,7 +80,14 @@ export async function listWorkspaceFiles(
     } catch {
       continue; // unreadable: skipped, not fatal
     }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
+    // Alphabetical, so the list under the cap is the same every time — for
+    // a directory of ordinary size. One flat folder of two hundred thousand
+    // files (screenshots, logs) sorted with the collator stalled the main
+    // thread for seconds on every first `@` (review 2026-09-30); such a
+    // folder is taken as read, and `rankPaths` orders what is shown anyway.
+    if (entries.length <= SORTED_DIR_MAX_ENTRIES) {
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+    }
     for (const e of entries) {
       visited += 1;
       if (visited > maxVisited) return { files, truncated: true };

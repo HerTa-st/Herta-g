@@ -195,6 +195,38 @@ describe("OpeningAsciiCanvas with the glyph sheet (M-opening-4)", () => {
     }
   });
 
+  it("a sheet that breaks the player on this thread: the opening is drawn as text, not left up (review 2026-09-30)", async () => {
+    const { ctx } = stubContext();
+    const { pump } = fakeFrames();
+    const onComplete = vi.fn();
+    const good = stubSheet();
+    // The shape a record from another build could carry: no positions.
+    const broken = {
+      ...good,
+      entries: good.entries.map((e) => ({
+        ...e,
+        pos: null as unknown as readonly number[],
+      })),
+    };
+    render(
+      <OpeningAsciiCanvas
+        data={stubSegment()}
+        onComplete={onComplete}
+        getSheet={() => Promise.resolve(broken)}
+      />,
+    );
+    await settle();
+    // The first player draws at its second frame and throws there, before
+    // any copy from the sheet; the retry's own first frame draws nothing,
+    // its second draws text and, this segment being two frames long,
+    // begins the dissolve — a real completion, not the give-up's instant one.
+    for (const t of [1000, 1040, 1080, 1120, 1160]) pump(t);
+    expect(ctx.drawImage).not.toHaveBeenCalled();
+    expect(ctx.fillText).toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete.mock.calls[0]?.[0]).toBeGreaterThan(0);
+  });
+
   it.each([
     ["drawn at another device scale", { dpr: 3 }],
     ["drawn in another ink", { ink: "rgba(1, 2, 3, 1)" }],
