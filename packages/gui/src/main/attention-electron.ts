@@ -36,8 +36,6 @@ export function createElectronAttentionHost(deps: {
     prefs: deps.prefs,
     locale: deps.locale,
     notify: (notice: AttentionNotice) => {
-      // The kind only — the title and body may carry the user's own words.
-      console.log(`[herta] notification: ${notice.kind}`);
       if (!Notification.isSupported()) return;
       const n = new Notification({ title: notice.title, body: notice.body });
       shown.add(n);
@@ -47,6 +45,14 @@ export function createElectronAttentionHost(deps: {
       });
       n.on("close", () => shown.delete(n));
       n.show();
+      // The kind only — the title and body may carry the user's own words.
+      // Logged once the platform has it; whether it is shown is the OS's
+      // (a denied app, Focus Assist).
+      console.log(`[herta] notification: ${notice.kind}`);
+    },
+    dismiss: () => {
+      for (const n of shown) n.close();
+      shown.clear();
     },
     holdAwake: () => {
       // Keeps the system from sleeping; the display may still turn off.

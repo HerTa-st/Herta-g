@@ -54,7 +54,9 @@ export function buildSessionMarkdown(
       continue;
     }
     const b = item.block;
-    if (b.kind === "system") continue; // groupRecord never passes one through
+    // Typed as any block; groupRecord folds every system block into an
+    // activity item, so this narrows and never runs.
+    if (b.kind === "system") continue;
     if (b.kind === "herta" && b.surface !== "speech") continue;
     const text = aliasBanzhuanPlain(b.text, src.lang).trim();
     if (text === "") continue;

@@ -189,6 +189,10 @@ export function extractUserMessages(
 ): ExtractedUserMessages {
   const all: { text: string }[] = [];
   for (const block of record) {
+    // A 继续 block is the harness's own turn (ADR 0071 §1.4), not a task
+    // the user set: it would enter every later dispatch as the user's
+    // words (review 2026-09-30).
+    if (block.kind === "user" && block.resume === true) continue;
     if (block.kind === "user") {
       all.push({ text: block.text });
     } else if (block.kind === "system" && block.digest?.kind === "attachment") {

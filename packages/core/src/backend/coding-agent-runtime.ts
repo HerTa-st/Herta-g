@@ -196,8 +196,8 @@ interface PendingPermission {
 /**
  * Silent coding-agent runtime per ADR 0007 / D6. Long-lived infrastructure
  * (provider, tools, permissions, backend builder, bus, memory) is owned by
- * the instance; per-brief state (transcript, plan, research, read ledger)
- * is reset on every `runBrief` call. The runtime never speaks to the user
+ * the instance; per-brief state (transcript, read ledger, journal,
+ * background host) is reset on every `runBrief` call. The runtime never speaks to the user
  * and never role-plays Herta — it returns a structured `AgentExecutionReport`.
  */
 export class CodingAgentRuntime {

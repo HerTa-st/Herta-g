@@ -534,6 +534,37 @@ describe("continuing a run (ADR 0071 §1.4–§1.5)", () => {
     );
   });
 
+  it("after a Stop, a run that had put commands in the background is told they ended (review 2026-09-30)", async () => {
+    const plan = await planResume(
+      [
+        start({ frame: { ...start().frame, lang: "en" } }),
+        asks(
+          call("c1", "run_command", {
+            command: "npm run dev",
+            runInBackground: true,
+          }),
+        ),
+        dispatched("c1"),
+        answer("c1"),
+        {
+          kind: "spawn",
+          callId: "c1",
+          pid: 11,
+          startedAt: 1,
+          command: "npm run dev",
+          role: "background",
+        },
+        stopEnd,
+      ],
+      disk({}),
+      AT,
+    );
+    const note = plan?.messages.at(-1);
+    expect(note?.role === "user" && note.text).toContain(
+      "The commands started in the background have ended",
+    );
+  });
+
   it("after a Stop: the open call is closed now, in the stop's words, and handed back to be journaled", async () => {
     const plan = await planResume(
       [

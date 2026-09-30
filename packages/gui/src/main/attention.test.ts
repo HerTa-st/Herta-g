@@ -86,12 +86,16 @@ function fixture(
   let clock = 0;
   let held = 0;
   let released = 0;
+  let dismissed = 0;
   const state = { attended: opts.attended ?? false };
   const host: AttentionHost = {
     attended: () => state.attended,
     prefs: () => ({ notifications: true, keepAwake: true, ...opts.prefs }),
     locale: () => "zh",
     notify: (n) => notices.push(n),
+    dismiss: () => {
+      dismissed += 1;
+    },
     holdAwake: () => {
       held += 1;
       return () => {
@@ -126,6 +130,7 @@ function fixture(
       for (const t of timers.splice(0)) if (!t.cancelled) t.fn();
     },
     awake: () => ({ held, released }),
+    dismissed: () => dismissed,
   };
 }
 
@@ -150,7 +155,10 @@ describe("the attention watcher (ADR 0072 §1)", () => {
     expect(f.notices).toEqual([
       { kind: "reply", title: "修 parser 的 bug", body: "改好了。" },
     ]);
+    // Stopped — the window shows another session now — the notice still on
+    // screen is taken back: a click on it would front the wrong session.
     f.stop();
+    expect(f.dismissed()).toBe(1);
   });
 
   it("notifies a waiting approval once per request, only while the window is not attended", async () => {

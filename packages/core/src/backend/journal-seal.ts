@@ -280,11 +280,6 @@ function oneLine(text: string): string {
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 }
 
-/**
- * The result an open call is closed with. `ok` only for a write found
- * applied — the tool's work stands; every other outcome says what did not
- * happen, or that nobody can know.
- */
 /** Why a run stopped: the app exited under it (the seal), the user pressed
  *  Stop, or it reached the step limit. A run the app exited during has its
  *  closers from the seal; the other two are closed when it is continued. */
@@ -556,6 +551,10 @@ export async function planResume(
       cause,
       spawns.some((s) => s.role === "shell"),
       leftRunning.map((p) => processLine(p, lang)),
+      // A stopped run's own cleanup ended what run_command had put in the
+      // background; said, or the model asks command_output about a dead id
+      // (review 2026-09-30). The seal's case lists each process instead.
+      cause !== "app-exit" && spawns.some((s) => s.role === "background"),
     ),
     ts,
   });
@@ -609,6 +608,7 @@ function resumeNote(
   cause: StopCause,
   hadShell: boolean,
   processLines: readonly string[],
+  backgroundEnded = false,
 ): string {
   const why: Record<StopCause, { zh: string; en: string }> = {
     "app-exit": { zh: "应用意外退出", en: "the app exited unexpectedly" },
@@ -624,6 +624,9 @@ function resumeNote(
       hadShell
         ? "The shell has been restarted: its working directory and environment are back to their initial state, and commands it was running in the background have ended."
         : null,
+      backgroundEnded
+        ? "The commands started in the background have ended; their ids are no longer valid."
+        : null,
       ...processLines,
       "Continue the task from where it stopped.)",
     ]
@@ -634,6 +637,9 @@ function resumeNote(
     `（运行在这里中断过：${why[cause].zh}。上面每个未完成的步骤都已写明结果，没有任何步骤被重做。`,
     hadShell
       ? "shell 已经重新启动：当前目录和环境变量都回到了初始状态，之前在后台运行的命令都已结束。"
+      : null,
+    backgroundEnded
+      ? "之前放到后台运行的命令都已结束，它们的编号已失效。"
       : null,
     ...processLines,
     "请从中断的地方继续完成任务。）",

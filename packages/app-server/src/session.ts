@@ -823,11 +823,15 @@ export class SessionImpl implements Session {
       return false;
     }
     const run = entries === null ? null : resumableRun(entries);
+    // The same contract AND the same workspace: a run continued after a
+    // workspace_set would run in the new one with the old one's paths in
+    // its closers and journal (review 2026-09-30).
     return (
       run !== null &&
       run.recordLength !== undefined &&
       run.recordLength <= marker &&
-      run.start.contract === this.contract
+      run.start.contract === this.contract &&
+      run.start.workspaceRoot === this.backendWorkspace
     );
   }
 

@@ -1,6 +1,7 @@
 import { open, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
+  currentJournalHost,
   DispatchJournal,
   type DispatchJournalEntry,
   hashFile,
@@ -65,10 +66,7 @@ export const systemProcessProbe: ProcessProbe = {
       return (err as { code?: unknown }).code === "EPERM";
     }
   },
-  self: () => ({
-    pid: process.pid,
-    startedAt: Math.round(Date.now() - process.uptime() * 1000),
-  }),
+  self: currentJournalHost,
 };
 
 /**
@@ -146,16 +144,36 @@ export async function sealOpenDispatch(opts: {
   const open = openDispatch(entries);
   if (open === null) return null;
   const at = open.recordLength;
-  if (
-    at === undefined ||
-    opts.record.length < at ||
-    lastTerminalMarker(opts.record) >= at
-  ) {
+  if (at === undefined) return null;
+  if (DispatchJournal.isLive(opts.journalPath)) return null;
+  // The record ends before the run began: its rows were withdrawn, or a
+  // power cut took a tail the fsynced journal kept (review 2026-09-30). No
+  // marker can stand where no user block does; the run is dropped as a
+  // rewind drops it, so it is neither sealed nor offered later.
+  if (opts.record.length < at) {
+    await dropWithdrawnJournal(opts.journalPath, opts.record.length).catch(
+      () => undefined,
+    );
     return null;
   }
-  if (DispatchJournal.isLive(opts.journalPath)) return null;
   const host = await hostState(open.start.host, probe);
   if (host === "other" || host === "unknown") return null;
+  // A marker already ends the run but the journal has no `end`: a seal cut
+  // short after its marker, before its last line. Finished now, or the run
+  // would read as open forever and never be offered (review 2026-09-30).
+  if (lastTerminalMarker(opts.record) >= at) {
+    const journal = await DispatchJournal.reopen(opts.journalPath);
+    try {
+      await journal.append({
+        kind: "end",
+        status: "interrupted",
+        cause: "app-exit",
+      });
+    } finally {
+      await journal.close();
+    }
+    return null;
+  }
 
   const plan = await planSeal(entries, hashFile);
   if (plan === null) return null;
@@ -272,6 +290,16 @@ export async function reapOrphanedDispatches(
         } catch {
           found.push({ pid: t.pid, fate: "unverified" });
         }
+      }
+      // The process queries took a while: if the session was opened and its
+      // run continued meanwhile, the journal is a live run's now — its
+      // entries belong to the new segment and its listing is the new run's
+      // (review 2026-09-30). The fates are still returned; the journal is
+      // left as it is.
+      if (DispatchJournal.isLive(path)) {
+        journals += 1;
+        fates.push(...found);
+        continue;
       }
       const journal = await DispatchJournal.reopen(path);
       for (const f of found) {

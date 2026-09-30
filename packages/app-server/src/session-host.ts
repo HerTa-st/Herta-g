@@ -656,6 +656,12 @@ class SessionHostImpl implements SessionHost {
         const active = this._active;
         if (active !== null && active.sessionId === sessionId) {
           if (active.renameTitle === undefined) return { ok: false } as const;
+          // No message yet means no topic to name: the name would show on
+          // the sidebar's card and be dropped by the next open, which keeps
+          // no title without a user turn (review 2026-09-30).
+          if (!active.record.some((b) => b.kind === "user")) {
+            return { ok: false } as const;
+          }
           const topics = active.renameTitle(clean);
           return { ok: true, title: clean, topics } as const;
         }

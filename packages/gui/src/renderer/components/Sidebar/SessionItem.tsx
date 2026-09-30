@@ -50,8 +50,7 @@ export interface SessionItemProps {
 
 export function SessionItem(props: SessionItemProps): JSX.Element {
   const t = useT();
-  const { sessionStore, sessionListStore } = useHertaBridge();
-  const { bridge } = useHertaBridge();
+  const { bridge, sessionStore, sessionListStore } = useHertaBridge();
   // Selector-based: every card re-rendering on every streaming delta (whole-
   // snapshot subscription) also re-ran the sidebar FLIP measure per token.
   const activeSessionId = useSessionSelector((s) => s.sessionId);
@@ -299,7 +298,16 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
   // not, so it never switches (and never interrupts). Each item shows only
   // where the bridge has the surface; with neither the right-click is left
   // alone. `lastMenuAt` holds the spot through the menu's exit.
-  const canRename = bridge.renameSession !== undefined;
+  // A rename names the current topic, and a session with no message has
+  // none: the name would show on the card and vanish from the header at the
+  // next open (review 2026-09-30). Main refuses it too; here the item is
+  // simply not offered while the open session is still empty.
+  const openAndEmpty = useSessionSelector(
+    (s) =>
+      s.sessionId === props.session.sessionId &&
+      !s.record.some((b) => b.kind === "user"),
+  );
+  const canRename = bridge.renameSession !== undefined && !openAndEmpty;
   const canExport =
     bridge.readSessionForExport !== undefined &&
     bridge.saveSessionExport !== undefined;
@@ -388,6 +396,9 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
     void runSessionExport(bridge, props.session.sessionId).then((r) => {
       if (r === "saved") showNotice("exported");
       else if (r === "failed") showNotice("exportFailed");
+      // The save dialog took the focus; a keyboard user comes back to the
+      // card they exported, not to the page (review 2026-09-30).
+      cardRef.current?.focus({ preventScroll: true });
     });
   };
 

@@ -1,4 +1,4 @@
-import type { SessionMetadata } from "@herta/app-server";
+import type { SessionMetadata, TerminalRecordBlock } from "@herta/app-server";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { HertaBridgeProvider } from "../../context/HertaBridgeContext.js";
@@ -40,9 +40,16 @@ function Harness(): JSX.Element {
   );
 }
 
+/** The open session has a message: a rename names its current topic, so
+ *  one with none offers no rename (see the last test). */
+const SPOKEN: TerminalRecordBlock[] = [
+  { kind: "user", text: "hi" } as TerminalRecordBlock,
+];
+
 async function setup(
   opts: MockHertaBridgeOpts = {},
   activeId = SESSION.sessionId,
+  record: TerminalRecordBlock[] = SPOKEN,
 ): Promise<MockHertaBridge> {
   const mock = createMockHertaBridge({
     listSessionsResult: [SESSION],
@@ -59,7 +66,7 @@ async function setup(
     mock.emitReset({
       sessionId: activeId,
       workspaceRoot: "/repo",
-      record: [],
+      record,
       overlay: null,
       title: activeId === SESSION.sessionId ? "旧名字" : null,
       backendWorkspace: "/r",
@@ -78,6 +85,15 @@ function rightClick(x = 40, y = 60): boolean {
 }
 
 describe("the session menu (ADR 0072 §3)", () => {
+  it("an open session with no message yet offers no rename: there is no topic to name (review 2026-09-30)", async () => {
+    await setup({}, SESSION.sessionId, []);
+    rightClick(40, 60);
+    const items = [
+      ...(menu()?.querySelectorAll("[role='menuitem']") ?? []),
+    ].map((b) => b.textContent);
+    expect(items).toEqual(["导出为 Markdown…"]);
+  });
+
   it("opens at the pointer with rename and export, and opens nothing else", async () => {
     const mock = await setup({}, "another-session");
     const defaulted = !rightClick(40, 60);

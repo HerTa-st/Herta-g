@@ -23,6 +23,7 @@ import {
 } from "../../hooks/useSessionSelector.js";
 import type { MessageKey } from "../../i18n/keys.js";
 import { useT } from "../../i18n/LocaleProvider.js";
+import { afterLaunch } from "../../lib/launch-gate.js";
 import { useRailParked } from "../FileViewer/file-viewer-context.js";
 import { CardMenu } from "./CardMenu.js";
 import { DeviceGlow } from "./DeviceGlow.js";
@@ -140,15 +141,22 @@ export function DeviceCard(): JSX.Element {
   useEffect(() => {
     if (!sceneSupported) return;
     let cancelled = false;
-    detectDeviceScenePath().then(
-      (some) => {
-        if (!cancelled) setGpuPath(some ? "some" : "none");
-      },
-      () => {
-        if (!cancelled) setGpuPath("none");
-      },
-    );
+    // After the opening is playing, as the glow's setup waits: where no
+    // WebGPU adapter answers (Linux, a software surface) the probe falls
+    // through to a WebGL2 context, a GPU-process round trip the opening's
+    // first frame would otherwise share (review 2026-09-30).
+    const cancelGate = afterLaunch("opening", () => {
+      detectDeviceScenePath().then(
+        (some) => {
+          if (!cancelled) setGpuPath(some ? "some" : "none");
+        },
+        () => {
+          if (!cancelled) setGpuPath("none");
+        },
+      );
+    });
     return () => {
+      cancelGate();
       cancelled = true;
     };
   }, [sceneSupported]);

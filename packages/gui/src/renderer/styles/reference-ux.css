@@ -4353,19 +4353,6 @@ button.session-item__badge--dismiss {
   color: var(--muted-4);
   font-variant-numeric: tabular-nums;
 }
-.plan-card__meter {
-  height: 3px;
-  border-radius: 999px;
-  background: var(--hairline-strong);
-  overflow: hidden;
-}
-.plan-card__meter-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--banzhuan-led);
-  transition: width 420ms var(--ease-signature);
-}
 .plan-card__list {
   margin: 2px 0 0;
   padding: 0;
@@ -4467,19 +4454,6 @@ button.session-item__badge--dismiss {
    FORM. It needs no motion to read as "you are here". Size comes from the
    `.plan-card__mark svg` rule above; the 8×10 viewBox letterboxes the
    triangle back to its true proportions inside it. */
-.plan-card__caret {
-  fill: currentColor;
-}
-/* Parked on a permission gate: the step is the current one but nothing is
-   being done to it — it is waiting on the user. The caret goes hollow,
-   keeping the LED tint so it still reads as the CURRENT step. */
-.plan-card.is-waiting .plan-card__caret {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.2;
-  stroke-linejoin: round;
-}
-
 /* ── 操作轨迹 rail card (2026-08-17; the timeline, ADR 0073) ────────────
    Rides the .plan-card chrome — glass, slide, fog — as a timeline: one
    node per stretch of one phase down a hairline, the finished ones folded
@@ -4965,8 +4939,7 @@ button.repo-card__path,
 
 @media (prefers-reduced-motion: reduce) {
   .plan-card,
-  .plan-card__list,
-  .plan-card__meter-fill { transition: none; }
+  .plan-card__list { transition: none; }
   .trace-ticker__line { animation: none; }
   .plan-card__row { animation: none; }
 }

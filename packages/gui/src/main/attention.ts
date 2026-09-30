@@ -61,6 +61,9 @@ export interface AttentionHost {
   notify(notice: AttentionNotice): void;
   /** Keep the machine awake until the returned release is called. */
   holdAwake(): () => void;
+  /** Take back every notice still on screen (the watcher stopped: the
+   *  window shows another session, or none). */
+  dismiss?(): void;
   /** Timer seam (tests). Returns the cancel. */
   setTimer?(fn: () => void, ms: number): () => void;
   /** Clock seam (tests). */
@@ -261,6 +264,9 @@ export function watchAttention(
     live = false;
     dropReply();
     awake(false);
+    // A notice still on screen concerns the session the window showed when
+    // it was sent; the window may show another now (review 2026-09-30).
+    host.dismiss?.();
     for (const it of iterators) void it.return?.().catch(() => undefined);
   };
 }

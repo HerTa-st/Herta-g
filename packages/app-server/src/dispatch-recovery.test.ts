@@ -327,6 +327,53 @@ describe("the seal on open (ADR 0071 §1.2)", () => {
     ).toBeNull();
   });
 
+  it("a seal cut short after its marker gets its end at the next open, so the run can still be offered (review 2026-09-30)", async () => {
+    const s = crashed(editThenTest, [
+      ...RECORD,
+      {
+        kind: "system",
+        label: "差分协处理器",
+        body: "中断",
+        role: "done-marker",
+      },
+    ]);
+    const a = reopen(s.sessionFile);
+    const seal = () =>
+      sealOpenDispatch({
+        journalPath: s.journalPath,
+        record: a.record,
+        persister: a.persister,
+        probe: probe(),
+      });
+    expect(await seal()).toBeNull();
+    const entries = (await readDispatchJournal(s.journalPath)) ?? [];
+    expect(entries.at(-1)).toEqual({
+      kind: "end",
+      status: "interrupted",
+      cause: "app-exit",
+    });
+    expect(resumableRun(entries)).not.toBeNull();
+    // Once: the next open finds the run ended and appends nothing.
+    expect(await seal()).toBeNull();
+    expect((await readDispatchJournal(s.journalPath))?.length).toBe(
+      entries.length,
+    );
+  });
+
+  it("a record that ends before the run began — a tail lost to a power cut — drops the journal rather than leave the run open forever (review 2026-09-30)", async () => {
+    const s = crashed(editThenTest, RECORD.slice(0, 2));
+    const b = reopen(s.sessionFile);
+    expect(
+      await sealOpenDispatch({
+        journalPath: s.journalPath,
+        record: b.record,
+        persister: b.persister,
+        probe: probe(),
+      }),
+    ).toBeNull();
+    expect(existsSync(s.journalPath)).toBe(false);
+  });
+
   it("a run another live app is running, or one that cannot be checked, is left alone", async () => {
     const s = crashed(editThenTest);
     const { record, persister } = reopen(s.sessionFile);
@@ -526,6 +573,35 @@ describe("the launch reaper (ADR 0071 §1.6)", () => {
     );
     expect(p.killed.sort()).toEqual([21, 31]);
     expect(summary.fates).toEqual([{ pid: 11, fate: "ended" }]);
+  });
+
+  it("leaves a journal alone that went live while it was checking — the session was opened and its run continued (review 2026-09-30)", async () => {
+    const s = crashed(withProcesses);
+    await markJournalOpen(s.journalPath, true);
+    const p = probe({ 11: 10_400 });
+    let held: DispatchJournal | null = null;
+    const table = p.processes;
+    p.processes = async () => {
+      // The process query is slow; meanwhile the user pressed 继续 — the
+      // continued run holds the journal live.
+      held = await DispatchJournal.reopen(s.journalPath, { live: true });
+      return table();
+    };
+    const summary = await reapOrphanedDispatches(
+      dispatchJournalDir(s.transcriptDir),
+      p,
+    );
+    // The dead run's orphan is still ended (it was verified as that
+    // process), but nothing is written into what is now a live run's
+    // journal, and it stays listed.
+    expect(p.killed).toEqual([11]);
+    expect(summary.fates.map((f) => f.fate)).toEqual(["ended", "gone", "gone"]);
+    const entries = await readDispatchJournal(s.journalPath);
+    expect(entries?.some((e) => e.kind === "reap")).toBe(false);
+    expect(
+      await readJournalIndex(dispatchJournalDir(s.transcriptDir)),
+    ).toHaveLength(1);
+    await (held as DispatchJournal | null)?.close();
   });
 
   it("reaches an MSYS shell's commands through its process group, where Windows' parent ids are broken", async () => {

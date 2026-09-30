@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { journeyMarkAfterPaint, journeyMarkAt } from "../../lib/journey.js";
 import { holdLaunch, releaseLaunch } from "../../lib/launch-gate.js";
 import type { SegmentData } from "./ascii-renderer.js";
@@ -17,6 +17,11 @@ const CURTAIN_MS = 700;
  *  when it committed that frame; a frame drawn here is marked after paint.
  *  The mark's detail says how it was drawn (the CI opening probe reads it). */
 const markOpeningPainted = (frame: OpeningFirstFrame): void => {
+  // The opening is PLAYING now — not when its segment loaded, which since
+  // the sheet wait (§17) can be a second or more earlier, with the main
+  // thread idle and the glow's GPU work free to land in front of the first
+  // frame (review 2026-09-30; the gate's own words say "playing").
+  releaseLaunch("opening");
   const detail = { host: frame.host, sheet: frame.sheet };
   if (frame.atEpochMs === undefined) {
     journeyMarkAfterPaint("launch:opening-painted", detail);
@@ -59,15 +64,18 @@ export function OpeningAscii(props: OpeningAsciiProps): JSX.Element {
   const completedRef = useRef(false);
   const fadeTimerRef = useRef<number>();
 
-  // The launch gate (lib/launch-gate.ts): closed from this FIRST render —
-  // render runs before any effect of the tree the splash covers — so the
-  // rail's GPU setup waits for the opening instead of racing it. Released
-  // below as the opening plays and ends; the unmount releases it too.
-  const heldRef = useRef(false);
-  if (!heldRef.current) {
-    heldRef.current = true;
+  // The launch gate (lib/launch-gate.ts): closed from this splash's layout
+  // effect — every layout effect of a commit runs before any passive effect
+  // of the tree the splash covers, where the rail's GPU setup waits — so
+  // that setup waits for the opening instead of racing it. Released as the
+  // opening paints and ends; the unmount releases it too. A layout effect,
+  // not the first render: StrictMode's simulated unmount ran the cleanup
+  // once, and a render-time hold never re-held, so in development the gate
+  // was open before the opening began (review 2026-09-30).
+  useLayoutEffect(() => {
     holdLaunch();
-  }
+    return () => releaseLaunch("settled");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,7 +84,6 @@ export function OpeningAscii(props: OpeningAsciiProps): JSX.Element {
       .then((seg) => {
         if (cancelled) return;
         setData(seg);
-        releaseLaunch("opening");
       })
       .catch(() => {
         if (cancelled) return;
@@ -89,7 +96,6 @@ export function OpeningAscii(props: OpeningAsciiProps): JSX.Element {
       if (fadeTimerRef.current !== undefined) {
         window.clearTimeout(fadeTimerRef.current);
       }
-      releaseLaunch("settled");
     };
   }, [props.loadSegment]);
 
