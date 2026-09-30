@@ -11,7 +11,8 @@
  *     origin is the expected one: `drawn` on a fresh profile, `kept` on the
  *     launch after (`any` accepts either, `none` expects text);
  *   - every frame of the opening holds the figure: the page is screencast
- *     from the first frame to the end, each frame dated by its own swap
+ *     from the moment the probe attaches (before it asks the page anything
+ *     — see startScreencast) to the end, each frame dated by its own swap
  *     time, its ink (pixels far from the background's luminance) measured
  *     in the page after the opening. From the frame where the figure has
  *     developed through the first quarter of the dissolve, each must keep a
@@ -23,8 +24,11 @@
  *   node opening-probe.mjs <outDir> <label> <drawn|kept|any|none> -- <command…>
  *
  * The command is the app (or `xvfb-run … <AppImage>`); the debug-port switch
- * is appended to it. Prints `OPENING PROBE <label>: PASS` or `FAIL (…)`,
- * writes opening-<label>.json and .jpg, exits 1 on FAIL. The app is closed
+ * is appended to it. Prints `OPENING PROBE <label>: PASS`, `FAIL (…)`, or —
+ * when the recording began only after the reveal, so no frame of the opening
+ * exists to judge — `NOT OBSERVED (…)` with a CI warning (the marks are
+ * still judged, and it exits 0). Writes opening-<label>.json and .jpg, exits
+ * 1 on FAIL. The app is closed
  * (SIGTERM to its process group, then SIGKILL) and its port waited out
  * before the probe returns, so the next launch is not refused by the
  * single-instance lock.
@@ -97,15 +101,25 @@ class Cdp {
 }
 
 /**
- * The page's screencast frames until `done()` or `ms`: { how, at, data },
- * `at` in the page's clock — the frame's own swap time. The FIRST frame is
- * dropped: it can be stale (on Linux at scale 2 it was a flat fill without
- * even the window controls, which exist from React's first paint — the trap
- * opening-flash.mjs met in a late-started trace, ADR 0068 §18). A covered
- * window gets no screencast frames; after 1.5 s of none, one plain capture
- * stands in, dated by when it RETURNED (its frame is no later).
+ * The page's screencast, started the moment the probe is attached (2026-09-30).
+ * It used to start once the opening-painted mark was seen — and a mark is seen
+ * by evaluating in the page, which waits for the renderer's main thread. On a
+ * cold first launch of a freshly signed app on the macOS runner that thread is
+ * busy booting until ~3.4 s: the probe's first frame came AFTER the reveal,
+ * so a drawn opening was reported as "no glyphs in any frame" (v0.1.7's two
+ * release builds, while every launch mark was normal). The screencast is
+ * served by the browser process: started before anything asks the page, it
+ * sees the opening from its first frame whatever the main thread is doing.
+ *
+ * Each frame is { how, swapped, data }: `swapped` is its own swap time
+ * (seconds, the browser's epoch clock), turned into the page's clock later
+ * — reading `performance.timeOrigin` is itself a main-thread evaluation. The
+ * FIRST frame is dropped: it can be stale (on Linux at scale 2 it was a flat
+ * fill without even the window controls, which exist from React's first
+ * paint — the trap opening-flash.mjs met in a late-started trace, ADR 0068
+ * §18). `stop()` ends it and returns the frames.
  */
-async function recordScreencast(cdp, origin, done, ms) {
+function startScreencast(cdp, cap) {
   const got = [];
   let seen = 0;
   cdp.on("Page.screencastFrame", (p) => {
@@ -115,40 +129,60 @@ async function recordScreencast(cdp, origin, done, ms) {
     seen += 1;
     const swapped = p.metadata?.timestamp;
     if (seen === 1 || typeof swapped !== "number") return;
-    got.push({
-      how: "screencast",
-      at: Math.round(swapped * 1000 - origin),
-      data: p.data,
-    });
+    got.push({ how: "screencast", swapped, data: p.data });
   });
-  // At CSS size: a scale-2 frame is four times the pixels, and on a
+  // At about CSS size: a scale-2 frame is four times the pixels, and on a
   // software-rendered surface (Linux under Xvfb) the full-size screencast
-  // delivered ONE frame in the whole opening (2026-09-28). Ink is a ratio,
-  // so it reads the same at either size.
-  const view = await cdp.eval("[window.innerWidth, window.innerHeight]");
-  await cdp.send("Page.startScreencast", {
-    format: "jpeg",
-    quality: 80,
-    maxWidth: view[0],
-    maxHeight: view[1],
-  });
-  const started = Date.now();
-  let captured = false;
-  while (Date.now() - started < ms && !(await done())) {
-    if (!captured && seen === 0 && Date.now() - started > 1500) {
-      captured = true;
-      const shot = await cdp.send("Page.captureScreenshot", {
-        format: "jpeg",
-        quality: 80,
-      });
-      const at = await cdp.eval("performance.now()");
-      got.push({ how: "capture", at: Math.round(at), data: shot.data });
+  // delivered ONE frame in the whole opening (2026-09-28). The window's
+  // bounds stand in for the viewport, which only the busy page could say.
+  // Ink is a ratio, so it reads the same at either size. Not awaited: the
+  // reply can wait on the page; the frames do not.
+  cdp
+    .send("Page.startScreencast", {
+      format: "jpeg",
+      quality: 80,
+      maxWidth: cap.width,
+      maxHeight: cap.height,
+    })
+    .catch(() => undefined);
+  return {
+    frames: got,
+    seen: () => seen,
+    async stop() {
+      await cdp.send("Page.stopScreencast").catch(() => undefined);
+      cdp.on("Page.screencastFrame", () => undefined);
+      return got;
+    },
+  };
+}
+
+/** The window's size in DIPs, from the BROWSER target — no page evaluation.
+ *  Falls back to the window size the runners use. */
+async function windowSize(targetId) {
+  const fallback = { width: 1440, height: 900 };
+  try {
+    const version = await (
+      await fetch(`http://127.0.0.1:${PORT}/json/version`, {
+        signal: AbortSignal.timeout(2000),
+      })
+    ).json();
+    const browser = new Cdp(version.webSocketDebuggerUrl);
+    await browser.ready;
+    try {
+      const r = await Promise.race([
+        browser.send("Browser.getWindowForTarget", { targetId }),
+        sleep(2000).then(() => null),
+      ]);
+      const b = r?.bounds;
+      return typeof b?.width === "number" && typeof b?.height === "number"
+        ? { width: b.width, height: b.height }
+        : fallback;
+    } finally {
+      browser.ws.close();
     }
-    await sleep(40);
+  } catch {
+    return fallback;
   }
-  await cdp.send("Page.stopScreencast").catch(() => undefined);
-  cdp.on("Page.screencastFrame", () => undefined);
-  return got;
 }
 
 async function portAnswers() {
@@ -201,24 +235,27 @@ const errors = [];
 /** { how, at, data, screen } per recorded frame. */
 let frames = [];
 try {
-  let ws = null;
-  for (let i = 0; i < 1800 && ws === null && !exited; i += 1) {
+  let target = null;
+  for (let i = 0; i < 1800 && target === null && !exited; i += 1) {
     try {
       const list = await (
         await fetch(`http://127.0.0.1:${PORT}/json/list`)
       ).json();
-      ws =
-        list.find((t) => t.type === "page" && !t.url.startsWith("devtools://"))
-          ?.webSocketDebuggerUrl ?? null;
+      target =
+        list.find(
+          (t) => t.type === "page" && !t.url.startsWith("devtools://"),
+        ) ?? null;
     } catch {
       /* not listening yet */
     }
-    if (ws === null) await sleep(50);
+    if (target === null) await sleep(50);
   }
-  if (ws === null)
+  if (target === null)
     throw new Error("the app never opened a page on the debug port");
-  const cdp = new Cdp(ws);
+  const cdp = new Cdp(target.webSocketDebuggerUrl);
   await cdp.ready;
+  // Recording first, before anything waits on the page (see startScreencast).
+  const cast = startScreencast(cdp, await windowSize(target.id));
   cdp.on("Runtime.exceptionThrown", (p) =>
     errors.push(
       p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text,
@@ -240,23 +277,44 @@ try {
     return false;
   };
 
+  // Every frame of the opening, dated by its own swap time in the page's
+  // clock (the marks'), until the opening is over. One screenshot was not
+  // enough (2026-09-28, Linux at scale 2): a starved window answered with
+  // the connect screen, a capture call on a large software surface took
+  // 2.1 s, and one frame just into the dissolve had no glyphs — whether the
+  // figure vanished or the capture missed it, one frame cannot say.
+  let captured = null;
   if (await waitMark("opening-painted", 60_000)) {
-    // Every frame of the opening, dated by its own swap time in the page's
-    // clock (the marks'), until the opening is over. One screenshot was not
-    // enough (2026-09-28, Linux at scale 2): a starved window answered with
-    // the connect screen, a capture call on a large software surface took
-    // 2.1 s, and one frame just into the dissolve had no glyphs — whether
-    // the figure vanished or the capture missed it, one frame cannot say.
-    const origin = await cdp.eval("performance.timeOrigin");
-    frames = await recordScreencast(
-      cdp,
-      origin,
-      () => hasMark("interactive"),
-      30_000,
-    );
+    // A covered window gets no screencast frames; 1.5 s after the opening
+    // painted with none, one plain capture stands in, dated by when it
+    // RETURNED (its frame is no later).
+    const painted = Date.now();
+    while (Date.now() - painted < 30_000 && !(await hasMark("interactive"))) {
+      if (
+        captured === null &&
+        cast.seen() === 0 &&
+        Date.now() - painted > 1500
+      ) {
+        const shot = await cdp.send("Page.captureScreenshot", {
+          format: "jpeg",
+          quality: 80,
+        });
+        const at = await cdp.eval("performance.now()");
+        captured = { how: "capture", at: Math.round(at), data: shot.data };
+      }
+      await sleep(40);
+    }
   } else {
     problems.push("no opening-painted mark within 60 s");
   }
+  const recorded = await cast.stop();
+  const origin = await cdp.eval("performance.timeOrigin");
+  frames = recorded.map((f) => ({
+    how: f.how,
+    at: Math.round(f.swapped * 1000 - origin),
+    data: f.data,
+  }));
+  if (captured !== null) frames.push(captured);
   if (!(await waitMark("interactive", 30_000))) {
     problems.push("no interactive mark: the opening never finished");
   }
@@ -282,11 +340,6 @@ try {
     for (let i = 0; i < d.length; i += 4) if (Math.abs(lum(d, i) - bg) > 60) ink += 1;
     return { width: W, height: H, background: Math.round(bg), inkRatio: ink / (d.length / 4) };
   }; true`);
-  for (const f of frames) {
-    f.screen = await cdp
-      .eval(`window.__openingInk('${f.data}')`)
-      .catch(() => null);
-  }
   report.dpr = await cdp.eval("window.devicePixelRatio").catch(() => null);
   report.theme = await cdp
     .eval("document.documentElement.dataset.theme ?? 'light'")
@@ -294,6 +347,23 @@ try {
   report.marks = await cdp.eval(
     `performance.getEntriesByType('mark').filter((m) => m.name.startsWith('herta:launch:')).map((m) => ({ name: m.name.slice(13), at: Math.round(m.startTime), detail: m.detail ?? null }))`,
   );
+  // Only the frames that can be judged are measured: the recording now runs
+  // from the probe's attach, well before the opening paints.
+  const markAt = (name) =>
+    report.marks?.find((m) => m.name === name)?.at ?? undefined;
+  const from = markAt("opening-painted") ?? Number.NEGATIVE_INFINITY;
+  const reveal = markAt("revealed");
+  const end = markAt("interactive");
+  const upTo =
+    reveal !== undefined && end !== undefined
+      ? reveal + (end - reveal) * 0.25
+      : Number.POSITIVE_INFINITY;
+  for (const f of frames) {
+    if (f.at < from || f.at > upTo) continue;
+    f.screen = await cdp
+      .eval(`window.__openingInk('${f.data}')`)
+      .catch(() => null);
+  }
   // Let the sheet worker finish storing the sheet for the next launch.
   await sleep(1500);
   cdp.ws.close();
@@ -339,8 +409,16 @@ const ended = marks.get("interactive")?.at;
 report.frames = frames.map((f) => ({
   how: f.how,
   at: f.at,
-  ink: Number(inkOf(f).toFixed(4)),
+  // Only frames the judgement can reach are measured.
+  ink: f.screen ? Number(inkOf(f).toFixed(4)) : null,
 }));
+const firstFrame = frames.reduce(
+  (m, f) => Math.min(m, f.at),
+  Number.POSITIVE_INFINITY,
+);
+report.recordingFrom = Number.isFinite(firstFrame) ? firstFrame : null;
+/** Set when nothing of the opening could be seen: no verdict either way. */
+let notObserved = null;
 let judged = [];
 if (painted !== undefined && revealed !== undefined && ended !== undefined) {
   const hold = frames.filter((f) => f.at > painted && f.at <= revealed);
@@ -355,7 +433,19 @@ if (painted !== undefined && revealed !== undefined && ended !== undefined) {
     }
     report.unjudged = [...(report.unjudged ?? []), why];
   };
-  if (level < 0.003 || start === undefined) {
+  if (hold.length === 0 && frames.length > 0 && firstFrame > revealed) {
+    // The recording began after the reveal: the opening was not seen, so
+    // it can be neither passed nor failed on its frames. Its marks — the
+    // worker, the sheet, the opening to its end — are still judged. A real
+    // missing figure shows as frames DURING the hold without ink, below.
+    notObserved = `the recording began at ${firstFrame} ms, after the reveal at ${revealed} ms`;
+  } else if (hold.length === 0) {
+    flag(
+      frames.length === 0
+        ? "no frames recorded"
+        : `no frames between the opening's paint and its reveal (${frames.length} recorded)`,
+    );
+  } else if (level < 0.003 || start === undefined) {
     flag(
       `no glyphs in any frame of the opening (${hold.length} frames before the reveal, best ink ${level.toFixed(4)})`,
     );
@@ -406,6 +496,7 @@ if (shown !== undefined) {
 if (errors.length > 0) problems.push(`page exceptions: ${errors.join(" | ")}`);
 report.errors = errors;
 report.problems = problems;
+report.notObserved = notObserved;
 writeFileSync(
   join(OUT, `opening-${LABEL}.json`),
   JSON.stringify(report, null, 2),
@@ -413,14 +504,20 @@ writeFileSync(
 
 const at = (name) => marks.get(name)?.at ?? "–";
 console.log(
-  `opening ${LABEL}: dpr ${report.dpr} · theme ${report.theme} · drawn on ${how?.host ?? "?"} from sheet ${how?.sheet ?? "?"} · marks painted ${at("app-painted")} / opening ${at("opening-painted")} / revealed ${at("revealed")} / interactive ${at("interactive")} ms · frames ${frames.length} recorded, ${judged.length} judged, ${report.judged?.blank.length ?? "–"} blank, longest gap ${report.longestGap?.ms ?? "–"} ms · ink at ${report.screen?.at ?? "–"} ms ${report.screen?.inkRatio?.toFixed(4) ?? "–"}`,
+  `opening ${LABEL}: dpr ${report.dpr} · theme ${report.theme} · drawn on ${how?.host ?? "?"} from sheet ${how?.sheet ?? "?"} · marks painted ${at("app-painted")} / opening ${at("opening-painted")} / revealed ${at("revealed")} / interactive ${at("interactive")} ms · frames ${frames.length} recorded from ${report.recordingFrom ?? "–"} ms, ${judged.length} judged, ${report.judged?.blank.length ?? "–"} blank, longest gap ${report.longestGap?.ms ?? "–"} ms · ink at ${report.screen?.at ?? "–"} ms ${report.screen?.inkRatio?.toFixed(4) ?? "–"}`,
 );
 if (!JUDGE_FRAMES) {
   console.log(
     `opening ${LABEL}: frames reported, not judged${report.unjudged ? ` — ${report.unjudged.join("; ")}` : ""}`,
   );
 }
-if (problems.length === 0) {
+if (problems.length === 0 && notObserved !== null) {
+  // Neither a pass nor a flash: said as such, and as a CI warning.
+  console.log(`OPENING PROBE ${LABEL}: NOT OBSERVED (${notObserved})`);
+  console.log(
+    `::warning::opening probe ${LABEL}: not observed — ${notObserved}`,
+  );
+} else if (problems.length === 0) {
   console.log(`OPENING PROBE ${LABEL}: PASS`);
 } else {
   console.log(`OPENING PROBE ${LABEL}: FAIL (${problems.join("; ")})`);
