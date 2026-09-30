@@ -357,6 +357,55 @@ export function hertaStateWriteDenial(
   return null;
 }
 
+/**
+ * True when a path PATTERN relative to the workspace could expand to a path
+ * through `.herta`: some segment carries a live `*`, `?` or `[…]` and matches
+ * the name under bash's default rule — a leading `.` must be spelled, since
+ * `dotglob` is off in the shells the harness starts, so `*` and `?herta`
+ * cannot reach it while `.her?a`, `.[h]erta`, `.h*` and `.*` can (review
+ * 2026-09-30: each of those was a plain fs / write card). The literal spelling
+ * is {@link hertaStateWriteDenial}'s; this is only for what bash would expand.
+ */
+export function globReachesHertaState(relative: string): boolean {
+  return relative
+    .split(/[\\/]/)
+    .some((segment) => globSegmentMatches(segment, ".herta"));
+}
+
+/** Whether one glob segment matches one name, case-folded (the filesystems
+ *  the harness runs on may be). Fail-closed on a bracket class the matcher
+ *  does not read (`[[:alpha:]]`) or a pattern it cannot compile. */
+export function globSegmentMatches(pattern: string, name: string): boolean {
+  if (!/[*?[]/.test(pattern)) return false;
+  if (name.startsWith(".") && !pattern.startsWith(".")) return false;
+  let re = "";
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i] as string;
+    if (ch === "*") re += ".*";
+    else if (ch === "?") re += ".";
+    else if (ch === "[") {
+      // A `]` right after the opener (or after a negation) is literal.
+      let j = i + 1;
+      if (pattern[j] === "!" || pattern[j] === "^") j += 1;
+      if (pattern[j] === "]") j += 1;
+      const close = pattern.indexOf("]", j);
+      if (close === -1) {
+        re += "\\[";
+        continue;
+      }
+      const body = pattern.slice(i + 1, close);
+      if (/\[[:=.]/.test(body)) return true;
+      re += `[${body.replace(/^[!^]/, "^").replace(/\\/g, "\\\\")}]`;
+      i = close;
+    } else re += ch.replace(/[.+^${}()|\\]/g, "\\$&");
+  }
+  try {
+    return new RegExp(`^${re}$`, "i").test(name);
+  } catch {
+    return true;
+  }
+}
+
 /** True when shell text names `.herta` as a path component — for a body the
  *  argv hands to another shell (`bash -c "…"`, `cmd /c …`), whose redirects
  *  and operands no argv parse reaches. Case-folded everywhere: a body is

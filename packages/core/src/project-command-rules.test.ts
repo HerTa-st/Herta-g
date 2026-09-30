@@ -38,6 +38,8 @@ describe("isRuleEligibleAskCode", () => {
     expect(isRuleEligibleAskCode("command_ask_write")).toBe(false);
     expect(isRuleEligibleAskCode("command_ask_reader_path")).toBe(false);
     expect(isRuleEligibleAskCode("command_ask_recursive_read")).toBe(false);
+    // A reach into .herta the guard cannot bound is asked every time.
+    expect(isRuleEligibleAskCode("command_ask_harness_state")).toBe(false);
     expect(isRuleEligibleAskCode(undefined)).toBe(false);
   });
 });

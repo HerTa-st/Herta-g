@@ -38,6 +38,9 @@ export const REASON_KEY: Record<string, MessageKey> = {
   command_ask_unresolved: "approval.reason.commandUnresolved",
   // macOS / Linux machine-level changes (platform review 2026-09-23).
   command_ask_system: "approval.reason.commandSystem",
+  // A line whose reach into `.herta` the guard cannot bound (review
+  // 2026-09-30): never trust-covered, never a rule.
+  command_ask_harness_state: "approval.reason.commandHarnessState",
   write_new_file_ask: "approval.reason.writeNewFile",
   edit_file_ask: "approval.reason.editFile",
   // The minimal contract's editor (ADR 0040) — its raw reason ("writes

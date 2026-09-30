@@ -3,10 +3,112 @@ import {
   classifyCommand,
   classifyShellBody,
   readerPathCandidates,
+  splitShellSegments,
+  type WriteGuard,
   writtenOperands,
 } from "./classifier.js";
 
+describe("splitShellSegments — `>|` is the clobber redirect, not a pipe (review 2026-09-30)", () => {
+  it("keeps the clobber target in its segment; a pipe and `||` still cut", () => {
+    expect(splitShellSegments("echo x >| out.txt")).toEqual([
+      "echo x >| out.txt",
+    ]);
+    expect(splitShellSegments("echo x >|out.txt; ls")).toEqual([
+      "echo x >|out.txt",
+      "ls",
+    ]);
+    expect(splitShellSegments("a | b || c")).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("harnessReach — a line whose reach into .herta the argv does not show (review 2026-09-30)", () => {
+  const guard: WriteGuard = {
+    path: (op) => (op.split("/").includes(".herta") ? "state" : null),
+    body: () => null,
+    holds: (op) => op === "." || op === ".." || op === "/repo",
+    patch: (file) =>
+      file === "bad.patch"
+        ? [".herta/permissions.json"]
+        : file === "ok.patch"
+          ? ["src/x.ts"]
+          : null,
+  };
+  const code = (argv: string[], g: WriteGuard = guard): string => {
+    const v = classifyCommand(argv, { writeGuard: g });
+    return v.kind === "allow" ? "allow" : `${v.kind}:${v.code}`;
+  };
+
+  it("a find with an action from a directory holding .herta asks in the harness-state class", () => {
+    expect(code(["find", ".", "-name", "x", "-delete"])).toBe(
+      "ask:command_ask_harness_state",
+    );
+    expect(code(["find", "-delete"])).toBe("ask:command_ask_harness_state");
+    expect(code(["find", "..", "-exec", "rm", "{}", "+"])).toBe(
+      "ask:command_ask_harness_state",
+    );
+    expect(code(["find", "src", "-delete"])).toBe("ask:command_ask_write");
+    expect(code(["find", ".", "-name", "x"])).toBe("allow");
+  });
+
+  it("git apply / am: a readable patch is judged by its targets, an unreadable one asks every time", () => {
+    expect(code(["git", "apply", "bad.patch"])).toBe("block:command_blocked");
+    expect(code(["git", "am", "bad.patch"])).toBe("block:command_blocked");
+    expect(code(["git", "apply", "ok.patch"])).toBe("ask:command_ask_vcs");
+    expect(code(["git", "apply", "gone.patch"])).toBe(
+      "ask:command_ask_harness_state",
+    );
+    expect(code(["git", "apply"])).toBe("ask:command_ask_harness_state");
+    expect(code(["git", "apply", "-"])).toBe("ask:command_ask_harness_state");
+    expect(code(["git", "apply", "--check", "bad.patch"])).toBe(
+      "ask:command_ask_vcs",
+    );
+    expect(code(["git", "apply", "--check", "--apply", "bad.patch"])).toBe(
+      "block:command_blocked",
+    );
+    expect(code(["git", "apply", "--directory=.herta", "ok.patch"])).toBe(
+      "block:command_blocked",
+    );
+  });
+
+  it("a guard without the optional methods leaves the old verdicts alone", () => {
+    const bare = { path: guard.path, body: guard.body };
+    expect(code(["find", ".", "-delete"], bare)).toBe("ask:command_ask_write");
+    expect(code(["git", "apply", "bad.patch"], bare)).toBe(
+      "ask:command_ask_harness_state",
+    );
+  });
+});
+
 describe("writtenOperands — what a command WRITES, for the write guard (2026-09-30)", () => {
+  it("names the paths the few writing git shapes create", () => {
+    expect(
+      writtenOperands(["git", "checkout-index", "--prefix=.herta/", "-a"]),
+    ).toEqual([".herta/"]);
+    expect(
+      writtenOperands(["git", "apply", "--directory", ".herta", "p.patch"]),
+    ).toEqual([".herta"]);
+    expect(writtenOperands(["git", "worktree", "add", "wt", "main"])).toEqual([
+      "wt",
+    ]);
+    expect(writtenOperands(["git", "init", "sub"])).toEqual(["sub"]);
+    expect(writtenOperands(["git", "init"])).toEqual([]);
+    expect(
+      writtenOperands(["git", "archive", "-o", "out.zip", "HEAD"]),
+    ).toEqual(["out.zip"]);
+    expect(writtenOperands(["git", "archive", "-oout.zip", "HEAD"])).toEqual([
+      "out.zip",
+    ]);
+    expect(
+      writtenOperands(["git", "bundle", "create", "b.bundle", "main"]),
+    ).toEqual(["b.bundle"]);
+    expect(
+      writtenOperands(["git", "format-patch", "-o", "patches", "-1"]),
+    ).toEqual(["patches"]);
+    expect(writtenOperands(["git", "-C", "sub", "init", "x"])).toEqual(["x"]);
+    expect(writtenOperands(["git", "commit", "-m", "x"])).toEqual([]);
+    expect(writtenOperands(["git", "apply", "p.patch"])).toEqual([]);
+  });
+
   it("names exactly the written operands, per program", () => {
     expect(writtenOperands(["cp", "-r", "a", "b"])).toEqual(["a", "b"]);
     expect(writtenOperands(["cp", "--target-directory=d", "a"])).toEqual([

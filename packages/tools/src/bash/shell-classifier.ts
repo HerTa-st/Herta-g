@@ -4,6 +4,7 @@ import { isCredentialPath } from "../credential-denylist.js";
 import { detectInProgressState, resolveGitDir } from "../git/repo-probe.js";
 import {
   gitDirShapeWriteDenial,
+  globReachesHertaState,
   hertaStateWriteDenial,
   mentionsHertaState,
 } from "../path-safety.js";
@@ -15,6 +16,7 @@ import {
   type Verdict,
 } from "../run-command/classifier.js";
 import { findDisallowedEnvKey } from "../run-command/env-guard.js";
+import { readPatchTargets } from "../run-command/patch-targets.js";
 import type { ShellPaths } from "./shell-paths.js";
 
 /**
@@ -794,7 +796,7 @@ function classifySegment(
   if (seg.length === 0) return { verdict: { kind: "allow" } };
   const tokenized = tokenize(seg);
   let { words } = tokenized;
-  const { assignments, redirects } = tokenized;
+  const { assignments, redirects, globbed } = tokenized;
 
   // Collected BEFORE the head peel, so every exit below — including the
   // control-flow ones — carries the segment's redirect and assignment asks.
@@ -844,7 +846,7 @@ function classifySegment(
       }
       // The harness's own state (2026-09-30): same reasoning, same tier — bash
       // performs the write, so the guard lives here or nowhere.
-      const stateDenial = hertaTargetDenial(r.target, opts);
+      const stateDenial = hertaTargetDenial(r.target, opts, r.glob === true);
       if (stateDenial !== null) {
         return {
           verdict: {
@@ -1240,12 +1242,19 @@ function classifySegment(
   // The rewrite is relative to the WORKSPACE ROOT, not the cwd, so the write
   // guard below maps an operand back to the word as typed before resolving.
   const typed = new Map<string, string>();
+  // The argv words bash will EXPAND before the program sees them: a pattern
+  // is judged by what it could match, not by its spelling.
+  const live = new Set<string>();
   const argv = words.map((w, i) => {
     if (i === 0) return w;
     const rel = relativizeInsideWorkspace(w, opts);
     if (rel !== w) typed.set(rel, w);
+    if (globbed.has(w)) live.add(rel);
     return rel;
   });
+  // A written operand as the guard needs it: the shell's own spelling when
+  // the argv holds a relativized copy.
+  const spelled = (operand: string): string => typed.get(operand) ?? operand;
   // `shell: true` — this argv is about to be EXPANDED by bash, so the
   // inversion's unresolved-token rules apply here and only here. `unresolved`
   // is computed from the RAW segment because quoting decides it and the words
@@ -1261,7 +1270,8 @@ function classifySegment(
     },
     // The harness's own state is not command-writable (2026-09-30).
     writeGuard: {
-      path: (operand) => hertaTargetDenial(typed.get(operand) ?? operand, opts),
+      path: (operand) =>
+        hertaTargetDenial(spelled(operand), opts, live.has(operand)),
       // A body handed to another shell: its text naming `.herta`, or run from
       // a cwd inside it, where every relative path lands there.
       body: (body) =>
@@ -1271,6 +1281,18 @@ function classifySegment(
               opts.workspaceRoot,
               opts.cwd ?? opts.workspaceRoot,
             ),
+      // The root or any directory above it: `find .. -delete` from the root
+      // reaches `.herta` as surely as `find .` does.
+      holds: (operand) => {
+        const native = nativeOf(spelled(operand), opts);
+        return native !== null && isPathInside(native, opts.workspaceRoot);
+      },
+      // A patch may sit outside the workspace (`/tmp/p.patch`): resolved like
+      // any token, read wherever it is; a token no path resolves stays null.
+      patch: (file) => {
+        const native = nativeOf(spelled(file), opts);
+        return native === null ? null : readPatchTargets(native);
+      },
     },
   });
   if (v.kind === "block") return { verdict: v };
@@ -1593,32 +1615,42 @@ export function resolveWorkspacePath(
   token: string,
   opts: ShellClassifyOpts,
 ): { native: string; relative: string } | null {
-  const t = token.replace(/^["']|["']$/g, "");
-  if (t.length === 0 || t.startsWith("~") || /[$`]/.test(t)) return null;
-  const nativeAbs = opts.paths.toNative(t);
-  const native =
-    nativeAbs ??
-    (/^[\\/]/.test(t)
-      ? null
-      : resolveNative(opts.cwd ?? opts.workspaceRoot, t));
+  const native = nativeOf(token, opts);
   if (native === null || !isPathInside(opts.workspaceRoot, native)) return null;
   const rel = relativePath(opts.workspaceRoot, native);
   return { native, relative: rel === "" ? "." : rel };
+}
+
+/** The native path a token names, inside the workspace or not — shell or
+ *  native spelling, relative to the shell cwd; null for a token no path
+ *  resolves (`~`, a variable, a substitution, empty). */
+function nativeOf(token: string, opts: ShellClassifyOpts): string | null {
+  const t = token.replace(/^["']|["']$/g, "");
+  if (t.length === 0 || t.startsWith("~") || /[$`]/.test(t)) return null;
+  return (
+    opts.paths.toNative(t) ??
+    (/^[\\/]/.test(t) ? null : resolveNative(opts.cwd ?? opts.workspaceRoot, t))
+  );
 }
 
 /** Denial when writing the path a shell token names would change the
  *  harness's own state (`hertaStateWriteDenial`), else null. Resolved like a
  *  redirect target — shell or native spelling, relative to the shell cwd.
  *  Unknowable tokens (variables, `~`) and paths outside the workspace stay
- *  null: they already ask as leaving it. */
+ *  null: they already ask as leaving it. A token bash will expand (`glob`) is
+ *  also judged by what its pattern could match (`globReachesHertaState`). */
 function hertaTargetDenial(
   token: string,
   opts: ShellClassifyOpts,
+  glob = false,
 ): string | null {
   const at = resolveWorkspacePath(token, opts);
-  return at === null
-    ? null
-    : hertaStateWriteDenial(opts.workspaceRoot, at.native);
+  if (at === null) return null;
+  const literal = hertaStateWriteDenial(opts.workspaceRoot, at.native);
+  if (literal !== null) return literal;
+  return glob && globReachesHertaState(at.relative)
+    ? "names .herta by a pattern — the harness's own state (its permission rules and trust choice, memory, logs); no command may change it"
+    : null;
 }
 
 /** `/e/repo/src/x` (or `E:\repo\src\x`) → `src/x` when inside the workspace;
@@ -1904,17 +1936,31 @@ function decodeAnsiC(body: string): string {
 export interface Tokenized {
   words: string[];
   assignments: Array<{ key: string; value: string }>;
-  redirects: Array<{ kind: "out" | "in"; target: string }>;
+  /** `glob`: the target carries an unquoted `*`, `?` or `[` — bash expands
+   *  it, so the written path is whatever the pattern matches. */
+  redirects: Array<{ kind: "out" | "in"; target: string; glob?: true }>;
+  /** The words bash will expand the same way. */
+  globbed: Set<string>;
 }
 
 /** Shell-style word split of ONE simple command: quotes and backslash
  *  escapes honoured, leading `K=V` assignments separated, redirections
- *  pulled out with their targets. */
+ *  pulled out with their targets, and the words a live glob makes patterns
+ *  marked (quoted or escaped, `*` is a character; bare, it is a match). */
 export function tokenize(segment: string): Tokenized {
   const raw: string[] = [];
+  const rawGlob: boolean[] = [];
   let cur = "";
   let has = false;
+  let glob = false;
   let quote: "'" | '"' | null = null;
+  const flush = (): void => {
+    raw.push(cur);
+    rawGlob.push(glob);
+    cur = "";
+    has = false;
+    glob = false;
+  };
   const s = segment.trim();
   for (let i = 0; i < s.length; i += 1) {
     const ch = s[i] as string;
@@ -1960,24 +2006,17 @@ export function tokenize(segment: string): Tokenized {
       continue;
     }
     if (/\s/.test(ch)) {
-      if (has) {
-        raw.push(cur);
-        cur = "";
-        has = false;
-      }
+      if (has) flush();
       continue;
     }
     // split redirection operators glued to words: `>file`, `2>>x`, `<in`
     if (ch === ">" || ch === "<" || (ch === "&" && s[i + 1] === ">")) {
       // flush a preceding word unless it is a bare fd number
-      if (has && !/^\d+$/.test(cur)) {
-        raw.push(cur);
-        cur = "";
-        has = false;
-      }
+      if (has && !/^\d+$/.test(cur)) flush();
       let op = has ? cur : ""; // fd prefix
       cur = "";
       has = false;
+      glob = false;
       op += ch;
       if (ch === "&") {
         op += ">";
@@ -1996,22 +2035,31 @@ export function tokenize(segment: string): Tokenized {
         i += 1;
       }
       raw.push(op);
+      rawGlob.push(false);
       continue;
     }
     cur += ch;
     has = true;
+    if (ch === "*" || ch === "?" || ch === "[") glob = true;
   }
-  if (has) raw.push(cur);
+  if (has) flush();
 
   const words: string[] = [];
   const assignments: Tokenized["assignments"] = [];
   const redirects: Tokenized["redirects"] = [];
+  const globbed = new Set<string>();
   let leading = true;
   for (let i = 0; i < raw.length; i += 1) {
     const w = raw[i] as string;
     if (OUT_REDIRECT.test(w)) {
       const target = raw[i + 1];
-      if (target !== undefined) redirects.push({ kind: "out", target });
+      if (target !== undefined) {
+        redirects.push(
+          rawGlob[i + 1] === true
+            ? { kind: "out", target, glob: true }
+            : { kind: "out", target },
+        );
+      }
       i += 1;
       leading = false;
       continue;
@@ -2037,7 +2085,8 @@ export function tokenize(segment: string): Tokenized {
       }
       leading = false;
     }
+    if (rawGlob[i] === true) globbed.add(w);
     words.push(w);
   }
-  return { words, assignments, redirects };
+  return { words, assignments, redirects, globbed };
 }

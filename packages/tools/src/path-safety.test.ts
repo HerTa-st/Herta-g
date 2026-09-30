@@ -3,11 +3,44 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  globReachesHertaState,
   hertaStateWriteDenial,
   mentionsHertaState,
   resolveSafePath,
 } from "./path-safety.js";
 import { mkTmpWorkspace, type TmpWorkspace } from "./testing/tmp-workspace.js";
+
+describe("globReachesHertaState — a pattern bash would expand (review 2026-09-30)", () => {
+  it("matches under bash's default rule: a leading dot must be spelled", () => {
+    for (const p of [
+      ".her?a/permissions.json",
+      ".[h]erta",
+      ".h*",
+      ".*",
+      ".HER?A",
+      "stash/.her*/x",
+      ".[!x]erta",
+      ".[[:alpha:]]erta",
+      ".herta*",
+    ]) {
+      expect(globReachesHertaState(p), p).toBe(true);
+    }
+    for (const p of [
+      "*",
+      "?herta",
+      "[.]herta",
+      "build/*",
+      "*.json",
+      ".herta?",
+      ".hert",
+      ".herta",
+      "src/x.ts",
+      ".her[",
+    ]) {
+      expect(globReachesHertaState(p), p).toBe(false);
+    }
+  });
+});
 
 async function canCreateFileSymlinks(): Promise<boolean> {
   const probe = await mkdtemp(join(tmpdir(), "herta-symlink-probe-"));

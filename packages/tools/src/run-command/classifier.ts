@@ -5,6 +5,7 @@ import {
   SCRIPT_INTERPRETERS,
 } from "@herta/core";
 import { isCredentialPath } from "../credential-denylist.js";
+import { patchTargetPaths } from "./patch-targets.js";
 
 export type Verdict =
   | { kind: "allow" }
@@ -1030,6 +1031,14 @@ export function splitShellSegments(body: string): string[] {
       current += ch;
       continue;
     }
+    // `>|` is the clobber redirect, not a pipe. Cut here, its target became
+    // the second "program" of a pipeline — `echo x >| .herta/permissions.json`
+    // classified as running a workspace program, past every write guard
+    // (review 2026-09-30).
+    if (ch === "|" && prev === ">") {
+      current += ch;
+      continue;
+    }
     if (ch === ";" || ch === "\n" || ch === "|" || ch === "&") {
       out.push(current);
       current = "";
@@ -1709,6 +1718,16 @@ export function classifyShellBody(
   if (body.includes(":(){")) {
     return { hit: true, reason: "fork bomb pattern" };
   }
+  // A patch inside the body's own text — a heredoc fed to `git apply` —
+  // whose target is `.herta`. The tokenizer sees heredoc text as data, so the
+  // one place the raw body is still whole judges it (review 2026-09-30).
+  if (patchTargetPaths(body).some(pathTouchesHerta)) {
+    return {
+      hit: true,
+      reason:
+        "a patch in the command's text writes into .herta — the harness's own state; no command may change it",
+    };
+  }
   // EVERY command in the body, not just the first (audit S4).
   for (const segment of splitShellSegments(body)) {
     const tokens = shellBodyTokens(segment);
@@ -1773,15 +1792,26 @@ export interface ClassifyCommandOpts {
   writeGuard?: WriteGuard;
 }
 
-/** See `ClassifyCommandOpts.writeGuard`. Both return a denial reason, or null
- *  to let the verdict stand. */
+/** See `ClassifyCommandOpts.writeGuard`. `path` and `body` return a denial
+ *  reason, or null to let the verdict stand. */
 export interface WriteGuard {
   /** One operand the command WRITES, as it appears in the argv. */
   path(operand: string): string | null;
   /** A shell body the argv hands to another shell (`bash -c "…"`,
    *  `cmd /c …`): its redirects and operands are text no argv parse reaches. */
   body(body: string): string | null;
+  /** True when the operand names the directory that HOLDS the harness's
+   *  state — the workspace root, however spelled — so a walk started there
+   *  reaches `.herta`. A caller without it gets no reach ask. */
+  holds?(operand: string): boolean;
+  /** The paths a patch file WRITES, read now; null when the file cannot be
+   *  read (absent, too large, stdin, a token the caller cannot resolve). */
+  patch?(file: string): readonly string[] | null;
 }
+
+/** The ask class of a line whose reach into `.herta` the guard cannot
+ *  bound (see `harnessReach`): never trust-covered, never rule-eligible. */
+export const HARNESS_STATE_ASK_CODE = "command_ask_harness_state";
 
 export function classifyCommand(
   argv: readonly string[],
@@ -1807,7 +1837,114 @@ export function classifyCommand(
       return { kind: "block", code: "command_blocked", reason: denial };
     }
   }
+  if (verdict.kind === "ask") return harnessReach(argv, guard) ?? verdict;
   return verdict;
+}
+
+/**
+ * A command whose written paths the argv does not name but which CAN reach
+ * the harness's state (review 2026-09-30): `find` with an action predicate
+ * started from the directory that holds `.herta`, and `git apply` / `git am`
+ * of a patch, whose targets are inside the patch. A patch the guard can read
+ * is judged path by path — a `.herta` target blocks, like any written
+ * operand. One it cannot read, and a find from the root, ASK in a class trust
+ * never covers and no rule derives from: the user sees the line every time.
+ * Null when the line is neither shape, or the guard cannot judge it.
+ */
+function harnessReach(
+  argv: readonly string[],
+  guard: WriteGuard,
+): Verdict | null {
+  const id = interpreterName(argv[0] ?? "");
+  if (id === "find") {
+    if (guard.holds === undefined) return null;
+    const action = argv.find((a) => FIND_ACTION_PREDICATES.has(a));
+    if (action === undefined) return null;
+    const start = findStartPoints(argv.slice(1)).find(
+      (s) => guard.holds?.(s) === true,
+    );
+    if (start === undefined) return null;
+    return {
+      kind: "ask",
+      risk: "workspace_write",
+      code: HARNESS_STATE_ASK_CODE,
+      reason: `find from ${start} with ${action} reaches .herta — the harness's own state — and what it touches there cannot be told from the line`,
+    };
+  }
+  if (id === "git") {
+    const sub = gitSubcommandIndex(argv);
+    const name = sub === null ? undefined : argv[sub];
+    if (sub === null || (name !== "apply" && name !== "am")) return null;
+    const rest = argv.slice(sub + 1);
+    // The read-only forms apply nothing — unless `--apply` turns them back.
+    if (
+      rest.some((a) => APPLY_READ_ONLY_FLAGS.has(a)) &&
+      !rest.includes("--apply")
+    ) {
+      return null;
+    }
+    const unreadable: Verdict = {
+      kind: "ask",
+      risk: "workspace_write",
+      code: HARNESS_STATE_ASK_CODE,
+      reason: `git ${name} of a patch the harness could not read — it may write into .herta, the harness's own state`,
+    };
+    const files = patchOperands(rest);
+    if (files.length === 0 || guard.patch === undefined) return unreadable;
+    for (const file of files) {
+      const targets = guard.patch(file);
+      if (targets === null) return unreadable;
+      for (const target of targets) {
+        const denial = guard.path(target);
+        if (denial !== null) {
+          return { kind: "block", code: "command_blocked", reason: denial };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+const APPLY_READ_ONLY_FLAGS: ReadonlySet<string> = new Set([
+  "--check",
+  "--stat",
+  "--numstat",
+  "--summary",
+]);
+
+/** `find`'s start points: the operands before the first expression word.
+ *  None spelled means the current directory, as find itself takes it. */
+function findStartPoints(args: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const a of args) {
+    if (a.startsWith("-") || a === "(" || a === "!" || a === ")") break;
+    out.push(a);
+  }
+  return out.length === 0 ? ["."] : out;
+}
+
+/** `git apply` / `git am` operands that are patch files. The options that
+ *  take a separate value are stepped over; a bare `-` is stdin, which the
+ *  guard cannot read — as it should not. */
+function patchOperands(args: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i] as string;
+    if (a === "--directory" || a === "--include" || a === "--exclude") {
+      i += 1;
+      continue;
+    }
+    if (a === "--") {
+      out.push(...args.slice(i + 1));
+      break;
+    }
+    if (a === "-" || !a.startsWith("-")) out.push(a);
+  }
+  return out;
+}
+
+function pathTouchesHerta(p: string): boolean {
+  return p.split(/[\\/]/).some((s) => s.toLowerCase() === ".herta");
 }
 
 /** Verbs whose every non-flag operand is a path they create, change, move or
@@ -1922,14 +2059,8 @@ export function writtenOperands(argv: readonly string[]): string[] {
   }
   if (id === "find") {
     if (!args.some((a) => FIND_ACTION_PREDICATES.has(a))) return [];
-    const out: string[] = [];
-    let i = 0;
-    for (; i < args.length; i += 1) {
-      const a = args[i] as string;
-      if (a.startsWith("-") || a === "(" || a === "!" || a === ")") break;
-      out.push(a);
-    }
-    for (; i < args.length; i += 1) {
+    const out = findStartPoints(args);
+    for (let i = 0; i < args.length; i += 1) {
       const a = args[i] as string;
       if (
         a === "-fprint" ||
@@ -1948,7 +2079,73 @@ export function writtenOperands(argv: readonly string[]): string[] {
       .filter((a) => a.startsWith("of="))
       .map((a) => a.slice("of=".length));
   }
+  if (id === "git") return gitWrittenOperands(argv);
   return [];
+}
+
+/**
+ * The few git shapes that write a path the argv NAMES — none is the
+ * repository's own content (that stays `command_ask_vcs`); each is a place
+ * on disk git creates or fills: a checkout-index prefix, a new worktree or
+ * repository, an archive, a bundle, format-patch's output directory, and the
+ * `--directory` an apply prepends to every path in the patch (review
+ * 2026-09-30: `git checkout-index --prefix=.herta/` planted files with a
+ * plain vcs card).
+ */
+function gitWrittenOperands(argv: readonly string[]): string[] {
+  const sub = gitSubcommandIndex(argv);
+  if (sub === null) return [];
+  const rest = argv.slice(sub + 1);
+  switch (argv[sub]) {
+    case "apply":
+      return optionValues(rest, ["--directory"]);
+    case "checkout-index":
+      return optionValues(rest, ["--prefix"]);
+    case "worktree":
+      return rest[0] === "add" ? firstPathOperand(rest.slice(1)) : [];
+    case "init":
+      return firstPathOperand(rest);
+    case "archive":
+      return optionValues(rest, ["-o", "--output"]);
+    case "bundle":
+      return rest[0] === "create" ? firstPathOperand(rest.slice(1)) : [];
+    case "format-patch":
+      return optionValues(rest, ["-o", "--output-directory"]);
+    default:
+      return [];
+  }
+}
+
+/** The values of `--name=V`, `--name V`, `-oV` and `-o V`. */
+function optionValues(
+  args: readonly string[],
+  names: readonly string[],
+): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i] as string;
+    for (const n of names) {
+      if (a === n) {
+        const v = args[i + 1];
+        if (v !== undefined) out.push(v);
+        i += 1;
+        break;
+      }
+      if (n.startsWith("--") ? a.startsWith(`${n}=`) : a.startsWith(n)) {
+        const v = a.slice(n.length + (n.startsWith("--") ? 1 : 0));
+        if (v.length > 0) out.push(v);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+function firstPathOperand(args: readonly string[]): string[] {
+  const first = args.find(
+    (a) => a !== "--" && !(a.startsWith("-") && a.length > 1),
+  );
+  return first === undefined ? [] : [first];
 }
 
 function classifyCommandTiers(

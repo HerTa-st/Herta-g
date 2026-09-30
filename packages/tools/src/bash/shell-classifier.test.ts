@@ -116,6 +116,83 @@ describe("classifyShellCommand — the harness's own state (.herta) is not comma
     expect(ask("rm notes.txt").code).toBe("command_ask_delete");
   });
 
+  // Review 2026-09-30: the spellings that slipped past the guard — a clobber
+  // redirect cut as a pipe, a pattern bash expands to the name, the git
+  // shapes that write a named path, and a patch whose targets sit inside it.
+  it.each([
+    `echo ${planted} >| .herta/permissions.json`,
+    "echo x >|.herta/permissions.json",
+    "echo x > .her?a/permissions.json",
+    "cp evil.json .[h]erta/permissions.json",
+    "cp evil.json .h*/permissions.json",
+    "mv .her*/permissions.json gone.json",
+    "rm -rf .*",
+    `echo x > ${wsShell}/.her?a/permissions.json`,
+    "cp evil.json stash/.her?a/permissions.json",
+    "git apply --directory=.herta p.patch",
+    "git checkout-index --prefix=.herta/ -a",
+    "git worktree add .herta/wt",
+    "git apply <<'EOF'\n--- /dev/null\n+++ b/.herta/permissions.json\n@@ -0,0 +1 @@\n+{}\nEOF",
+  ])("blocks %s", (cmd) => {
+    expect(kind(cmd)).toBe("block");
+  });
+
+  it("a pattern that cannot reach .herta under bash's default rule is not blocked", () => {
+    // No dotglob: `*` and `?` do not match a leading dot. A quoted or escaped
+    // glob is a character, and a literal `.her?a` is not `.herta`.
+    expect(ask("rm -rf build/*").kind).toBe("ask");
+    expect(ask("cp -r * dst/").code).toBe("command_ask_fs");
+    expect(ask("echo x > ?herta/p.json").code).toBe("command_ask_write");
+    expect(ask("echo x > '.her?a/p.json'").code).toBe("command_ask_write");
+    expect(ask("echo x > .her\\?a/p.json").code).toBe("command_ask_write");
+    expect(ask("echo x >| out.txt").code).toBe("command_ask_write");
+  });
+
+  it("a find with an action from a directory holding .herta asks in a class trust never covers", () => {
+    const state = "command_ask_harness_state";
+    expect(ask("find . -name permissions.json -delete").code).toBe(state);
+    expect(ask("find -name x -delete").code).toBe(state);
+    expect(ask(`find ${wsShell} -name x -exec rm {} +`).code).toBe(state);
+    expect(ask("find .. -name x -delete").code).toBe(state);
+    expect(ask("find src -name x -delete").code).toBe("command_ask_write");
+    expect(kind("find . -name x")).toBe("allow");
+  });
+
+  it("git apply reads the patch: a .herta target blocks, an ordinary one stays a vcs ask, an unreadable one asks every time", async () => {
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = await mkdtemp(join(tmpdir(), "herta-patch-"));
+    try {
+      await writeFile(
+        join(root, "bad.patch"),
+        "diff --git a/.herta/permissions.json b/.herta/permissions.json\n--- /dev/null\n+++ b/.herta/permissions.json\n@@ -0,0 +1 @@\n+{}\n",
+      );
+      await writeFile(
+        join(root, "ok.patch"),
+        "--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1 +1 @@\n-a\n+b\n",
+      );
+      const local = { workspaceRoot: root, paths };
+      const code = (cmd: string): string => {
+        const v = classifyShellCommand(cmd, local);
+        return v.kind === "allow" ? "allow" : `${v.kind}:${v.code}`;
+      };
+      expect(code("git apply bad.patch")).toBe("block:command_blocked");
+      expect(code("git am bad.patch")).toBe("block:command_blocked");
+      expect(code("git apply ok.patch")).toBe("ask:command_ask_vcs");
+      expect(code("git apply gone.patch")).toBe(
+        "ask:command_ask_harness_state",
+      );
+      expect(code("cat ok.patch | git apply")).toBe(
+        "ask:command_ask_harness_state",
+      );
+      // The read-only forms apply nothing, so the patch is not read.
+      expect(code("git apply --check bad.patch")).toBe("ask:command_ask_vcs");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("judges the path inside the workspace: a managed workspace under ~/.herta/workspaces writes normally", () => {
     const managed =
       process.platform === "win32"
@@ -605,6 +682,7 @@ describe("tokenize", () => {
         { kind: "out", target: "err.log" },
         { kind: "out", target: "out.log" },
       ],
+      globbed: new Set(),
     });
     expect(tokenize("cat >file <<'EOF'").redirects).toEqual([
       { kind: "out", target: "file" },
@@ -613,6 +691,16 @@ describe("tokenize", () => {
       { kind: "in", target: "in.txt" },
     ]);
     expect(tokenize(String.raw`echo a\ b`).words).toEqual(["echo", "a b"]);
+  });
+
+  it("marks the words and redirect targets a live glob makes patterns; quoted or escaped, the character is text", () => {
+    const t = tokenize(
+      String.raw`cp *.json '.her?a' .her\?a "[x]" .h* > .her?a/p`,
+    );
+    expect([...t.globbed]).toEqual(["*.json", ".h*"]);
+    expect(t.redirects).toEqual([
+      { kind: "out", target: ".her?a/p", glob: true },
+    ]);
   });
 });
 
