@@ -11,11 +11,19 @@ import { morphFlightActive } from "../Workspace/morph-flight.js";
 import {
   AURA_ENERGY_FLOOR,
   clamp,
+  createAuraAnimator,
   displayAuraState,
-  getAuraUniformTarget,
-  lerp,
   resolveAura,
+  type TideOptions,
 } from "./aura-engine.js";
+import {
+  type AuraLocations,
+  type AuraPalette,
+  auraLocations,
+  drawAuraFrame,
+  LIGHT_AURA_PALETTE,
+  readAuraPalette,
+} from "./aura-gl.js";
 import { AURA_SHADER_SOURCE } from "./auraShader.js";
 import { useSpeechEnvelope } from "./useSpeechEnvelope.js";
 import { initialEnvelope, stepEnvelope } from "./wave-engine.js";
@@ -25,8 +33,16 @@ import {
   QUAD_VERTEX_SOURCE,
 } from "./webgl.js";
 
-const AURA_COLOR = "#3c5a62"; // cool graphite glass tint (tunable)
-const AURA_COLOR_SHIFT = 0.1; // fixed subtle layered-hue variation
+/* The tide's polish (2026-09-30): which of the optional upgrades the app
+   draws (aura-engine TideOptions; TIDE_CLASSIC is the tide as it was). All
+   of them — the owner's pick from a live gallery of each alone. */
+const TIDE: TideOptions = {
+  smoothBreath: true,
+  settle: true,
+  window: 1,
+  crest: 1,
+  prism: 0.35,
+};
 const MAX_FRAME_DT_S = 0.05;
 /* Idle frame governor (perf 2026-07-13): at rest the wave draws a 2.8s
    breathing cycle — full display rate (60–165fps) buys nothing visually
@@ -38,6 +54,7 @@ const MAX_FRAME_DT_S = 0.05;
 const CALM_MIN_FRAME_MS = 30;
 const CALM_HOLD_MS = 1500; // full rate for this long after any state change
 const CALM_ENERGY = 0.04; // env.fast below this counts as at-rest
+const CALM_SETTLE = 0.03; // the calm after speech still moving above this
 /* Parking (perf 2026-09-03): the governor's floor is ~33fps FOREVER while a
    session is open — `document.hidden` never flips for a window that is
    merely behind another one, so an app left open all day kept the most
@@ -53,27 +70,19 @@ const PARK_UNFOCUSED_MS = 5000;
    slowly (the wave's wiggles), so the backing width is capped and the GPU
    upscales; vertical resolution stays at full dpr — the hairline's
    CRISPNESS lives in the y axis. ~3.5× fewer fragments at dpr-2
-   fullscreen, no visible change in the band. */
+   fullscreen, no visible change in the band. (Since 2026-09-30 the rows
+   above the band's reach return at once — see auraShader.ts.) */
 const WAVE_MAX_BACKING_W = 1600;
-
-function hexToRgb(hex: string): [number, number, number] {
-  const m = hex.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (!m) return [0.24, 0.35, 0.38];
-  return [m[1], m[2], m[3]].map((c) => parseInt(c ?? "0", 16) / 255) as [
-    number,
-    number,
-    number,
-  ];
-}
 
 /**
  * The voice card's aura: a WebGL fragment-shader visualizer ported from
  * reference_UX_design/speech-visual-UX, rendering the tide-wave geometry from
  * reference_UX_design/glass-wave-study (2026-07-05). State (disconnected/
  * listening/speaking) comes from the active session; energy from Herta's
- * revealed-text rhythm (useSpeechEnvelope). Reduced motion pins the calm
- * listening breath. Falls back to a static CSS aura when WebGL is unavailable.
- * Renderer-local only.
+ * revealed-text rhythm (useSpeechEnvelope); the easing and clocks are the
+ * pure animator in aura-engine.ts, the upload aura-gl.ts. Reduced motion pins
+ * the calm listening breath. Falls back to a static CSS aura when WebGL is
+ * unavailable. Renderer-local only.
  */
 export function AuraVisual(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -157,29 +166,9 @@ export function AuraVisual(): JSX.Element {
       // a context loss (Windows TDR, driver update, sleep-wake) invalidates
       // every program/buffer/location, so setup must be re-runnable on
       // webglcontextrestored — not once-per-mount.
-      const makeLocs = (p: WebGLProgram) => ({
-        position: gl.getAttribLocation(p, "aPosition"),
-        resolution: gl.getUniformLocation(p, "iResolution"),
-        time: gl.getUniformLocation(p, "iTime"),
-        speed: gl.getUniformLocation(p, "uSpeed"),
-        blur: gl.getUniformLocation(p, "uBlur"),
-        scale: gl.getUniformLocation(p, "uScale"),
-        shape: gl.getUniformLocation(p, "uShape"),
-        frequency: gl.getUniformLocation(p, "uFrequency"),
-        amplitude: gl.getUniformLocation(p, "uAmplitude"),
-        bloom: gl.getUniformLocation(p, "uBloom"),
-        mix: gl.getUniformLocation(p, "uMix"),
-        spacing: gl.getUniformLocation(p, "uSpacing"),
-        colorShift: gl.getUniformLocation(p, "uColorShift"),
-        variance: gl.getUniformLocation(p, "uVariance"),
-        smoothing: gl.getUniformLocation(p, "uSmoothing"),
-        mode: gl.getUniformLocation(p, "uMode"),
-        color: gl.getUniformLocation(p, "uColor"),
-        base: gl.getUniformLocation(p, "uBase"),
-      });
       let program: WebGLProgram | null = null;
       let buf: WebGLBuffer | null = null;
-      let loc: ReturnType<typeof makeLocs> | null = null;
+      let loc: AuraLocations | null = null;
       const buildGl = (): boolean => {
         try {
           program = createProgram(gl, QUAD_VERTEX_SOURCE, AURA_SHADER_SOURCE);
@@ -195,7 +184,7 @@ export function AuraVisual(): JSX.Element {
           new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
           gl.STATIC_DRAW,
         );
-        loc = makeLocs(program);
+        loc = auraLocations(gl, program);
         // biome-ignore lint/correctness/useHookAtTopLevel: gl.useProgram is a WebGL API method, not a React hook
         gl.useProgram(program);
         gl.enableVertexAttribArray(loc.position);
@@ -207,19 +196,13 @@ export function AuraVisual(): JSX.Element {
 
       const env = initialEnvelope();
       // Theme-aware wave (night-mode slice 2 + visibility fix 2026-07-13):
-      // the tint AND the glass-sheet base value live in CSS (--aura-color /
-      // --aura-base; dark overrides both — light sheets on the dark glass),
-      // re-read when the theme controller re-stamps <html data-theme>.
-      // Fallbacks mirror the original light constants (jsdom, missing vars).
-      let rgb = hexToRgb(AURA_COLOR);
-      let base = 0.16;
+      // the tint, the glass-sheet base value and the catch-light's prism
+      // live in CSS (--aura-*; dark overrides them — light sheets on the dark
+      // glass), re-read when the theme controller re-stamps <html
+      // data-theme>. Missing tokens fall back to the light values.
+      let palette: AuraPalette = LIGHT_AURA_PALETTE;
       const readThemeVars = (): void => {
-        const cs = getComputedStyle(canvas);
-        rgb = hexToRgb(
-          cs.getPropertyValue("--aura-color").trim() || AURA_COLOR,
-        );
-        const parsed = Number.parseFloat(cs.getPropertyValue("--aura-base"));
-        base = Number.isFinite(parsed) ? parsed : 0.16;
+        palette = readAuraPalette(canvas);
       };
       readThemeVars();
       const mo =
@@ -257,15 +240,7 @@ export function AuraVisual(): JSX.Element {
         live.current.reduced,
         AURA_ENERGY_FLOOR,
       );
-      const anim: {
-        speed: number;
-        scale: number;
-        amplitude: number;
-        frequency: number;
-        brightness: number;
-      } = { ...getAuraUniformTarget(seed.state, seed.energy, 0) };
-      let shaderTime = 0;
-      let phaseTime = 0;
+      const animator = createAuraAnimator(seed.state, seed.energy, TIDE);
       let last = performance.now();
       let raf: number | null = null;
       let idleTimer: number | null = null;
@@ -333,21 +308,7 @@ export function AuraVisual(): JSX.Element {
           stateChangedTs = now;
         }
 
-        shaderTime += dt;
-        const target = getAuraUniformTarget(
-          resolved.state,
-          resolved.energy,
-          shaderTime,
-        );
-        const ease = 1 - Math.exp(-dt / 0.46);
-        anim.speed = lerp(anim.speed, target.speed, ease);
-        anim.scale = lerp(anim.scale, target.scale, ease);
-        const ampEase =
-          1 - Math.exp(-dt / (target.amplitude > anim.amplitude ? 0.05 : 0.18));
-        anim.amplitude = lerp(anim.amplitude, target.amplitude, ampEase);
-        anim.frequency = lerp(anim.frequency, target.frequency, ease);
-        anim.brightness = lerp(anim.brightness, target.brightness, ease);
-        phaseTime += dt * (0.3 + anim.speed * 0.03);
+        const frame = animator.step(dt, resolved.state, resolved.energy);
 
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         // Backing width capped (see WAVE_MAX_BACKING_W); height keeps full dpr.
@@ -362,34 +323,15 @@ export function AuraVisual(): JSX.Element {
           gl.viewport(0, 0, w, h);
         }
 
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.uniform2f(l.resolution, w, h);
-        gl.uniform1f(l.time, phaseTime);
-        gl.uniform1f(l.speed, anim.speed);
-        gl.uniform1f(l.blur, 0.24);
-        gl.uniform1f(l.scale, anim.scale);
-        // 3.0 = tide wave (glass-wave direction, 2026-07-05); 1.0 circle and
-        // 2.0 capsule remain in the shader for quick A/B.
-        gl.uniform1f(l.shape, 3.0);
-        gl.uniform1f(l.frequency, anim.frequency);
-        gl.uniform1f(l.amplitude, anim.amplitude);
-        gl.uniform1f(l.bloom, 0.0);
-        gl.uniform1f(l.mix, anim.brightness);
-        gl.uniform1f(l.spacing, 0.5);
-        gl.uniform1f(l.colorShift, AURA_COLOR_SHIFT);
-        gl.uniform1f(l.variance, 0.1);
-        gl.uniform1f(l.smoothing, 1.0);
-        gl.uniform1f(l.mode, 1.0);
-        gl.uniform3fv(l.color, rgb);
-        gl.uniform1f(l.base, base);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        drawAuraFrame(gl, l, frame, { width: w, height: h }, palette);
 
         // Judge NEXT frame's throttle from this one: at rest (listening, floor
-        // energy, transitions settled) the governor spaces frames out.
+        // energy, transitions settled, the calm after speech done) the
+        // governor spaces frames out.
         calm =
           resolved.state === "listening" &&
           env.fast < CALM_ENERGY &&
+          frame.settle < CALM_SETTLE &&
           now - stateChangedTs > CALM_HOLD_MS;
         if (!calm) calmSince = null;
         else if (calmSince === null) calmSince = now;

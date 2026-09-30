@@ -268,10 +268,17 @@
      backdrop; dark draws light sheets that lift a dark one. */
   --aura-color:#9fc4ce;
   --aura-base:0.84;
+  /* The tide's prism (2026-09-30): its sheets tinted the backdrop's jade →
+     blue, as light as the dark theme's sheets. */
+  --aura-prism-a:#8fead0;
+  --aura-prism-b:#a3bfff;
 }
 :root{
-  --aura-color:#3c5a62; /* light default — mirrors AuraVisual's constant */
+  /* Light defaults — mirrored by LIGHT_AURA_PALETTE in aura-gl.ts. */
+  --aura-color:#3c5a62;
   --aura-base:0.16;     /* mirrors the shader's original hardcoded sheet gray */
+  --aura-prism-a:#13806b; /* deep enough to stay ink on the light glass */
+  --aura-prism-b:#2c55c4;
 }
 /* Dark-mode raster/canvas companions (night mode 2026-07-13): surfaces the
    token flip can't reach. The galaxy-row transfer icons swap for the
