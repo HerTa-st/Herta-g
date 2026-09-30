@@ -151,9 +151,9 @@ function renderStructuredDigest(
       // bridge already keeps these sparse.
       return `background ${d.id}: ${d.state}`;
     case "todo":
-      // The plan layout AND the "todo k/n" progress rows are working state,
-      // not operations — same skip rationale as the Planning op rows they
-      // replaced (spec §4.1).
+      // Legacy rows (nothing writes them since ADR 0073): the plan layout
+      // AND the "todo k/n" progress rows were working state, not operations
+      // — same skip rationale as the Planning op rows before them (spec §4.1).
       return null;
     case "excerpt":
       // The CITATION survives compaction, the excerpt does not (ADR 0027):

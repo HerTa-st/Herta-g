@@ -230,7 +230,6 @@ export {
   workspaceRelativeRepoPath,
 } from "./text/repo-path.js";
 export { stripDisplayUnsafe } from "./text-sanitize.js";
-export { renderTodoState, TodoStore } from "./todo-store.js";
 export type { ToolRegistry } from "./tool-registry.js";
 export { InMemoryToolRegistry } from "./tool-registry.js";
 export { TranscriptStore } from "./transcript-store.js";
@@ -253,10 +252,8 @@ export {
   type SystemBlockLabel,
   type TerminalRecord,
   type TerminalRecordBlock,
-  type TodoDigestItem,
   type UserBlock,
 } from "./types/terminal-record.js";
-export type * from "./types/todo.js";
 export type * from "./types/tool.js";
 export type * from "./types/transcript.js";
 export {

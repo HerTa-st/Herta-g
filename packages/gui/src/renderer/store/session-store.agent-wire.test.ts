@@ -83,7 +83,14 @@ const TURN: AgentEvent[] = [
       error: { code: "permission_denied", message: "no", retryable: false },
     },
   },
-  { type: "plan.updated", layer: "backend", todos: [] },
+  {
+    type: "tool.call.delta",
+    layer: "backend",
+    id: "c",
+    tool: "str_replace_editor",
+    argsDelta: BIG,
+  },
+  { type: "tool.call.output", layer: "backend", id: "c", chunk: BIG },
   { type: "user.steer", layer: "actor", id: "steer:1", text: "also b.ts" },
   { type: "verification.started", layer: "backend", command: "pnpm test" },
   { type: "verification.finished", layer: "backend", result: { passed: true } },
@@ -98,7 +105,6 @@ const TURN: AgentEvent[] = [
       tests: [],
       permissions: [],
       residualRisks: [BIG],
-      nextActions: [],
     },
   },
   {

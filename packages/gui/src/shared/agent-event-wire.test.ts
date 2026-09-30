@@ -52,8 +52,16 @@ describe("slimAgentEventForRenderer", () => {
         layer: "backend",
         result: { passed: true },
       },
-      { type: "plan.updated", layer: "backend", todos: [] },
       { type: "user.steer", layer: "actor", id: "steer:1", text: "also b.txt" },
+      // The live views ride their own folded, throttled channel (ADR 0073).
+      {
+        type: "tool.call.delta",
+        layer: "backend",
+        id: "c",
+        tool: "str_replace_editor",
+        argsDelta: BIG,
+      },
+      { type: "tool.call.output", layer: "backend", id: "c", chunk: BIG },
     ];
     for (const ev of dropped) {
       expect(slimAgentEventForRenderer(wrap(ev)), ev.type).toBeNull();
@@ -143,7 +151,6 @@ describe("slimAgentEventForRenderer", () => {
           tests: [],
           permissions: [],
           residualRisks: [BIG],
-          nextActions: [BIG],
         },
       }),
     );
@@ -160,7 +167,6 @@ describe("slimAgentEventForRenderer", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         },
       },
     });

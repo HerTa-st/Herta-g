@@ -24,14 +24,6 @@
 Reading fibonacci.ts
 ```
 
-→ 差分协处理器
-
-```text
-todo list (2):
-[ ] 重写 fibonacci.ts 为迭代版（保留签名，加 n<0 验证）
-[ ] 跑通 tests/fibonacci.test.ts
-```
-
 （我 想）
 要改什么、不能动什么、怎样算完，都写了。
 

@@ -4,6 +4,10 @@ import type { ToolCallRequest } from "./tool.js";
 export type ProviderEvent =
   | { type: "text-delta"; text: string }
   | { type: "reasoning-delta"; text: string }
+  /** A fragment of a tool call's arguments as it streams (ADR 0073). Sent
+   *  once the call's id and name are known; the finished call still arrives
+   *  as `tool-call-request`. */
+  | { type: "tool-call-delta"; id: string; tool: string; argsDelta: string }
   | { type: "tool-call-request"; call: ToolCallRequest }
   | { type: "finish"; reason: "stop" | "tool_calls" | "length" | "error" };
 

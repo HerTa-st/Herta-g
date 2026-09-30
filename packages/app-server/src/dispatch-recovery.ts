@@ -177,7 +177,6 @@ export async function sealOpenDispatch(opts: {
       ...buildCrashMarker({
         steps: plan.calls.map((c) => ({ step: c.step, outcome: c.outcome })),
         changedFiles: plan.changedFiles,
-        openTodos: plan.openTodos,
       }),
       at: stamp,
     };

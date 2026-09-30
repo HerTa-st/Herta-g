@@ -122,7 +122,6 @@ function mkDriver(
       tests: [],
       permissions: [],
       residualRisks: [],
-      nextActions: [],
     }),
   } as unknown as CodingAgentRuntime;
   return new V2ActorDriver({
@@ -196,7 +195,6 @@ describe("V2ActorDriver", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -271,7 +269,6 @@ describe("V2ActorDriver", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const mkDriverWithCb = (
@@ -376,7 +373,6 @@ describe("V2ActorDriver", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -436,7 +432,6 @@ describe("V2ActorDriver", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -510,7 +505,6 @@ describe("V2ActorDriver", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -580,7 +574,6 @@ describe("V2ActorDriver", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -634,7 +627,6 @@ describe("V2ActorDriver", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -811,7 +803,6 @@ describe("V2ActorDriver", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         }),
       } as unknown as CodingAgentRuntime;
       const driver = new V2ActorDriver({
@@ -858,7 +849,6 @@ describe("V2ActorDriver", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         }),
       } as unknown as CodingAgentRuntime;
       const driver = new V2ActorDriver({
@@ -925,7 +915,6 @@ describe("V2ActorDriver", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         }),
       } as unknown as CodingAgentRuntime;
       const driver = new V2ActorDriver({
@@ -1003,7 +992,6 @@ describe("V2ActorDriver", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         }),
       } as unknown as CodingAgentRuntime;
       const driver = new V2ActorDriver({
@@ -1193,7 +1181,6 @@ describe("V2ActorDriver", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         }),
       } as unknown as CodingAgentRuntime;
       const driver = new V2ActorDriver({
@@ -1286,7 +1273,6 @@ describe("V2ActorDriver", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         }),
       } as unknown as CodingAgentRuntime;
       const driver = new V2ActorDriver({
@@ -1354,7 +1340,6 @@ describe("V2ActorDriver — mood routing (Slice 13)", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     return new V2ActorDriver({
@@ -1790,7 +1775,6 @@ describe("V2ActorDriver — appendSystemNote (out-of-turn)", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -1873,7 +1857,6 @@ describe("V2ActorDriver — state-out dump label", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
 
@@ -1931,7 +1914,6 @@ describe("V2ActorDriver — state-out dump label", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
 
@@ -1982,7 +1964,6 @@ describe("V2ActorDriver — forceCompactNextTurn (one-shot)", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     return new V2ActorDriver({
@@ -2073,7 +2054,6 @@ describe("V2ActorDriver — recap dependency", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     return new V2ActorDriver({
@@ -2154,7 +2134,6 @@ describe("V2ActorDriver — recap dependency", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -2201,7 +2180,6 @@ describe("V2ActorDriver — recap dependency", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     const driver = new V2ActorDriver({
@@ -2296,7 +2274,6 @@ describe("V2ActorDriver — interaction language (slice 4)", () => {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }),
     } as unknown as CodingAgentRuntime;
     return new V2ActorDriver({

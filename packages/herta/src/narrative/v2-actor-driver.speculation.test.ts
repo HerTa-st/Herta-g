@@ -149,7 +149,6 @@ function harness(opts: {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       };
     },
   } as unknown as CodingAgentRuntime;

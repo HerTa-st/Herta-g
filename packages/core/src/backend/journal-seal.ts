@@ -1,6 +1,5 @@
 import type { Finding } from "../findings-ledger.js";
 import type { CutoffOutcome } from "../types/terminal-record.js";
-import type { TodoItem } from "../types/todo.js";
 import type { ToolCallRequest, ToolResult } from "../types/tool.js";
 import type { Message } from "../types/transcript.js";
 import type {
@@ -59,8 +58,6 @@ export interface SealPlan extends OpenDispatch {
   /** Workspace-relative files the segment changed: its finished writes and
    *  the open writes found applied. */
   readonly changedFiles: readonly string[];
-  /** The last finished todo list's unfinished items. */
-  readonly openTodos: readonly string[];
   /** Processes the run left running (no `exit`), whichever call started
    *  them. */
   readonly processes: readonly SealedProcess[];
@@ -72,10 +69,7 @@ const WRITING_TOOLS: ReadonlySet<string> = new Set([
   "str_replace_editor",
 ]);
 const COMMAND_TOOLS: ReadonlySet<string> = new Set(["run_command", "bash"]);
-const STATE_TOOLS: ReadonlySet<string> = new Set([
-  "todo_write",
-  "report_finding",
-]);
+const STATE_TOOLS: ReadonlySet<string> = new Set(["report_finding"]);
 const OUTCOMES: ReadonlySet<string> = new Set<CutoffOutcome>([
   "not_started",
   "read_interrupted",
@@ -123,12 +117,10 @@ export async function planSeal(
   const lang = start.frame.lang;
   const root = start.workspaceRoot;
 
-  // The whole journal: processes outlive a segment, and so does the list.
+  // The whole journal: processes outlive a segment.
   const spawns: SealedProcess[] = [];
   const exited = new Set<number>();
   const fates = new Map<number, JournalProcessFate>();
-  const todoCalls = new Map<string, unknown>();
-  let lastTodos: unknown;
   for (const e of entries) {
     if (e.kind === "spawn") {
       spawns.push({
@@ -142,17 +134,6 @@ export async function planSeal(
       exited.add(e.pid);
     } else if (e.kind === "reap") {
       fates.set(e.pid, e.fate);
-    } else if (e.kind === "message" && e.message.role === "assistant") {
-      for (const c of e.message.toolCalls) {
-        if (c.tool === "todo_write") todoCalls.set(c.id, c.input);
-      }
-    } else if (
-      e.kind === "message" &&
-      e.message.role === "tool" &&
-      e.message.result.ok &&
-      todoCalls.has(e.message.toolCallId)
-    ) {
-      lastTodos = todoCalls.get(e.message.toolCallId);
     }
   }
   const leftRunning = spawns
@@ -243,7 +224,6 @@ export async function planSeal(
     ...open,
     calls: sealed,
     changedFiles: [...new Set(changed)],
-    openTodos: unfinishedTodos(lastTodos),
     processes: leftRunning,
   };
 }
@@ -298,18 +278,6 @@ function stepOf(call: ToolCallRequest, path: string | undefined): string {
 function oneLine(text: string): string {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
-}
-
-function unfinishedTodos(input: unknown): string[] {
-  const todos = (input as { todos?: unknown } | null | undefined)?.todos;
-  if (!Array.isArray(todos)) return [];
-  return todos
-    .filter(
-      (t): t is { content: string; status?: unknown } =>
-        typeof (t as { content?: unknown })?.content === "string",
-    )
-    .filter((t) => t.status !== "completed")
-    .map((t) => t.content);
 }
 
 /**
@@ -442,8 +410,6 @@ export interface ResumePlan extends ResumableRun {
     readonly outcome: CutoffOutcome;
     readonly result: ToolResult;
   }>;
-  /** The last todo list that took effect. */
-  readonly todos: readonly TodoItem[];
   /** The conclusions already recorded. */
   readonly findings: readonly Finding[];
   /** Workspace-relative files already changed: finished writes, and open
@@ -453,12 +419,6 @@ export interface ResumePlan extends ResumableRun {
     readonly kind: "created" | "modified";
   }>;
 }
-
-const TODO_STATUSES: ReadonlySet<string> = new Set([
-  "pending",
-  "in_progress",
-  "completed",
-]);
 
 /**
  * Rebuild a run for continuing it. Null unless `resumableRun` holds. A call
@@ -601,23 +561,13 @@ export async function planResume(
   });
 
   // State, from the calls that took effect.
-  let todos: TodoItem[] = [];
   const findings: Finding[] = [];
   const changed = new Map<string, "created" | "modified">();
   for (const e of entries) {
     if (e.kind !== "message" || e.message.role !== "tool") continue;
     if (!e.message.result.ok) continue;
     const call = callsById.get(e.message.toolCallId);
-    if (call?.tool === "todo_write") {
-      const list = (call.input as { todos?: unknown } | null)?.todos;
-      if (Array.isArray(list)) {
-        todos = list.filter(
-          (t): t is TodoItem =>
-            typeof (t as TodoItem)?.content === "string" &&
-            TODO_STATUSES.has((t as TodoItem)?.status),
-        );
-      }
-    } else if (call?.tool === "report_finding") {
+    if (call?.tool === "report_finding") {
       const data = e.message.result.data as
         | { claim?: unknown; cites?: unknown }
         | undefined;
@@ -647,7 +597,6 @@ export async function planResume(
     ...run,
     messages,
     newClosers,
-    todos,
     findings,
     changedFiles: [...changed].map(([path, kind]) => ({ path, kind })),
   };

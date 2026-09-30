@@ -19,7 +19,6 @@ import {
   shareRunIdentity,
 } from "./group-record.js";
 import { HertaBubble } from "./HertaBubble.js";
-import { planContext } from "./plan-context.js";
 import { imageViewsFromBlocks, UserBubble } from "./UserBubble.js";
 import type { RemoveAttachmentFactory } from "./useRemoveAttachment.js";
 
@@ -119,13 +118,6 @@ export function useConversationRows(opts: {
     () => shareRunIdentity(liftUserImages(groupRecord(record))),
     [record],
   );
-  // The CURRENT dispatch's 任务清单, scanned across the WHOLE record — an
-  // in-turn beat splits one backend run into several activity groups, and
-  // each ActivityBlock sees only its own blocks, so the continuation group
-  // has no todo projection of its own to read. Computed once here (O(n)
-  // backward from the end, memoized on the record like `items`) and handed
-  // ONLY to the group rendered as active, below.
-  const plan = useMemo(() => planContext(record), [record]);
   // The rewind control shows only on the LATEST user turn, and only when idle
   // (no in-flight turn to race the truncation). Find the last `user` block
   // that starts a turn — a steer is words inside 板砖's run, not a turn, and
@@ -147,7 +139,7 @@ export function useConversationRows(opts: {
   // Split out from the activity rows (2026-07-30) so that "their real inputs"
   // is actually true. Sharing one memo with the activity groups meant sharing
   // their dependencies — status, turnStartedAt, backendStartedAt,
-  // backendInFlight, backendActive, plan, canRewind — every one of which flips
+  // backendInFlight, backendActive, canRewind — every one of which flips
   // at the moment of a send, so pressing send re-rendered every bubble in the
   // session, and again when the turn ended. None of them can change what a
   // bubble looks like. Now they cannot reach one: this memo survives a send,
@@ -241,11 +233,6 @@ export function useConversationRows(opts: {
               }
               lang={lang}
               inFlightCount={isActive ? backendInFlight : 1}
-              // Same discipline as inFlightCount: a historical group must
-              // never receive live state. `plan` describes the dispatch in
-              // flight, so a past group showing it would claim 板砖 is
-              // working through a plan it finished turns ago.
-              plan={isActive ? plan : null}
               onRemoveAttachment={removeAttachmentFactory}
             />
           </ErrorBoundary>
@@ -260,7 +247,6 @@ export function useConversationRows(opts: {
       turnStartedAt,
       backendStartedAt,
       backendInFlight,
-      plan,
       removeAttachmentFactory,
       // Read by the activity group's `isActive` (L1) — without it the rows
       // memo would keep rendering the last group as live after the backend

@@ -8,10 +8,8 @@ import {
   type SystemBlockLabel,
   type TerminalRecord,
   type TerminalRecordBlock,
-  type TodoDigestItem,
   type UserBlock,
 } from "./terminal-record.js";
-import type { TodoStatus } from "./todo.js";
 
 describe("SystemBlockLabel", () => {
   it("enumerates exactly 系统 and 差分协处理器", () => {
@@ -100,26 +98,14 @@ describe("TerminalRecord block types", () => {
     expect(block.role).toBeUndefined();
   });
 
-  it("a todo digest carries the whole list; its status union IS the backend's", () => {
-    // The literals are imported from the backend's TodoItem, never restated
-    // here — a new backend status must break this, not slip past a renderer.
-    expectTypeOf<TodoDigestItem["status"]>().toEqualTypeOf<TodoStatus>();
-    const digest: SystemBlockDigest = {
+  it("a legacy todo digest still typechecks — records persisted before ADR 0073 carry it", () => {
+    const legacy: SystemBlockDigest = {
       kind: "todo",
       total: 2,
       completed: 1,
       current: "修复",
-      items: [
-        { content: "定位 bug", status: "completed" },
-        { content: "修复", status: "in_progress" },
-      ],
     };
-    expect(digest.kind === "todo" && digest.items?.[1]?.content).toBe("修复");
-  });
-
-  it("a todo digest without items still typechecks (records persisted before the field)", () => {
-    const legacy: SystemBlockDigest = { kind: "todo", total: 3, completed: 0 };
-    expect(legacy.kind === "todo" && legacy.items).toBeUndefined();
+    expect(legacy.kind).toBe("todo");
   });
 
   it("TerminalRecordBlock discriminates by kind", () => {

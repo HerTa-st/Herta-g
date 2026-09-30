@@ -35,9 +35,23 @@ describe("mapStream", () => {
     ]);
   });
 
-  it("tool-call-single.sse → one tool-call-request + finish{tool_calls}", async () => {
+  it("tool-call-single.sse → the arguments as they stream, then one tool-call-request + finish{tool_calls}", async () => {
     const events = await eventsFromFixture("tool-call-single.sse");
     expect(events).toEqual([
+      // ADR 0073: each argument fragment, as it arrives (an empty one is not
+      // sent).
+      {
+        type: "tool-call-delta",
+        id: "call_1",
+        tool: "read_file",
+        argsDelta: '{"path":',
+      },
+      {
+        type: "tool-call-delta",
+        id: "call_1",
+        tool: "read_file",
+        argsDelta: '"foo.ts"}',
+      },
       {
         type: "tool-call-request",
         call: { id: "call_1", tool: "read_file", input: { path: "foo.ts" } },
@@ -46,9 +60,21 @@ describe("mapStream", () => {
     ]);
   });
 
-  it("tool-call-parallel.sse → 2 tool-call-requests in index order", async () => {
+  it("tool-call-parallel.sse → each call's fragments under its own id, then 2 tool-call-requests in index order", async () => {
     const events = await eventsFromFixture("tool-call-parallel.sse");
     expect(events).toEqual([
+      {
+        type: "tool-call-delta",
+        id: "call_1",
+        tool: "read_file",
+        argsDelta: '{"path":"a"}',
+      },
+      {
+        type: "tool-call-delta",
+        id: "call_2",
+        tool: "list_files",
+        argsDelta: '{"path":"b"}',
+      },
       {
         type: "tool-call-request",
         call: { id: "call_1", tool: "read_file", input: { path: "a" } },
@@ -61,11 +87,17 @@ describe("mapStream", () => {
     ]);
   });
 
-  it("tool-call-with-text.sse → text deltas, then tool-call, then finish", async () => {
+  it("tool-call-with-text.sse → text deltas, then the call's arguments, then tool-call, then finish", async () => {
     const events = await eventsFromFixture("tool-call-with-text.sse");
     expect(events).toEqual([
       { type: "text-delta", text: "Looking up " },
       { type: "text-delta", text: "the file." },
+      {
+        type: "tool-call-delta",
+        id: "call_1",
+        tool: "read_file",
+        argsDelta: '{"path":"foo"}',
+      },
       {
         type: "tool-call-request",
         call: { id: "call_1", tool: "read_file", input: { path: "foo" } },
@@ -97,7 +129,9 @@ describe("mapStream", () => {
   // every tool call already run in it. The failure now travels as data and
   // the turn loop hands it back to the model as a result it can act on.
   it("malformed-args.sse marks the call instead of throwing", async () => {
-    const events = await eventsFromFixture("malformed-args.sse");
+    const events = (await eventsFromFixture("malformed-args.sse")).filter(
+      (e) => e.type !== "tool-call-delta",
+    );
     expect(events).toHaveLength(2);
     const [first, second] = events;
     if (first?.type !== "tool-call-request") throw new Error("no call");
@@ -132,6 +166,37 @@ async function mapChunks(chunks: unknown[]): Promise<ProviderEvent[]> {
   for await (const ev of mapStream(src, ctl.signal)) out.push(ev);
   return out;
 }
+
+describe("mapStream argument deltas (ADR 0073)", () => {
+  const callChunk = (tc: Record<string, unknown>) => ({
+    choices: [
+      { delta: { tool_calls: [{ index: 0, ...tc }] }, finish_reason: null },
+    ],
+  });
+
+  it("a fragment that lands before the call's id and name is not lost: the first delta after them carries it", async () => {
+    const events = await mapChunks([
+      callChunk({ function: { arguments: '{"pa' } }),
+      callChunk({ id: "c1", function: { name: "bash", arguments: 'th":' } }),
+      callChunk({ function: { arguments: '"x"}' } }),
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ]);
+    expect(events.filter((e) => e.type === "tool-call-delta")).toEqual([
+      {
+        type: "tool-call-delta",
+        id: "c1",
+        tool: "bash",
+        argsDelta: '{"path":',
+      },
+      { type: "tool-call-delta", id: "c1", tool: "bash", argsDelta: '"x"}' },
+    ]);
+    // The deltas concatenate to exactly what the finished call parses.
+    const req = events.find((e) => e.type === "tool-call-request");
+    expect(req?.type === "tool-call-request" && req.call.input).toEqual({
+      path: "x",
+    });
+  });
+});
 
 describe("mapStream truncation (audit BL4)", () => {
   const textChunk = (t: string) => ({

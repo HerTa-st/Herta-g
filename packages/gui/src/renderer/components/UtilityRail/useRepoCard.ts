@@ -6,14 +6,17 @@ import {
   useSessionScopedTimer,
 } from "../../hooks/useSessionScoped.js";
 import { useSessionSelector } from "../../hooks/useSessionSelector.js";
-import { PLAN_SLIDE_MS } from "./usePlanCard.js";
+import { CARD_SLIDE_MS } from "./card-motion.js";
 
 /** Focus refreshes are throttled: a window that flickers focus (a dialog,
  *  an alt-tab and back) must not spawn a `git status` per flicker. */
 export const REPO_FOCUS_REFRESH_MIN_MS = 2000;
 
-/** Slack past the slide before the retracted card is dropped — the plan
- *  card's own reasoning (usePlanCard.ts). */
+/** Slack past the slide before the retracted card is dropped: unmounting
+ *  late leaves a collapsed box a moment longer, unmounting early tears the
+ *  content out mid-slide — so the timer deliberately runs long. (A
+ *  `transitionend` listener never fires under reduced motion, where the
+ *  transition is removed, and the card would then never unmount.) */
 const REPO_UNMOUNT_SLACK_MS = 120;
 
 export interface RepoCardState {
@@ -50,7 +53,7 @@ export function useRepoCard(): RepoCardState {
       return;
     }
     setSettled(false);
-    unmount.arm(() => setShown(null), PLAN_SLIDE_MS + REPO_UNMOUNT_SLACK_MS);
+    unmount.arm(() => setShown(null), CARD_SLIDE_MS + REPO_UNMOUNT_SLACK_MS);
   }, [repo, unmount, setShown, setSettled]);
 
   // Settled follows what is ON SCREEN (`shown`), one commit behind it: the

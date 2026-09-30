@@ -1,5 +1,7 @@
 import {
   type HertaTool,
+  type OutputFn,
+  type ProgressFn,
   type RunCommandData,
   summarizeShellCommand,
   type ToolCallRequest,
@@ -9,6 +11,7 @@ import {
 } from "@herta/core";
 import { formatInputIssues } from "../input-issues.js";
 import { splitShellSegments } from "../run-command/classifier.js";
+import { LiveOutput } from "../run-command/live-output.js";
 import { writeRunLog } from "../run-command/logger.js";
 import { checkReaderArgvPaths } from "../run-command/reader-guard.js";
 import { redactSecrets } from "../run-command/redactor.js";
@@ -135,7 +138,12 @@ export function bashTool(opts: BashToolOpts): HertaTool {
       const shellForm = shellPathsFor(opts.bashPath).toShell(ctx.workspaceRoot);
       return summarizeShellCommand(command, ctx.workspaceRoot, [shellForm]);
     },
-    async run(call: ToolCallRequest, ctx: ToolContext): Promise<ToolResult> {
+    async run(
+      call: ToolCallRequest,
+      ctx: ToolContext,
+      _progress: ProgressFn,
+      output?: OutputFn,
+    ): Promise<ToolResult> {
       const parsed = bashInputSchema.safeParse(call.input);
       if (!parsed.success) {
         const message = formatInputIssues(parsed.error);
@@ -209,10 +217,17 @@ export function bashTool(opts: BashToolOpts): HertaTool {
         }
       }
 
+      // The live view (ADR 0073): whole lines, redacted as the result is.
+      const live =
+        output !== undefined ? new LiveOutput((text) => output(text)) : null;
       const r = await sh.run(command, {
         timeoutMs: BASH_TIMEOUT_MS,
         signal: ctx.signal,
+        ...(live !== null
+          ? { onOutput: (text: string) => live.push(text) }
+          : {}),
       });
+      live?.flush();
       if (ctx.signal.aborted) {
         const err = new Error("aborted");
         (err as Error & { name: string }).name = "AbortError";

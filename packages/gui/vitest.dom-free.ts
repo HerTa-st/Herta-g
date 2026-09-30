@@ -55,6 +55,9 @@ export const DOM_FREE_TESTS = [
   "src/shared/agent-event-wire.test.ts",
   "src/shared/dead-transcoder.test.ts",
   "src/shared/links.test.ts",
+  // The live views' fold and the partial-JSON scanner under it (ADR 0073).
+  "src/shared/live-tool-feed.test.ts",
+  "src/shared/partial-json.test.ts",
   // The 3D device card's build-time helpers — pure, no DOM (ADR 0057 §6.5).
   "src/renderer/components/UtilityRail/device-scene/buffer-ratio.test.ts",
   "src/renderer/components/UtilityRail/device-scene/build-scope.test.ts",
@@ -84,9 +87,10 @@ export const DOM_FREE_TESTS = [
   "src/renderer/components/Workspace/format-time.test.ts",
   "src/renderer/components/Workspace/group-record.test.ts",
   "src/renderer/components/Workspace/marker-summary.test.ts",
-  "src/renderer/components/Workspace/plan-context.test.ts",
+  "src/renderer/components/Workspace/op-phase.test.ts",
   "src/renderer/components/Workspace/step-display.test.ts",
   "src/renderer/components/Workspace/trace-context.test.ts",
+  "src/renderer/components/Workspace/workspace-path.test.ts",
   "src/renderer/focus-prevent-scroll.test.ts",
   "src/renderer/i18n/no-hardcoded-cjk.test.ts",
   "src/renderer/ipc/bridge-types.test.ts",

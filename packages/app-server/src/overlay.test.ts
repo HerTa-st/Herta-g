@@ -213,7 +213,6 @@ describe("OverlayAskResolver — pending + resolveExternal", () => {
       signal,
       workspaceRoot: "/repo",
       reads: {} as import("@herta/core").ReadLedger,
-      todos: {} as import("@herta/core").TodoStore,
       bg: {} as import("@herta/core").BackgroundHost,
       bus: {
         publish: () => {},

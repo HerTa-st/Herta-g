@@ -1,5 +1,8 @@
+import { StringDecoder } from "node:string_decoder";
 import type {
   HertaTool,
+  OutputFn,
+  ProgressFn,
   RunCommandData,
   ToolCallRequest,
   ToolContext,
@@ -13,6 +16,7 @@ import { resolveSafePath } from "../path-safety.js";
 import { SpawnedBackgroundProcess } from "./background-process.js";
 import { classifyCommand } from "./classifier.js";
 import { allowedEnvKeys, findDisallowedEnvKey } from "./env-guard.js";
+import { LiveOutput } from "./live-output.js";
 import { writeRunLog } from "./logger.js";
 import { checkReaderArgvPaths } from "./reader-guard.js";
 import { redactSecrets } from "./redactor.js";
@@ -68,6 +72,8 @@ export function runCommandTool(): HertaTool {
     async run(
       call: ToolCallRequest,
       ctx: ToolContext,
+      _progress: ProgressFn,
+      output?: OutputFn,
     ): Promise<ToolResult<RunCommandData>> {
       const parsed = runCommandInputSchema.safeParse(call.input);
       if (!parsed.success) {
@@ -199,6 +205,22 @@ export function runCommandTool(): HertaTool {
       }
 
       const effectiveTimeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      // The live view (ADR 0073): each stream decoded on its own (a chunk
+      // can split a character) and cut into lines on its own (so a stdout
+      // line and a stderr line never splice), redacted as the result is.
+      const live =
+        output !== undefined
+          ? {
+              stdout: {
+                decoder: new StringDecoder("utf8"),
+                lines: new LiveOutput(output),
+              },
+              stderr: {
+                decoder: new StringDecoder("utf8"),
+                lines: new LiveOutput(output),
+              },
+            }
+          : null;
       // The run's journal learns the pid (ADR 0071 §1.6): a relaunch after a
       // crash ends a command still running.
       let spawnedPid: number | undefined;
@@ -216,7 +238,21 @@ export function runCommandTool(): HertaTool {
             role: "foreground",
           });
         },
+        ...(live !== null
+          ? {
+              onOutput: (chunk: Buffer, stream: "stdout" | "stderr") => {
+                const s = live[stream];
+                s.lines.push(s.decoder.write(chunk));
+              },
+            }
+          : {}),
       });
+      if (live !== null) {
+        for (const s of [live.stdout, live.stderr]) {
+          s.lines.push(s.decoder.end());
+          s.lines.flush();
+        }
+      }
       if (spawnedPid !== undefined) ctx.journal?.recordExit(spawnedPid);
 
       if (raw.cause === "not_found") {

@@ -8,7 +8,6 @@ import {
   NoopMemoryManager,
   ReadLedger,
   RulePermissionEngine,
-  TodoStore,
 } from "@herta/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeMsysPaths } from "../bash/shell-paths.js";
@@ -33,7 +32,6 @@ function ctxFor(workspaceRoot: string, reads = new ReadLedger()) {
     signal: new AbortController().signal,
     workspaceRoot,
     reads,
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),

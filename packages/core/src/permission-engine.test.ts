@@ -11,7 +11,6 @@ import {
 } from "./permission-engine.js";
 import { ReadLedger } from "./read-ledger.js";
 import { FakeAskResolver } from "./testing/fake-ask-resolver.js";
-import { TodoStore } from "./todo-store.js";
 import type { AgentEvent, PermissionRequest } from "./types/events.js";
 import type { ToolCallRequest, ToolContext, ToolResult } from "./types/tool.js";
 
@@ -25,7 +24,6 @@ function makeCtx(): ToolContext {
     signal: new AbortController().signal,
     workspaceRoot: "/tmp/ws",
     reads: new ReadLedger(),
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),

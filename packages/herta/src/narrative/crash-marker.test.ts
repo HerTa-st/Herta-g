@@ -24,7 +24,6 @@ describe("a run that stopped at the step limit (2026-09-29)", () => {
         tests: [],
         permissions: [],
         residualRisks: risks,
-        nextActions: [],
         endedBy: "step_limit",
       },
       undefined,
@@ -48,7 +47,6 @@ describe("the crash marker (ADR 0071 §1.2)", () => {
       { step: "run_command npm test", outcome: "outcome_unknown" },
     ],
     changedFiles: ["src/a.ts"],
-    openTodos: ["run the suite"],
   });
 
   it("is a 中断 done-marker whose body the shared composer writes", () => {
@@ -63,15 +61,12 @@ describe("the crash marker (ADR 0071 §1.2)", () => {
       [
         "↳ 中断时: edit_file src/a.ts — 已写入; run_command npm test — 结果未知",
         "↳ 改动文件: src/a.ts",
-        "↳ 待办: run the suite",
       ].join("\n"),
     );
   });
 
   it("with nothing open and nothing changed it says only that the app exited", () => {
-    expect(
-      buildCrashMarker({ steps: [], changedFiles: [], openTodos: [] }),
-    ).toEqual({
+    expect(buildCrashMarker({ steps: [], changedFiles: [] })).toEqual({
       kind: "system",
       label: "差分协处理器",
       body: "中断 · 应用意外退出",
@@ -95,7 +90,6 @@ describe("the crash marker (ADR 0071 §1.2)", () => {
         },
       ],
       changedFiles: [],
-      openTodos: [],
     });
     const section = forged.evidence?.[0];
     expect(section?.kind === "cutoff" && section.steps[0]?.step).not.toContain(

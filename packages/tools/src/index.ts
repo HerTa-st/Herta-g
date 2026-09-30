@@ -27,7 +27,6 @@ import {
   registerStrReplaceEditorRule,
   strReplaceEditorTool,
 } from "./str-replace-editor/index.js";
-import { todoWriteTool } from "./todo-write/index.js";
 import { viewImageTool } from "./view-image/index.js";
 import { writeNewFileTool } from "./write-new-file/index.js";
 
@@ -213,16 +212,6 @@ export {
 } from "./str-replace-editor/index.js";
 export type { StrReplaceEditorInput } from "./str-replace-editor/schema.js";
 export { looksBinary, SNIFF_BYTES } from "./text-sniff.js";
-export type {
-  TodoWriteData,
-  TodoWriteToolOpts,
-} from "./todo-write/index.js";
-export {
-  MAX_TODO_ITEMS,
-  todoContentLanguageLine,
-  todoWriteTool,
-} from "./todo-write/index.js";
-export type { TodoWriteInput } from "./todo-write/schema.js";
 export {
   canonicalWorkspaceRoot,
   validateWorkspaceRoot,
@@ -315,14 +304,10 @@ export interface MinimalToolsOpts extends DigestToolsOpts {
  * (ADR 0043: a whole attached document's content in one call — a shell can
  * only read it end to end).
  *
- * `todo_write` joined 2026-08-26 (ADR 0047 §4, owner decision): without it
- * the done marker's 待办 lane was STRUCTURALLY empty on the default
- * contract — the git-dev lab reproduced a brief that said 记到待办 while
- * `nextActions` stayed `[]`, and cross-dispatch inheritance survived only
- * on the bounded user-history tail. It is the same harness-state channel
- * class as report_finding (a shell cannot write the plan the GUI's rail
- * card and the next dispatch read), so mounting it amends the trained
- * 4-tool shape deliberately, not casually.
+ * `todo_write`, mounted here by ADR 0047 §4, left with the backend's todo
+ * list (ADR 0073): the rail's trace card shows what 板砖 is doing from its
+ * own op rows, and the newer models this contract tracks plan in their own
+ * text rather than through a list tool.
  */
 export function createMinimalTools(opts: MinimalToolsOpts): HertaTool[] {
   // The two record channels accept the SHELL's path spelling too — the model
@@ -343,7 +328,6 @@ export function createMinimalTools(opts: MinimalToolsOpts): HertaTool[] {
       ...(opts.lang !== undefined ? { lang: opts.lang } : {}),
     }),
     showExcerptTool({ mapPath }),
-    todoWriteTool(opts.lang !== undefined ? { lang: opts.lang } : {}),
     ...(opts.digest !== false
       ? [
           digestDocumentTool({
@@ -388,7 +372,6 @@ export function createMvpTools(
     commandOutputTool(),
     commandStopTool(),
     writeNewFileTool(),
-    todoWriteTool(opts.lang !== undefined ? { lang: opts.lang } : {}),
     // Structured git reads — inside a git repository only (ADR 0067): the
     // wiring decides from the workspace and refreshes on a move.
     ...(opts.gitTools !== false ? [gitStatusTool(), gitDiffTool()] : []),

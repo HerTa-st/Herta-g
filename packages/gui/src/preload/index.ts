@@ -141,6 +141,7 @@ const bridge: HertaBridge = {
   onWorkspace: (cb) => subscribe(EVT.workspace, cb),
   onRepo: (cb) => subscribe(EVT.repo, cb),
   onResume: (cb) => subscribe(EVT.resume, cb),
+  onLive: (cb) => subscribe(EVT.live, cb),
   onRecord: (cb) => subscribe(EVT.record, cb),
   onOverlay: (cb) => subscribe(EVT.overlay, cb),
   onSpeech: (cb) => subscribe(EVT.speech, cb),

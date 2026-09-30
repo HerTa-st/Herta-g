@@ -60,7 +60,7 @@ export interface ReportFindingToolOpts {
   lang?: "zh" | "en";
 }
 
-/** The language sentence of the description; see todo_write's twin. */
+/** The language sentence of the description. */
 export function findingClaimLanguageLine(lang: "zh" | "en"): string {
   return lang === "en"
     ? "Write `claim` in English: the finding is shown to the user inside an English conversation."
@@ -72,9 +72,9 @@ export function reportFindingTool(opts: ReportFindingToolOpts = {}): HertaTool {
   const lang = opts.lang ?? "zh";
   return {
     name: "report_finding",
-    // NOT readOnly: it appends to the per-brief ledger — harness state, the
-    // same class as todo_write — and serial execution keeps finding indices
-    // in the order the model recorded them.
+    // NOT readOnly: it appends to the per-brief ledger — harness state —
+    // and serial execution keeps finding indices in the order the model
+    // recorded them.
     schema(): ToolSchema {
       return {
         name: "report_finding",

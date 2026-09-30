@@ -14,6 +14,9 @@ export interface RunOptions {
    *  it, so a relaunch can end a command the app died during (ADR 0071
    *  §1.6). */
   onSpawn?: (pid: number) => void;
+  /** Each chunk as it arrives, from either stream, beyond the capture cap
+   *  too — the live view (ADR 0073). Raw bytes; the caller decodes. */
+  onOutput?: (chunk: Buffer, stream: "stdout" | "stderr") => void;
 }
 
 /**
@@ -206,6 +209,7 @@ export async function runCommand(
     });
 
     child.stdout?.on("data", (chunk: Buffer) => {
+      options.onOutput?.(chunk, "stdout");
       stdoutBytes += chunk.length;
       const remaining = options.maxBytesPerStream - stdoutBuffered;
       if (remaining <= 0) return;
@@ -219,6 +223,7 @@ export async function runCommand(
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
+      options.onOutput?.(chunk, "stderr");
       stderrBytes += chunk.length;
       const remaining = options.maxBytesPerStream - stderrBuffered;
       if (remaining <= 0) return;

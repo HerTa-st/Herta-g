@@ -4,7 +4,6 @@ import { InMemoryEventBus } from "./event-bus.js";
 import { NoopMemoryManager } from "./memory-manager.js";
 import { NoopPermissionEngine } from "./permission-engine.js";
 import { ReadLedger } from "./read-ledger.js";
-import { TodoStore } from "./todo-store.js";
 import { InMemoryToolRegistry } from "./tool-registry.js";
 import type { AgentEvent } from "./types/events.js";
 import type { HertaTool, ToolContext } from "./types/tool.js";
@@ -14,7 +13,6 @@ const ctx: ToolContext = {
   signal: new AbortController().signal,
   workspaceRoot: process.cwd(),
   reads: new ReadLedger(),
-  todos: new TodoStore(),
   bg: new BackgroundHost(),
   bus: new InMemoryEventBus<AgentEvent>(),
   memory: new NoopMemoryManager(),

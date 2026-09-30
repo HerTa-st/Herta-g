@@ -1,5 +1,4 @@
 import type { ExecutionStatus } from "../bridge/types.js";
-import type { TodoStatus } from "./todo.js";
 
 /**
  * Canonical system-block labels emitted by the v0.2 harness into
@@ -170,7 +169,7 @@ export type CutoffOutcome =
   | "write_not_applied"
   /** The file is neither: it was changed after the app exited. */
   | "write_changed_since"
-  /** Harness state (todos, findings): rebuilt from finished steps. */
+  /** Harness state (findings): rebuilt from finished steps. */
   | "state_not_applied"
   /** A command, or anything else with side effects: it may have partly run. */
   | "outcome_unknown";
@@ -180,16 +179,6 @@ export interface CutoffStep {
   /** The tool and its target: `edit_file src/a.ts`, `run_command npm test`. */
   readonly step: string;
   readonly outcome: CutoffOutcome;
-}
-
-/**
- * One row of a todo digest's `items`. The status union is IMPORTED from the
- * backend's `TodoItem` rather than restated here, so a future backend status
- * cannot silently become a literal no renderer handles.
- */
-export interface TodoDigestItem {
-  readonly content: string;
-  readonly status: TodoStatus;
 }
 
 /**
@@ -296,35 +285,16 @@ export type SystemBlockDigest =
       readonly exitCode?: number | null;
     }
   | {
-      /** A todo-list projection (ADR 0025 §2): the dispatch's FIRST
-       *  todo_write projects as one full layout block so user and Herta
-       *  share the plan, every LATER update as a compact progress row; the
-       *  leftover tail rides the done-marker. */
+      /** LEGACY — a todo-list projection from before ADR 0073 removed the
+       *  backend's todo list. Nothing writes it now; records persisted
+       *  earlier still carry it (a layout block, then `todo k/n: <current>`
+       *  progress rows), so every reader must still recognise the kind. They
+       *  skip it: it was working state, and the op rows beside it say what
+       *  was done. The body stays in the record as Herta read it. */
       readonly kind: "todo";
       readonly total: number;
       readonly completed: number;
-      /** The in_progress item's text (2026-07-23) — set on the compact
-       *  progress rows projected for LATER todo_write updates so renderers
-       *  can show which step 板砖 is on. Absent on the first todo-layout
-       *  block (its body's [~] mark carries the same information) and when
-       *  nothing is in progress. */
       readonly current?: string;
-      /** The WHOLE list as it stood when this block was projected
-       *  (2026-07-26). `todo_write` is full-list replacement: 板砖 may
-       *  reword, reorder, add or drop items on any update, so a renderer
-       *  showing live plan state cannot reconstruct it by taking the first
-       *  layout block and folding later counts onto it — the first layout
-       *  is a snapshot of a list that no longer exists. The only honest
-       *  source is the list carried by the NEWEST todo block, so both block
-       *  kinds carry it. The counts above stay authoritative for the
-       *  canonical `body`'s phrasing; this is the same display-only class
-       *  as `markerSummary` and never reaches Herta's prompt.
-       *
-       *  Optional for backward compatibility: records persisted before this
-       *  field existed carry none, so renderers must keep their
-       *  `total`/`completed`/`current` fallback. Backend-authored text —
-       *  same trust class as `current`, sanitized at projection. */
-      readonly items?: readonly TodoDigestItem[];
     }
   | {
       /** A `show_excerpt` presentation row (ADR 0027). The excerpt itself
@@ -537,7 +507,10 @@ export type EvidenceSection =
       readonly items: readonly string[];
     }
   | {
-      /** The done-marker's unfinished todos (`↳ 待办:`). */
+      /** LEGACY — the done-marker's unfinished todos (`↳ 待办:`), written
+       *  before ADR 0073 removed the backend's todo list. Records persisted
+       *  earlier still carry it, and a renderer still shows it: it is part
+       *  of what that run reported. */
       readonly kind: "todos";
       readonly items: readonly string[];
     }

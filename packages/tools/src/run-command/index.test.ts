@@ -6,7 +6,6 @@ import {
   InMemoryEventBus,
   NoopMemoryManager,
   ReadLedger,
-  TodoStore,
 } from "@herta/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkTmpWorkspace, type TmpWorkspace } from "../testing/tmp-workspace.js";
@@ -26,12 +25,47 @@ function ctxFor(workspaceRoot: string) {
     signal: new AbortController().signal,
     workspaceRoot,
     reads: new ReadLedger(),
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),
   };
 }
+
+describe("runCommandTool — the live view (ADR 0073)", () => {
+  it("streams stdout and stderr as whole lines, each stream on its own, redacted; the result is unchanged", async () => {
+    ws = await mkTmpWorkspace({});
+    const tool = runCommandTool();
+    const chunks: string[] = [];
+    const script = [
+      "process.stdout.write('out 1\\nout ');",
+      "setTimeout(() => {",
+      "  process.stderr.write('err 1\\n');",
+      "  process.stdout.write('2\\nSECRET_TOKEN=abc123\\n');",
+      "}, 150);",
+    ].join("");
+    const r = await tool.run(
+      {
+        id: "call-live",
+        tool: "run_command",
+        input: { argv: [process.execPath, "-e", script] },
+      },
+      ctxFor(ws.root),
+      noopProgress,
+      (chunk) => chunks.push(chunk),
+    );
+    expect(r.ok).toBe(true);
+    const seen = chunks.join("");
+    // A stdout line split by the timer never splices with the stderr line.
+    expect(seen).toContain("out 1\n");
+    expect(seen).toContain("out 2\n");
+    expect(seen).toContain("err 1\n");
+    expect(seen).toContain("SECRET_TOKEN=[REDACTED:env_secret]\n");
+    expect(seen).not.toContain("abc123");
+    const data = r.data as { stdout: string; stderr: string };
+    expect(data.stdout).toContain("out 1\nout 2\n");
+    expect(data.stderr).toBe("err 1\n");
+  });
+});
 
 describe.skipIf(!POSIX)("runCommandTool", () => {
   it("happy path: runs echo, returns stdout, writes log file", async () => {

@@ -119,7 +119,6 @@ function mkDeps(opts: {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }) as never,
   } as unknown as CodingAgentRuntime;
   return {
@@ -582,7 +581,6 @@ describe("runActorCompletionTurn — @板砖 backend dispatch", () => {
             tests: [],
             permissions: [],
             residualRisks: [],
-            nextActions: [],
           } as never;
         },
       }) as unknown as CodingAgentRuntime;
@@ -635,7 +633,6 @@ describe("runActorCompletionTurn — @板砖 backend dispatch", () => {
             tests: [],
             permissions: [],
             residualRisks: [],
-            nextActions: [],
           };
         },
       }) as unknown as CodingAgentRuntime;
@@ -694,7 +691,6 @@ describe("runActorCompletionTurn — @板砖 backend dispatch", () => {
             tests: [],
             permissions: [],
             residualRisks: [],
-            nextActions: [],
           }) as never,
       }) as unknown as CodingAgentRuntime;
     const deps = mkDeps({ provider, runtimeFactory });
@@ -756,7 +752,6 @@ describe("runActorCompletionTurn — @板砖 backend dispatch", () => {
             tests: [],
             permissions: [],
             residualRisks: [],
-            nextActions: [],
           } as never;
         },
       }) as unknown as CodingAgentRuntime;
@@ -848,7 +843,6 @@ describe("runActorCompletionTurn — in-turn beats", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -927,7 +921,6 @@ describe("runActorCompletionTurn — in-turn beats", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -980,7 +973,6 @@ describe("runActorCompletionTurn — in-turn beats", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -1039,7 +1031,6 @@ describe("runActorCompletionTurn — in-turn beats", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -1091,7 +1082,6 @@ describe("runActorCompletionTurn — in-turn beats", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -1142,7 +1132,6 @@ describe("runActorCompletionTurn — in-turn beats", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -1210,7 +1199,6 @@ describe("runActorCompletionTurn — in-turn beats", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -1538,7 +1526,6 @@ describe("runActorCompletionTurn — onPrompt callback (prompt dump)", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -1701,7 +1688,6 @@ describe("runActorCompletionTurn — thought/speech surface", () => {
             tests: [],
             permissions: [],
             residualRisks: [],
-            nextActions: [],
           } as never;
         },
       }) as unknown as CodingAgentRuntime;
@@ -1750,7 +1736,6 @@ describe("runActorCompletionTurn — thought/speech surface", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -1982,7 +1967,6 @@ describe("runActorCompletionTurn — renderer cursor / record sync (C1 regressio
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -2104,7 +2088,6 @@ describe("runActorCompletionTurn — user-typed @板砖 pre-empt (Slice 10)", ()
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -2143,7 +2126,6 @@ describe("runActorCompletionTurn — user-typed @板砖 pre-empt (Slice 10)", ()
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -2175,7 +2157,6 @@ describe("runActorCompletionTurn — user-typed @板砖 pre-empt (Slice 10)", ()
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -2212,7 +2193,6 @@ describe("runActorCompletionTurn — user-typed @板砖 pre-empt (Slice 10)", ()
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -2244,7 +2224,6 @@ describe("runActorCompletionTurn — user-typed @板砖 pre-empt (Slice 10)", ()
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -2292,7 +2271,6 @@ describe("runActorCompletionTurn — user-typed @板砖 pre-empt (Slice 10)", ()
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -2553,7 +2531,6 @@ describe("runActorCompletionTurn — two-phase mood routing (Slice 13)", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -5604,7 +5581,6 @@ describe("runActorCompletionTurn — supervisor (Slice: supervisor)", () => {
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             } as never;
           },
         }) as unknown as CodingAgentRuntime;
@@ -5683,7 +5659,6 @@ describe("runActorCompletionTurn — supervisor (Slice: supervisor)", () => {
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             } as never;
           },
         }) as unknown as CodingAgentRuntime;
@@ -5807,7 +5782,6 @@ describe("runActorCompletionTurn — supervisor (Slice: supervisor)", () => {
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             } as never;
           },
         }) as unknown as CodingAgentRuntime;
@@ -5895,7 +5869,6 @@ describe("runActorCompletionTurn — supervisor (Slice: supervisor)", () => {
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             } as never;
           },
         }) as unknown as CodingAgentRuntime;
@@ -5952,7 +5925,6 @@ describe("runActorCompletionTurn — supervisor (Slice: supervisor)", () => {
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             } as never;
           },
         }) as unknown as CodingAgentRuntime;
@@ -6042,7 +6014,6 @@ describe("runActorCompletionTurn — supervisor (Slice: supervisor)", () => {
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             } as never;
           },
         }) as unknown as CodingAgentRuntime;
@@ -6150,7 +6121,6 @@ describe("runActorCompletionTurn — supervisor (Slice: supervisor)", () => {
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             } as never;
           },
         }) as unknown as CodingAgentRuntime;
@@ -6565,7 +6535,6 @@ describe("runActorCompletionTurn — compaction (2026-05-24)", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -6635,7 +6604,6 @@ describe("runActorCompletionTurn — compaction (2026-05-24)", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -6730,7 +6698,6 @@ describe("runActorCompletionTurn — compaction (2026-05-24)", () => {
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;

@@ -68,7 +68,6 @@ export function slimAgentEventForRenderer(
             tests: [],
             permissions: [],
             residualRisks: [],
-            nextActions: [],
           },
         },
       };
@@ -81,8 +80,13 @@ export function slimAgentEventForRenderer(
     case "patch.preview":
     case "verification.started":
     case "verification.finished":
-    case "plan.updated":
     case "user.steer":
+      return null;
+    // The live views (ADR 0073): a call's arguments a token at a time, a
+    // command's output a chunk at a time. They reach the renderer folded and
+    // throttled on their own channel (live-tool-feed.ts), never one per event.
+    case "tool.call.delta":
+    case "tool.call.output":
       return null;
     default: {
       const undecided: never = ev;

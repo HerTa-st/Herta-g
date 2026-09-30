@@ -1884,337 +1884,37 @@ describe("NarrativeRenderer — EN word-pacing + Brick alias (lang 'en')", () =>
   });
 });
 
-describe("NarrativeRenderer — plan strip (2026-07-26)", () => {
-  type Status = "pending" | "in_progress" | "completed";
-  type Item = { content: string; status: Status };
-
-  /** Drop everything written so far — the renderer is differential, so the
-   *  assertions below are about what the NEXT update appends. */
-  const clear = (out: MockWritable): void => {
-    out.chunks.length = 0;
-  };
-
-  const THREE: Item[] = [
-    { content: "定位 bug", status: "completed" },
-    { content: "修 cursor reset", status: "in_progress" },
-    { content: "加回归测试", status: "pending" },
-  ];
-
-  /** A todo projection as the bridge builds it: canonical English-chrome body
-   *  in the record, the list on the digest. */
-  function todo(opts: {
-    total: number;
-    completed: number;
-    current?: string;
-    items?: Item[];
-    body?: string;
-  }): TerminalRecordBlock {
-    return {
+describe("NarrativeRenderer — legacy todo blocks (ADR 0073)", () => {
+  it("print as the body the record holds, like any other row — no plan strip, no re-anchor after a beat", () => {
+    const { out, r } = mk();
+    const layout: TerminalRecordBlock = {
       kind: "system",
       label: "差分协处理器",
-      body:
-        opts.body ??
-        `todo ${opts.completed}/${opts.total}${
-          opts.current === undefined ? "" : `: ${opts.current}`
-        }`,
-      digest: {
-        kind: "todo",
-        total: opts.total,
-        completed: opts.completed,
-        ...(opts.current === undefined ? {} : { current: opts.current }),
-        ...(opts.items === undefined ? {} : { items: opts.items }),
-      },
+      body: "todo list (2):\n[~] 定位 bug\n[ ] 修复",
+      digest: { kind: "todo", total: 2, completed: 0 },
     };
-  }
-
-  const op = (body: string): TerminalRecordBlock => ({
-    kind: "system",
-    label: "差分协处理器",
-    body,
-    digest: { kind: "op", verb: "Reading", arg: body },
-  });
-
-  const beat = (text: string): TerminalRecordBlock => ({
-    kind: "herta",
-    surface: "speech",
-    text,
-  });
-
-  const doneMarker: TerminalRecordBlock = {
-    kind: "system",
-    label: "差分协处理器",
-    body: "完成 · 2 个文件",
-    role: "done-marker",
-  };
-
-  it("renders the first projection as a localized checklist, not the raw chrome", () => {
-    const { out, r } = mk();
-    r.update([todo({ total: 3, completed: 1, items: THREE })]);
-    expect(out.full()).toBe(
-      [
-        "→ 差分协处理器",
-        "  任务清单 (1/3):",
-        "  ✓ 定位 bug",
-        "  ▸ 修 cursor reset",
-        "  · 加回归测试",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("renders a later update as one step line, not the checklist again", () => {
-    const { out, r } = mk();
-    r.update([todo({ total: 3, completed: 1, items: THREE })]);
-    clear(out);
+    const progress: TerminalRecordBlock = {
+      kind: "system",
+      label: "差分协处理器",
+      body: "todo 1/2: 修复",
+      digest: { kind: "todo", total: 2, completed: 1, current: "修复" },
+    };
     r.update([
-      todo({ total: 3, completed: 1, items: THREE }),
-      todo({
-        total: 3,
-        completed: 2,
-        current: "加回归测试",
-        items: [
-          { content: "定位 bug", status: "completed" },
-          { content: "修 cursor reset", status: "completed" },
-          { content: "加回归测试", status: "in_progress" },
-        ],
-      }),
-    ]);
-    expect(out.full()).toBe("→ 差分协处理器\n  步骤 3/3 · 加回归测试\n");
-  });
-
-  it("re-prints the checklist when the plan changes SHAPE (a step was added)", () => {
-    const { out, r } = mk();
-    const grown: Item[] = [
-      ...THREE,
-      { content: "更新 ADR", status: "pending" },
-    ];
-    r.update([todo({ total: 3, completed: 1, items: THREE })]);
-    clear(out);
-    r.update([
-      todo({ total: 3, completed: 1, items: THREE }),
-      todo({
-        total: 4,
-        completed: 1,
-        current: "修 cursor reset",
-        items: grown,
-      }),
+      layout,
+      { kind: "herta", surface: "speech", text: "继续。" },
+      progress,
     ]);
     expect(out.full()).toBe(
       [
         "→ 差分协处理器",
-        "  任务清单 (1/4):",
-        "  ✓ 定位 bug",
-        "  ▸ 修 cursor reset",
-        "  · 加回归测试",
-        "  · 更新 ADR",
+        "  todo list (2):",
+        "  [~] 定位 bug",
+        "  [ ] 修复",
+        "继续。",
+        "→ 差分协处理器",
+        "  todo 1/2: 修复",
         "",
       ].join("\n"),
-    );
-  });
-
-  it("re-anchors the plan with ONE line when a beat splits the dispatch", () => {
-    const { out, r } = mk();
-    r.update([
-      todo({ total: 3, completed: 1, items: THREE }),
-      op("Reading packages/core/src/parser.ts"),
-    ]);
-    clear(out);
-    r.update([
-      todo({ total: 3, completed: 1, items: THREE }),
-      op("Reading packages/core/src/parser.ts"),
-      beat("嗯，cursor 没重置。继续。"),
-      op("Writing packages/core/src/parser.ts"),
-      op("Running pnpm test"),
-    ]);
-    expect(out.full()).toBe(
-      [
-        "嗯，cursor 没重置。继续。",
-        // The re-anchor: headerless, `⋯`-led, once.
-        "  ⋯ 步骤 2/3 · 修 cursor reset",
-        "→ 差分协处理器",
-        "  Writing packages/core/src/parser.ts",
-        // Second op row in the same continuation gets no repeat.
-        "→ 差分协处理器",
-        "  Running pnpm test",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("arms the re-anchor from STREAMED speech too (the live beat path)", () => {
-    const { out, r } = mk();
-    const record: TerminalRecordBlock[] = [
-      todo({ total: 3, completed: 1, items: THREE }),
-      beat("先看看。"),
-      op("Reading foo.ts"),
-    ];
-    r.update(record.slice(0, 1));
-    // The beat streams in live; endHertaStream advances the cursor past it,
-    // so update() never calls renderHerta for that block.
-    r.beginHertaStream("speech");
-    r.streamHertaToken("先看看。");
-    r.endHertaStream();
-    clear(out);
-    r.update(record);
-    expect(out.full()).toBe(
-      "  ⋯ 步骤 2/3 · 修 cursor reset\n→ 差分协处理器\n  Reading foo.ts\n",
-    );
-  });
-
-  it("does not re-anchor before a 系统 block (wrong lane)", () => {
-    const { out, r } = mk();
-    const upTo = [todo({ total: 3, completed: 1, items: THREE })];
-    r.update(upTo);
-    clear(out);
-    r.update([
-      ...upTo,
-      beat("等一下。"),
-      { kind: "system", label: "系统", body: "workspace_set: E:\\HERTA" },
-    ]);
-    expect(out.full()).toBe("等一下。\n→ 系统\n  workspace_set: E:\\HERTA\n");
-  });
-
-  it("does not re-anchor before the done marker, and drops the plan after it", () => {
-    const { out, r } = mk();
-    const upTo = [todo({ total: 3, completed: 1, items: THREE })];
-    r.update(upTo);
-    clear(out);
-    r.update([
-      ...upTo,
-      beat("收工。"),
-      doneMarker,
-      // A later beat + backend row belongs to whatever comes next — the
-      // finished run's plan must not follow it there.
-      beat("还有别的事？"),
-      op("Reading bar.ts"),
-    ]);
-    expect(out.full()).toBe(
-      [
-        "收工。",
-        "→ 差分协处理器",
-        "  完成 · 2 个文件",
-        "还有别的事？",
-        "→ 差分协处理器",
-        "  Reading bar.ts",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("drops the plan at a user block (a new turn is a new dispatch)", () => {
-    const { out, r } = mk();
-    const upTo = [todo({ total: 3, completed: 1, items: THREE })];
-    r.update(upTo);
-    clear(out);
-    r.update([
-      ...upTo,
-      { kind: "user", text: "换个事。" },
-      beat("行。"),
-      op("Reading baz.ts"),
-    ]);
-    expect(out.full()).toBe("行。\n→ 差分协处理器\n  Reading baz.ts\n");
-  });
-
-  it("starts a fresh checklist for the next dispatch's plan", () => {
-    const { out, r } = mk();
-    const upTo: TerminalRecordBlock[] = [
-      todo({ total: 3, completed: 1, items: THREE }),
-      doneMarker,
-      { kind: "user", text: "再来一个。" },
-    ];
-    r.update(upTo);
-    clear(out);
-    // Same total as the finished dispatch's plan — a shape check alone would
-    // suppress it; the dispatch boundary must have cleared the state.
-    r.update([...upTo, todo({ total: 3, completed: 0, items: THREE })]);
-    expect(out.full()).toContain("任务清单 (0/3):");
-  });
-
-  it("keeps a pre-items record byte-identical, but still re-anchors from its counts", () => {
-    const { out, r } = mk();
-    const legacyLayout = todo({
-      total: 3,
-      completed: 0,
-      body: "todo list (3):\n[ ] 定位 bug\n[ ] 修 cursor reset\n[ ] 加回归测试",
-    });
-    const legacyProgress = todo({
-      total: 3,
-      completed: 1,
-      current: "修 cursor reset",
-    });
-    r.update([legacyLayout]);
-    // The list is UNKNOWN, not empty: the record's own body is the only list
-    // there is, so it renders exactly as it did before the plan strip.
-    expect(out.full()).toBe(
-      [
-        "→ 差分协处理器",
-        "  todo list (3):",
-        "  [ ] 定位 bug",
-        "  [ ] 修 cursor reset",
-        "  [ ] 加回归测试",
-        "",
-      ].join("\n"),
-    );
-    clear(out);
-    r.update([legacyLayout, legacyProgress]);
-    expect(out.full()).toBe("→ 差分协处理器\n  todo 1/3: 修 cursor reset\n");
-    clear(out);
-    // Counts alone still answer "where are we" after a beat.
-    r.update([
-      legacyLayout,
-      legacyProgress,
-      beat("继续。"),
-      op("Reading foo.ts"),
-    ]);
-    expect(out.full()).toBe(
-      "继续。\n  ⋯ 步骤 2/3 · 修 cursor reset\n→ 差分协处理器\n  Reading foo.ts\n",
-    );
-  });
-
-  it("leaves a dispatch with no plan byte-identical (zh)", () => {
-    const { out, r } = mk();
-    r.update([
-      op("Reading foo.ts"),
-      beat("看完了。"),
-      op("Writing foo.ts"),
-      doneMarker,
-    ]);
-    expect(out.full()).toBe(
-      [
-        "→ 差分协处理器",
-        "  Reading foo.ts",
-        "看完了。",
-        "→ 差分协处理器",
-        "  Writing foo.ts",
-        "→ 差分协处理器",
-        "  完成 · 2 个文件",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("follows the SESSION language for label and wording (ADR 0018)", () => {
-    const out = new MockWritable();
-    const r = new NarrativeRenderer(out, plainStyle, { lang: "en" });
-    r.update([todo({ total: 3, completed: 1, items: THREE })]);
-    expect(out.full()).toBe(
-      [
-        "→ Coprocessor",
-        "  todo list (1/3):",
-        "  ✓ 定位 bug",
-        "  ▸ 修 cursor reset",
-        "  · 加回归测试",
-        "",
-      ].join("\n"),
-    );
-    clear(out);
-    r.update([
-      todo({ total: 3, completed: 1, items: THREE }),
-      beat("Keep going."),
-      op("Reading foo.ts"),
-    ]);
-    expect(out.full()).toBe(
-      "Keep going.\n  ⋯ Step 2/3 · 修 cursor reset\n→ Coprocessor\n  Reading foo.ts\n",
     );
   });
 });

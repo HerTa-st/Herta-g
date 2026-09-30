@@ -2,7 +2,7 @@
  * Per-brief store for the backend's own CONCLUSIONS (ADR 0039, 2026-08-17).
  *
  * The report has always carried by-products of a run — files touched, tests,
- * risks, todos left, tool receipts — and no place for what the run FOUND.
+ * risks, tool receipts — and no place for what the run FOUND.
  * For an analysis brief ("look at this log", "why is the build slow") that
  * was the whole deliverable, and it evaporated: the model's final prose has
  * no channel by design (D6, no Summary field), so 板砖 read the file, said

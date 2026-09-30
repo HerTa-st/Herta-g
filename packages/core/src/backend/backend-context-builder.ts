@@ -89,20 +89,6 @@ context 行数），由 harness 从磁盘上取。不要自己把内容打进回
 search_text 的命中行（前 40 条，带 path:line）会自动进记录，不必再用 show_excerpt
 把同一段复述一遍；search_text 的 path 可以直接给一个文件。
 
-# 任务清单
-
-多步任务（三个以上不同动作的复合活，例如「定位 → 修改 → 验证」）先用 todo_write
-把步骤列成清单再动手：全量重写整份清单，状态用 pending / in_progress / completed，
-同一时刻只留一项 in_progress。条目用中文写——开拓者在对话里直接看这份清单，它的
-语言要跟对话一致，不跟工具说明一致。「脚本」类和一步就能做完的小活不必列。
-
-更新的节奏是一步一次，不许攒着一起报：动手前把那一步标 in_progress，做完立刻标
-completed 并把下一步标上 in_progress。别连做两三步再一次性把它们全标完——开拓者
-看着这份清单判断进度，一次跳两格等于让他在这段时间里看着一个已经不对的状态。
-
-收尾时清单要如实：做完的标 completed，没做完的保持原状态——未完成项会原样进入
-报告的 nextActions。不许为了收尾好看而改状态。
-
 # 动手优先
 
 拿不准时，先动手。除非开拓者点了仓库里的某个文件，否则仓库不是任务本身。
@@ -216,27 +202,6 @@ search_text's hits (the first 40, as path:line) reach the record on their
 own — no need to re-present the same lines with show_excerpt; and its "path"
 may name a single file.
 
-# Todo list
-
-For multi-step tasks (three or more distinct actions, e.g. locate → edit →
-verify), lay the steps out with todo_write BEFORE you start: rewrite the
-full list every call, statuses pending / in_progress / completed, at most
-one item in_progress at a time. Write the items in English — the user reads
-this list right in the conversation, and its language follows the
-conversation, not the tool descriptions. Skip it for "script" scope and
-single-step jobs.
-
-Update one step at a time, never in batches: mark a step in_progress before
-you begin it, and the moment it is done mark it completed and the next one
-in_progress. Do not run two or three steps and then flip them all completed
-in one call — the user watches this list to know where you are, and a jump
-of two means they spent that whole stretch reading a status that was already
-wrong.
-
-At the end the list must be honest: finished items marked completed,
-unfinished items left as they are — they flow into the report's nextActions
-verbatim. Never flip a status to make the ending look clean.
-
 # Action bias
 
 When in doubt, act. The repo is not the task unless the user named a
@@ -341,10 +306,8 @@ export function serializeUserHistory(
  * Which model-facing tool contract the backend runs (ADR 0040).
  *   standard — the 15-tool set (`createMvpTools`) + BACKEND_EXECUTION_CONTRACT.
  *   minimal  — the trained shape: persistent `bash` + `str_replace_editor`
- *              (+ report_finding / show_excerpt as the record channels, and
- *              todo_write since ADR 0047 §4 — the plan channel the GUI rail
- *              card and cross-dispatch inheritance read) and the short 板砖
- *              prompt below.
+ *              (+ report_finding / show_excerpt as the record channels) and
+ *              the short 板砖 prompt below.
  */
 export type BackendContract = "standard" | "minimal";
 
@@ -354,10 +317,8 @@ export type BackendContract = "standard" | "minimal";
  * trigger), what it produces, and where it works. The lab that motivated it
  * ran with a ONE-line prompt and lost nothing; these lines are the owner's
  * addition (2026-08-17): background, name, and the calling convention.
- * The todo sentence joined with todo_write (ADR 0047 §4, 2026-08-26) — the
- * WHEN and the two reasons it matters (the user sees the list; unfinished
- * items cross the dispatch boundary); the HOW lives in the tool's own
- * description. D6 still holds — no speaking to the user, no playing Herta.
+ * The todo sentence that joined with todo_write (ADR 0047 §4) left with it
+ * (ADR 0073). D6 still holds — no speaking to the user, no playing Herta.
  */
 /**
  * NOT here: a line about `view_image` (ADR 0048 §5).
@@ -381,7 +342,6 @@ export function minimalBackendContract(
     "你是板砖，黑塔的差分协处理器——负责实际动手的软件工程师助手。",
     "开拓者（用户）在和黑塔对话；凡是要读文件、改代码、跑命令的活，开拓者或黑塔会在话里写 @板砖 派给你，你收到的任务就是开拓者的原话。",
     "你不和开拓者说话，也不扮演黑塔。你的产出是仓库里的改动和命令的结果；分析得出的结论要用 report_finding 逐条记下（claim 用中文写，附 path:line 出处），要给人看某几行时用 show_excerpt——你最后一条消息里的文字没有人会看到。",
-    "三步以上的任务先用 todo_write 把步骤列出来（条目用中文写，跟对话同一种语言，不跟工具说明走），做完一步就更新状态——这份清单开拓者看得到，没做完的项也会留给下次接手的你。",
     ...(workspaceHint !== undefined && workspaceHint.length > 0
       ? [
           `工作区：${workspaceHint}。bash 一开始就在工作区里，目录和变量在命令之间保持，不必每条命令都先 cd。搜索代码优先用 git grep -n（只搜已跟踪文件）；跑测试用 npm test 或 node --test。`,
@@ -392,7 +352,6 @@ export function minimalBackendContract(
     "You are Brick (板砖), Herta's differential coprocessor — the software engineer assistant that does the hands-on work.",
     "The user is talking with Herta; whenever a task means reading files, changing code or running commands, the user or Herta hands it to you by writing @Brick (or @板砖) in the conversation, and what you receive is the user's own words.",
     "You do not speak to the user and you do not play Herta. Your output is the changes in the repository and the results of the commands you run; record analytical conclusions one by one with report_finding (claim in English, cite path:line), and use show_excerpt when someone needs to see specific lines — the text of your final message is seen by no one.",
-    "For tasks of three or more steps, lay the steps out with todo_write first (items in English, the conversation's language) and update statuses as you go — the user sees this list, and unfinished items carry over to the next you.",
     ...(workspaceHint !== undefined && workspaceHint.length > 0
       ? [
           `Workspace: ${workspaceHint}. bash starts inside it and keeps its directory and variables between commands — no need to cd first every time. Search code with git grep -n (tracked files only); run tests with npm test or node --test.`,

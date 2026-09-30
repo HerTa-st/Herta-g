@@ -183,7 +183,6 @@ export function renderWithSession(
               tests: [],
               permissions: [],
               residualRisks: [],
-              nextActions: [],
             },
           } as never,
         });

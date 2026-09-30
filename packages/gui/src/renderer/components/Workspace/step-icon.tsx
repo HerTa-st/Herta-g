@@ -7,7 +7,6 @@ export type StepIconKey =
   | "diff"
   | "result"
   | "fail"
-  | "todo"
   | "attach"
   | "dot";
 
@@ -16,7 +15,6 @@ export type StepIconKey =
 export function stepIcon(body: string): StepIconKey {
   const t = body.trimStart();
   if (t.startsWith("patch preview")) return "diff";
-  if (t.startsWith("todo list")) return "todo";
   if (t.startsWith("↳")) return "result";
   const verb = t.split(/\s+/)[0] ?? "";
   switch (verb) {
@@ -71,12 +69,6 @@ const PATHS: Record<StepIconKey, JSX.Element> = {
   ),
   result: <path d="M4 3v4h6M8 5l2 2-2 2" />,
   fail: <path d="M3.5 3.5l7 7M10.5 3.5l-7 7" />,
-  todo: (
-    <>
-      <rect x="2.5" y="2.5" width="9" height="9" rx="1.5" />
-      <path d="M4.8 7.2l1.6 1.6 3-3.4" />
-    </>
-  ),
   // The composer's own paperclip (ADR 0033), so an attachment row and the
   // button that made it share one glyph — including its centring correction.
   // The path's ink sits 0.32 right and 0.83 low of this shared 14×14 box's

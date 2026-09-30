@@ -31,11 +31,9 @@ import {
   type SystemBlock,
 } from "./group-record.js";
 import { composeMarkerSummary } from "./marker-summary.js";
-import type { PlanContext } from "./plan-context.js";
 import { SwapText } from "./SwapText.js";
 import {
   latestOpStep,
-  latestTodoProgressStep,
   middleTruncateName,
   stepDisplayBody,
   stepDisplayDetail,
@@ -77,21 +75,6 @@ export interface ActivityBlockProps {
    *  one. Optional: omitted/1 keeps the classic single-row shimmer. */
   readonly inFlightCount?: number;
   /**
-   * The CURRENT dispatch's 任务清单 (ADR 0025 todo list), or null when there
-   * is none. A PROP, deliberately: the plan is a property of the dispatch,
-   * not of the group that happens to render it — an in-turn beat splits one
-   * backend run into several activity groups, and this component only ever
-   * sees its OWN blocks, so a continuation group would forget the plan
-   * entirely. `Conversation` scans the whole record with `planContext()` and
-   * passes the result ONLY to the group it renders as active (mirroring
-   * `inFlightCount`), so a historical group can never show a live plan.
-   *
-   * Rendered as a quiet checklist strip UNDER the status line: the strip
-   * answers "where are we in the plan", the header keeps answering "what is
-   * it doing this second". They are deliberately not merged.
-   */
-  readonly plan?: PlanContext | null;
-  /**
    * Factory for an attachment row's take-back handler, or undefined when
    * removal is unavailable (no session, or a turn in flight). A FACTORY keyed
    * on the stored path rather than a handler taking one, so the row itself
@@ -99,16 +82,10 @@ export interface ActivityBlockProps {
    *
    * A prop, not a hook call here: this component is `memo`'d over a stable
    * `blocks` identity, and reaching for the bridge inside it would make every
-   * historical group re-render on unrelated store churn — the same reasoning
-   * that keeps `plan` a prop.
+   * historical group re-render on unrelated store churn.
    */
   readonly onRemoveAttachment?: (path: string) => () => void;
 }
-
-/** Visible plan rows before the "+n more" tail. A bound, not a layout: real
- *  lists are 3-8 items, and an unbounded strip could push the conversation
- *  off-screen on a pathological plan. */
-const PLAN_MAX_ROWS = 8;
 
 /** The row views of a history nobody has opened yet — one shared empty array,
  *  so the memo below hands every such group the same identity. */
@@ -163,15 +140,13 @@ function formatDuration(ms: number): string {
  * memo: `blocks` identity is stable per record snapshot (groupRecord is
  * memoized on the record), so historical groups bail out of Conversation's
  * per-delta re-renders; the live group still updates via its own 1 Hz tick
- * and its changing props. `plan` does not weaken that: a historical group
- * receives the literal `null`, which never changes identity.
+ * and its changing props.
  */
 export const ActivityBlock = memo(function ActivityBlock(
   props: ActivityBlockProps,
 ): JSX.Element {
   const { blocks, active, turnStartedAt, backendStartedAt, lang } = props;
   const inFlightCount = props.inFlightCount ?? 1;
-  const plan = props.plan ?? null;
   const onRemoveAttachment = props.onRemoveAttachment;
   const t = useMemo(() => makeT(lang), [lang]);
   // Everything derived from the blocks, once per `blocks` identity
@@ -199,8 +174,8 @@ export const ActivityBlock = memo(function ActivityBlock(
     // Rendered rows, not raw blocks: a patch preview folds into the write it
     // previews (the permission rule emits it BEFORE the tool runs, so the
     // record holds diff-then-action and the history read backwards). The
-    // live-line lookups below stay on `steps` — a patch block is neither an
-    // op nor a todo, so folding cannot change what they find.
+    // live-line lookup below stays on `steps` — a patch block is not an op,
+    // so folding cannot change what it finds.
     const rows = activityRows(blocks);
     // The terminal marker's evidenceDetail (改动文件 / 风险 / 待办 / output
     // roll-up — what Herta's prompt reads) surfaces as one expandable row at
@@ -214,19 +189,9 @@ export const ActivityBlock = memo(function ActivityBlock(
     // a result row ("↳ exit 1 · 0 lines") as the "current activity" reads
     // wrong while the backend works, and the projected verbs are canonical
     // English regardless of locale. Result rows still appear in the history.
-    // With a 任务清单 in play (2026-07-23, user request) the line leads with
-    // the step-level context — "步骤 2/4 · <item> · 写入 x" — so the current
-    // task is visible throughout, not only at the flip. Dispatches without a
-    // todo list keep the op-only line.
     const latestOp = latestOpStep(steps);
-    const latestTodo = latestTodoProgressStep(steps);
-    const opText = latestOp !== undefined ? stepDisplayBody(latestOp, t) : "";
     const latestStep =
-      latestTodo === undefined || latestTodo === latestOp
-        ? opText
-        : opText === ""
-          ? stepDisplayBody(latestTodo, t)
-          : `${stepDisplayBody(latestTodo, t)} · ${opText}`;
+      latestOp !== undefined ? stepDisplayBody(latestOp, t) : "";
     return {
       chip,
       summary,
@@ -508,15 +473,13 @@ export const ActivityBlock = memo(function ActivityBlock(
             return {
               body: stepDisplayBody(b, t),
               // Icon parses the CANONICAL body — the display body may be a
-              // localized verb stepIcon can't recognize. Failure and todo rows
-              // key off the structured digest instead.
+              // localized verb stepIcon can't recognize. Failure and
+              // attachment rows key off the structured digest instead.
               icon: failed
                 ? "fail"
-                : b.digest?.kind === "todo"
-                  ? "todo"
-                  : b.digest?.kind === "attachment"
-                    ? "attach"
-                    : stepIcon(b.body),
+                : b.digest?.kind === "attachment"
+                  ? "attach"
+                  : stepIcon(b.body),
               failed,
               isOp: b.digest?.kind === "op",
               detail: stepDisplayDetail(b, t),
@@ -545,25 +508,6 @@ export const ActivityBlock = memo(function ActivityBlock(
           }),
     [rows, t, openFile, onRemoveAttachment, rowsMounted],
   );
-
-  // ── Live plan strip (2026-07-26) ────────────────────────────────────────
-  // Derived from props every render — NO state. Anything remembered here
-  // (a frozen row set, a "seen it" latch) would outlive the turn and the
-  // session that produced it, which is the exact hazard class the
-  // 2026-07-24 transient-state audit catalogued.
-  //
-  // Only while the run is LIVE: `plan` is already null for a historical
-  // group (Conversation passes it to the active one only) and `planContext`
-  // stops at a terminal marker, so this guard is the third, local, one —
-  // the strip is live status and must vanish the moment the run ends,
-  // leaving the collapsed done-marker rendering exactly as it was.
-  //
-  // `itemsKnown` false = a record persisted before the digest carried its
-  // items: the list is UNKNOWN, not empty, so there is nothing honest to
-  // draw as rows. The header's 步骤 k/n keeps working from the counts.
-  const planItems = active && plan?.itemsKnown ? plan.items : undefined;
-  const planRows = planItems?.slice(0, PLAN_MAX_ROWS) ?? [];
-  const planHidden = (planItems?.length ?? 0) - planRows.length;
 
   // Animated reveal of the history (bug 2). The panel is always mounted (when
   // expandable) and grows/shrinks via a measured max-height transition, so the
@@ -740,62 +684,6 @@ export const ActivityBlock = memo(function ActivityBlock(
           <span className="activity-line__duration">{durationLabel}</span>
         )}
       </div>
-      {/* The plan strip is a SIBLING of the collapsible history, never a
-          child of it: the history's reveal animates a MEASURED max-height,
-          so anything growing inside it while the backend works would either
-          be clipped by a stale ceiling or fight the transition. Here it
-          simply pushes the (collapsed or open) panel down. */}
-      {planRows.length > 0 && (
-        <ul className="activity-plan" aria-label={t("activity.todo.list")}>
-          {planRows.map((item, i) => (
-            <li
-              // biome-ignore lint/suspicious/noArrayIndexKey: todo_write is full-list replacement, so item text is neither unique nor stable (板砖 rewords rows mid-run) — position is the only usable identity, and the rows carry no per-row state to mis-associate.
-              key={i}
-              className={`activity-plan__row is-${item.status.replace("_", "-")}`}
-              // The full text, for a row the single-line ellipsis truncates.
-              title={item.content}
-            >
-              {/* ✓ / ▸ / ○ — the CLI plan strip's mark triad (plan-strip.ts
-                  MARK), form instead of motion: the 2026-07-27 dot redesign
-                  leaves the activity LED as the one pulsing element. */}
-              <span className="activity-plan__mark" aria-hidden="true">
-                {item.status === "completed" && (
-                  <svg
-                    className="activity-plan__check"
-                    viewBox="0 0 10 10"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M1.5 5.2l2.4 2.4L8.5 2.6" />
-                  </svg>
-                )}
-                {item.status === "in_progress" && (
-                  <svg
-                    className="activity-plan__caret"
-                    viewBox="0 0 8 10"
-                    aria-hidden="true"
-                  >
-                    <path d="M1.4 1.6l5.2 3.4-5.2 3.4z" />
-                  </svg>
-                )}
-              </span>
-              {/* Backend-authored task text, rendered VERBATIM (D7): this is
-                  the same string the record shows Herta. Only the chrome
-                  around it localizes. */}
-              <span className="activity-plan__text">{item.content}</span>
-            </li>
-          ))}
-          {planHidden > 0 && (
-            <li className="activity-plan__row activity-plan__more">
-              {t("activity.plan.more", { n: planHidden })}
-            </li>
-          )}
-        </ul>
-      )}
       {expandable && (
         <div
           ref={historyRef}

@@ -50,7 +50,6 @@ const backendReport = (status: string) => ({
       tests: [],
       permissions: [],
       residualRisks: [],
-      nextActions: [],
     },
   },
 });

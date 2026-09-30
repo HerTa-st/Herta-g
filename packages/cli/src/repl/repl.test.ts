@@ -54,7 +54,6 @@ function mkV2Driver(provider: CompletionProviderAdapter): V2ActorDriver {
       tests: [],
       permissions: [],
       residualRisks: [],
-      nextActions: [],
     }),
   } as unknown as CodingAgentRuntime;
   const noopRouter: ProviderAdapter = {

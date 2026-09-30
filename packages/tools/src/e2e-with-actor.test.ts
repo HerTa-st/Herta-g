@@ -15,7 +15,6 @@ import {
   type PermissionEngine,
   ReadLedger,
   RulePermissionEngine,
-  TodoStore,
 } from "@herta/core";
 import { FakeAskResolver, FakeProvider } from "@herta/core/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,7 +28,6 @@ import {
   registerWriteNewFileRule,
   reportFindingTool,
   runCommandTool,
-  todoWriteTool,
   writeNewFileTool,
 } from "./index.js";
 import { mkTmpWorkspace, type TmpWorkspace } from "./testing/tmp-workspace.js";
@@ -181,17 +179,16 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
       "write_new_file",
       "run_command",
       "command_stop",
-      "todo_write",
       "memory_save",
-      // Appends to the per-brief findings ledger (ADR 0039) — harness state,
-      // same class as todo_write; serial keeps finding indices in order.
+      // Appends to the per-brief findings ledger (ADR 0039) — harness state;
+      // serial keeps finding indices in order.
       "report_finding",
     ]) {
       expect(flags.get(mutator), mutator).toBe(false);
     }
   });
 
-  it("registers all fifteen MVP tools via createMvpTools (list_files left on 2026-09-18, ADR 0067)", () => {
+  it("registers all fourteen MVP tools via createMvpTools (list_files left on 2026-09-18, ADR 0067; todo_write on 2026-09-30, ADR 0073)", () => {
     const tools = createMvpTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       "command_output",
@@ -207,7 +204,6 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
       "run_command",
       "search_text",
       "show_excerpt",
-      "todo_write",
       "write_new_file",
     ]);
   });
@@ -232,7 +228,7 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
     expect(minimal(true)).toContain("view_image");
   });
 
-  it("createMinimalTools (ADR 0040): the trained pair plus the record channels (digest ADR 0043, todo_write ADR 0047 §4), and the record channels accept the shell's path spelling", async () => {
+  it("createMinimalTools (ADR 0040): the trained pair plus the record channels (digest ADR 0043), and the record channels accept the shell's path spelling", async () => {
     ws = await mkTmpWorkspace({ "src/a.ts": "one\ntwo\nthree\n" });
     const tools = createMinimalTools({
       bashPath: "/nonexistent/bash",
@@ -245,10 +241,6 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
       "report_finding",
       "show_excerpt",
       "str_replace_editor",
-      // ADR 0047 §4 (owner, 2026-08-26): without it the 待办 lane was
-      // structurally empty on the default contract and the GUI plan card
-      // never lit for a minimal dispatch.
-      "todo_write",
     ]);
     // Native and forward-slash spellings of the workspace pass; a relative
     // path passes; on Windows the /e/… MSYS form is understood too (live GUI
@@ -259,7 +251,6 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
       signal: new AbortController().signal,
       workspaceRoot: ws.root,
       reads: new ReadLedger(),
-      todos: new TodoStore(),
       bg: new BackgroundHost(),
       bus: new InMemoryEventBus<AgentEvent>(),
       memory: new NoopMemoryManager(),
@@ -544,121 +535,14 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
     expect(final).toBe("export const value = 2;\n");
   });
 
-  it("e2e: todo_write lays out steps, updates statuses, unfinished fold into nextActions — and cap the status at partial after the end-of-run check", async () => {
-    ws = await mkTmpWorkspace({});
-    const tools = new InMemoryToolRegistry();
-    tools.register(todoWriteTool());
-    let endCheck = "";
-    const provider = new FakeProvider({
-      turns: [
-        [
-          {
-            type: "tool-call-request",
-            call: {
-              id: "t1",
-              tool: "todo_write",
-              input: {
-                todos: [
-                  {
-                    content: "locate parser cursor bug",
-                    status: "in_progress",
-                  },
-                  { content: "patch parser.ts", status: "pending" },
-                  { content: "run parser tests", status: "pending" },
-                ],
-              },
-            },
-          },
-          { type: "finish", reason: "tool_calls" },
-        ],
-        [
-          {
-            type: "tool-call-request",
-            call: {
-              id: "t2",
-              tool: "todo_write",
-              input: {
-                todos: [
-                  { content: "locate parser cursor bug", status: "completed" },
-                  { content: "patch parser.ts", status: "completed" },
-                  { content: "run parser tests", status: "in_progress" },
-                ],
-              },
-            },
-          },
-          { type: "finish", reason: "tool_calls" },
-        ],
-        [
-          { type: "text-delta", text: "done" },
-          { type: "finish", reason: "stop" },
-        ],
-        // Stopped with an item open: one more step, with the end-of-run
-        // check (long-run study item 4). The model leaves it open.
-        (frame) => {
-          endCheck =
-            "trailingState" in frame ? (frame.trailingState ?? "") : "";
-          return [
-            { type: "text-delta", text: "the tests are still to run" },
-            { type: "finish", reason: "stop" },
-          ];
-        },
-      ],
-    });
-    const { runtime, bus } = mkRuntime({
-      provider,
-      tools,
-      workspaceRoot: ws.root,
-    });
-
-    const events: AgentEvent[] = [];
-    bus.onAny((e) => events.push(e));
-
-    const report = await runtime.runBrief(brief("fix the parser"), {
-      userMessages: userMessages("fix the parser"),
-    });
-    expect(endCheck).toContain("收尾检查");
-    // An open item caps the status as a refusal does (owner 2026-09-29):
-    // 完成 beside ↳ 待办 would claim work the list says is not done.
-    expect(report.status).toBe("partial");
-
-    // Both full-list writes publish plan.updated with the new todo payload.
-    const planEvents = events.filter((e) => e.type === "plan.updated");
-    expect(planEvents).toHaveLength(2);
-    const last = planEvents[1];
-    expect(last?.type).toBe("plan.updated");
-    if (last?.type === "plan.updated") {
-      expect(last.todos).toHaveLength(3);
-      expect(last.todos.filter((t) => t.status === "completed")).toHaveLength(
-        2,
-      );
-    }
-
-    // The item still in_progress at brief end folds into nextActions
-    // (ADR 0025 §2) — the honest unfinished list, not a claim of done.
-    expect(report.nextActions).toEqual(["run parser tests"]);
-  });
-
-  it("e2e: a run that brings its list up to date after the end-of-run check reports completed", async () => {
+  it("e2e: a run that records its finding and stops reports completed at that stop — no end-of-run check, no todo carry-over (ADR 0073)", async () => {
     ws = await mkTmpWorkspace({
       "src/parser.ts": "export const cursor = 0;\n",
     });
     const tools = new InMemoryToolRegistry();
-    tools.register(todoWriteTool());
     tools.register(reportFindingTool());
-    const write = (id: string, status: "pending" | "completed") => [
-      {
-        type: "tool-call-request" as const,
-        call: {
-          id,
-          tool: "todo_write",
-          input: { todos: [{ content: "find the cursor bug", status }] },
-        },
-      },
-      { type: "finish" as const, reason: "tool_calls" as const },
-    ];
     const provider = new FakeProvider({
       turns: [
-        write("t1", "pending"),
         [
           {
             type: "tool-call-request",
@@ -673,16 +557,11 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
           },
           { type: "finish", reason: "tool_calls" },
         ],
-        // Did the work, forgot to mark it: the check catches exactly this.
         [
           { type: "text-delta", text: "done" },
           { type: "finish", reason: "stop" },
         ],
-        write("t2", "completed"),
-        [
-          { type: "text-delta", text: "done" },
-          { type: "finish", reason: "stop" },
-        ],
+        // A third call would exhaust the script and fail the run.
       ],
     });
     const { runtime } = mkRuntime({ provider, tools, workspaceRoot: ws.root });
@@ -691,7 +570,7 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
       userMessages: userMessages("fix the parser"),
     });
     expect(report.status).toBe("completed");
-    expect(report.nextActions).toEqual([]);
+    expect("nextActions" in report).toBe(false);
   });
 
   it("e2e: a background command left running is reaped when the brief ends (ADR 0025 slice 4)", async () => {

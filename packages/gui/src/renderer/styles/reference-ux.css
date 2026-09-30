@@ -455,7 +455,7 @@ body {
 .activity-step__text,
 .activity-step__headline,
 .activity-step__detail,
-.activity-plan__text,
+.trace-ticker,
 .diff-body,
 .file-viewer__body {
   user-select: text;
@@ -4248,126 +4248,17 @@ button.session-item__badge--dismiss {
   flex-direction: column;
   gap: 6px;
 }
-/* ── Live plan strip (2026-07-26) ──────────────────────────────────────
-   板砖's 任务清单 while the dispatch runs: one quiet row per todo item,
-   under the status line. The header answers "what is it doing this
-   second"; this answers "where are we in the plan".
-
-   Same hairline family as the history panel above — identical margin (the
-   LED's centre, derived from --record-left) + 12px padding + 1px rule — so
-   the two read as one gutter even though the strip is deliberately OUTSIDE
-   the collapsible panel (its measured max-height animation must not see
-   this growth). */
-.activity-plan {
-  margin: 3px 0 0 calc(var(--record-left, 8px) + 3px);
-  /* The 3px bottom clearance predates the 2026-07-27 caret (the in-progress
-     mark used led-pulse, whose glow reached past the row and was clipped by
-     the group's content-visibility padding box). Kept: it is breathing room
-     now, and removing it would nudge every strip's height for no gain. */
-  padding: 1px 0 3px 12px;
-  border-left: 1px solid var(--hairline);
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.activity-plan__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--muted-4);
-}
-.activity-plan__text {
-  /* One line per item, always: the strip is a glance at the plan's shape,
-     not a place to read a paragraph. The full text rides `title`. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.activity-plan__mark {
-  flex: none;
-  /* 7px = the LED's diameter, so the markers sit on the same visual grid. */
-  width: 7px;
-  height: 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted-faint);
-}
-.activity-plan__check {
-  width: 9px;
-  height: 9px;
-  /* The check overflows the 7px marker box by 1px each side — centered, so
-     it stays optically aligned with the dots above and below it. */
-  flex: none;
-}
-.activity-plan__row.is-pending .activity-plan__mark {
-  border: 1px solid var(--muted-faint);
-  border-radius: 50%;
-}
-.activity-plan__row.is-in-progress {
-  color: var(--muted-strong);
-}
-.activity-plan__row.is-in-progress .activity-plan__mark {
-  /* Caret, not a pulsing dot (2026-07-27, same rule as .plan-card__caret):
-     the header LED four rows up is the pulse; the strip states which step
-     in form. */
-  color: var(--banzhuan-led);
-}
-.activity-plan__caret {
-  width: 7px;
-  height: 9px;
-  flex: none;
-  fill: currentColor;
-}
-.activity-plan__more {
-  /* Aligned with the text column (7px marker + 8px gap), not the markers:
-     it is chrome about the list, not an item of it. */
-  padding-left: 15px;
-  color: var(--muted-faint);
-}
-/* The inline strip is the NARROW-window fallback for the rail plan card
-   (2026-07-26). Above 900px the rail is visible and owns the plan — showing
-   it twice is noise, and the rail's copy is the better one (fixed, so it does
-   not scroll away mid-run). Below 900px `.utility-rail` is display:none, so
-   without this the plan would vanish entirely on a small window. A media
-   query decides, not JS: nothing to keep in sync, nothing to go stale. */
-@media (min-width: 901px) {
-  .activity-plan { display: none; }
-}
-/* The strip had no entrance either — it was minted by React already in its
-   final state, so it appeared between one frame and the next. @starting-style
-   gives that first paint an origin to move from. It fades and settles rather
-   than sliding: this one lives INSIDE the transcript, where a horizontal move
-   would fight the column it sits in.
-
-   The strip's DISAPPEARANCE stays instant, and deliberately so. It is owned by
-   its activity group, and a Herta beat ENDS that group — the strip is not
-   hidden, its host is finished, and a new group's strip takes over below the
-   beat. That discontinuity is exactly what moving the plan to the rail solved;
-   re-solving it here would mean duplicating the rail's hold/retract machinery
-   into a surface that only appears under 900px. */
-.activity-plan {
-  transition: opacity 260ms ease;
-}
-@starting-style {
-  .activity-plan {
-    opacity: 0;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .activity-line__led.is-pulsing { animation: none; opacity: 1; }
   .activity-line__history { transition: none; }
 }
 
-/* ── 板砖 plan card (rail, 2026-07-26) ────────────────────────────────────
-   A sibling of the device card, not a new kind of object: same 18px radius,
-   same frosted --speech-* surface, so the two read as one instrument — the
-   machine, and what it is working through.
+/* ── The rail card family (plan card 2026-07-26; the name outlived it, ADR
+   0073) ────────────────────────────────────────────────────────────────
+   The chrome the trace and repository cards ride. A sibling of the device
+   card, not a new kind of object: same 18px radius, same frosted --speech-*
+   surface, so they read as one instrument — the machine, and what it is
+   working through.
 
    Every colour is a token with a [data-theme="dark"] override, so dark mode
    is automatic. The one thing NOT copied from .device-card is its
@@ -4512,6 +4403,9 @@ button.session-item__badge--dismiss {
     --fog-top-h 180ms ease,
     --fog-bottom-h 180ms ease;
 }
+/* A card sliding shut squeezes its list: no scrollbar for the moment it
+   takes (`hidden` still scrolls, so the position is kept). */
+.plan-card:not(.is-open) .plan-card__list { overflow-y: hidden; }
 .plan-card__list.has-fog-top { --fog-top-h: 18px; }
 .plan-card__list.has-fog-bottom { --fog-bottom-h: 18px; }
 /* The house scrollbar — identical to .conversation / .composer-input, so the
@@ -4537,17 +4431,12 @@ button.session-item__badge--dismiss {
   min-width: 0;
   font-size: 12.5px;
   line-height: 1.45;
-  /* A step changing status EASES. 板砖 sometimes lands two flips in one
-     todo_write (it does the work, then updates the list once), and an
-     instant recolour of two rows at once reads as a glitch; the same change
-     eased over a beat reads as what it is — the plan catching up. */
+  /* A row changing status EASES: two rows settling in one update recolour
+     over a beat instead of flickering at once. */
   transition: color 260ms ease;
-  /* --muted-2, not the --muted-4 the inline strip uses: measured on the
-     composited card surface, --muted-4 lands at 3.1:1 in light mode. That is
-     fine for the strip (a glanceable echo of a line the transcript already
-     spells out) and not fine here — this card IS the plan now, and its rows
-     are meant to be read. The three tiers survive: pending at this weight,
-     completed dimmed below, in-flight promoted to full --ink. */
+  /* --muted-2: measured on the composited card surface, --muted-4 lands at
+     3.1:1 in light mode, and these rows are meant to be read. The in-flight
+     row is promoted to full --ink. */
   color: var(--muted-2);
 }
 .plan-card__mark {
@@ -4571,126 +4460,127 @@ button.session-item__badge--dismiss {
   height: 10px;
   flex: none;
 }
-.plan-card__row.is-pending .plan-card__mark {
-  border: 1px solid var(--muted-faint);
-  border-radius: 50%;
-}
-/* Done rows are marked, not faded. An earlier `opacity: .72` here bought
-   recession by fading the text toward the card surface — measured, that put
-   completed items at 2.65:1, i.e. the steps you might want to re-read became
-   the hardest to read. The ✓ already says "done" unambiguously, and the
-   in-flight row is promoted to full --ink, so the hierarchy survives without
-   spending contrast on it. The mark carries the tint instead. */
-.plan-card__row.is-completed .plan-card__mark {
-  color: var(--banzhuan-led);
-  opacity: .75;
-}
-.plan-card__row.is-in-progress {
-  color: var(--ink);
-}
 /* The current step is a CARET, not a pulsing dot (owner 2026-07-27: three
    identical blue pulses — sidebar, activity LED, this — ran at once during a
    dispatch). The redesign's rule: motion means "the live thing" and only the
    record's activity LED may claim it; every other surface states its fact in
-   FORM. The caret is the CLI plan strip's own in-progress mark (✓ / ▸ / ·),
-   so the two frontends point at the current step the same way — and it needs
-   no motion to read as "you are here". */
-.plan-card__row.is-in-progress .plan-card__mark {
-  color: var(--banzhuan-led);
-}
-/* Size comes from the `.plan-card__mark svg` rule above (10px box, same
-   1px overflow-and-center as the ✓); the 8×10 viewBox letterboxes the
+   FORM. It needs no motion to read as "you are here". Size comes from the
+   `.plan-card__mark svg` rule above; the 8×10 viewBox letterboxes the
    triangle back to its true proportions inside it. */
 .plan-card__caret {
   fill: currentColor;
 }
 /* Parked on a permission gate: the step is the current one but nothing is
-   being done to it — it is waiting on the user. The caret goes hollow, same
-   move as the pending ring, keeping the LED tint so it still reads as the
-   CURRENT step rather than a not-started one. */
+   being done to it — it is waiting on the user. The caret goes hollow,
+   keeping the LED tint so it still reads as the CURRENT step. */
 .plan-card.is-waiting .plan-card__caret {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.2;
   stroke-linejoin: round;
 }
-.plan-card__text {
-  min-width: 0;
-  /* Wraps, unlike the inline strip's single line: the rail is a column with
-     room to spend, and a truncated task name is the one thing this card
-     exists to show. */
-  overflow-wrap: anywhere;
+
+/* ── 操作轨迹 rail card (2026-08-17; the timeline, ADR 0073) ────────────
+   Rides the .plan-card chrome — glass, slide, fog — as a timeline: one
+   node per stretch of one phase down a hairline, the finished ones folded
+   to a counted line, the one in flight naming its step with one ticker line
+   of what that step is producing (the owner's pick, 2026-09-30). Form, not
+   motion: the node in flight is a hollow LED ring (dashed while parked on an
+   approval); the text is the only thing that moves. */
+/* A long run lands hundreds of steps: the timeline caps its visible height
+   and scrolls inside — with the fog edges and the follow-tail pin, the card
+   reaches this size and then stays. */
+.trace-card .plan-card__list {
+  max-height: min(320px, 42vh);
+  gap: 11px;
+  --card-row-gap: 11px;
+  /* Room for the hairline under a node while the node after it opens or
+     closes from zero height: without it the line overhangs the list and a
+     scrollbar blinks in (lab 2026-09-30). The negative margin gives the
+     space back to the card. */
+  padding-bottom: 12px;
+  margin-bottom: -12px;
 }
-.plan-card__unknown {
-  margin: 0;
-  font-size: 12px;
+.trace-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+}
+/* The hairline to the next node: from under this dot across the list gap. */
+.trace-node::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 15px;
+  bottom: -11px;
+  width: 1px;
+  background: var(--hairline-strong);
+}
+.trace-node:last-child::before {
+  display: none;
+}
+.trace-node__dot {
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  /* Optical centre of the first line (12.5px × 1.45 ≈ 18px). */
+  margin-top: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--banzhuan-led) 42%, transparent);
+  transition:
+    background-color 260ms ease,
+    border-color 260ms ease;
+}
+.trace-node.is-fail .trace-node__dot {
+  background: #b98080;
+}
+/* Written, not run yet: it waits its turn behind the node in flight — a
+   faint ring, its line in the quietest ink. */
+.trace-node.is-queued .trace-node__dot {
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+}
+.trace-node.is-queued .trace-node__line {
+  color: var(--muted-4);
+}
+.trace-node.is-in-flight .trace-node__dot {
+  background: transparent;
+  border: 1.5px solid var(--banzhuan-led);
+}
+/* Parked on an approval: the step is the current one, but nothing is being
+   done to it — the ring breaks. */
+.plan-card.is-waiting .trace-node.is-in-flight .trace-node__dot {
+  border-style: dashed;
+}
+.trace-node__body {
+  min-width: 0;
+}
+.trace-node__line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-2);
+  transition: color 260ms ease;
+}
+.trace-node.is-in-flight .trace-node__line {
+  color: var(--ink);
+}
+.trace-node__phase {
+  flex: none;
+  color: var(--muted-4);
+}
+.trace-node__phase::after {
+  content: "·";
+  margin-left: 7px;
   color: var(--muted-faint);
 }
-
-/* ── 操作轨迹 rail card (2026-08-17) — rides the .plan-card chrome ──────
-   The plan card's fallback for dispatches with no 任务清单 (every 极简 run).
-   Same glass, slide, fog and mark triad; what differs lives under the
-   `trace-card` variant class below. */
-/* No denominator, so no fill fraction: a slow edge-to-edge sweep is the
-   live state (and the card's ONE moving element — the row marks stay
-   static per the 2026-07-27 form-not-motion rule); settled, the meter
-   rests as a solid full line, the same "done" register as the plan meter
-   reaching its end. */
-.trace-card__meter-fill {
-  display: block;
-  height: 100%;
-  width: 100%;
-  border-radius: inherit;
-  background: var(--banzhuan-led);
-  opacity: .55;
-  transition: opacity 420ms ease;
-}
-.trace-card__meter-fill.is-live {
-  opacity: 1;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--banzhuan-led) 35%,
-    var(--banzhuan-led) 65%,
-    transparent 100%
-  );
-  background-size: 45% 100%;
-  background-repeat: no-repeat;
-  animation: trace-meter-sweep 1.6s ease-in-out infinite;
-}
-@keyframes trace-meter-sweep {
-  0% { background-position: -80% 0; }
-  100% { background-position: 180% 0; }
-}
-/* Parked on a permission gate: nothing is being worked — the sweep stops
-   mid-flight (paused, not removed: resuming continues rather than
-   restarting). Same discipline as the plan caret going hollow. */
-.plan-card.is-waiting .trace-card__meter-fill.is-live {
-  animation-play-state: paused;
-}
-/* Rows are append-only within a dispatch, so each mounts exactly once —
-   a small rise-and-fade entrance makes the trace visibly GROW instead of
-   rows teleporting in. */
-/* The per-mount fade this row used to carry gave way to the family's
-   shared row motion (ADR 0058 §5.7): an appended op enters with it, the
-   first trace lands still with the card's slide. */
-.trace-card__row {
-  align-items: center;
-}
-/* A long-run dispatch lands hundreds of ops (owner 2026-08-17): the list
-   caps its VISIBLE height (~6 rows) and scrolls inside — with the fog
-   edges and the follow-tail pin, the card reaches this size and then
-   stays, instead of creeping down the rail. trace-context caps the DOM
-   rows separately (TRACE_MAX_ROWS); the header count still covers the
-   whole run. The plan card keeps its grow-then-flex behaviour — a todo
-   list is finite and its tail is the payoff. */
-.trace-card .plan-card__list {
-  max-height: 168px;
-}
-/* One line per op, ellipsized — a command line can be arbitrarily long and
-   the row is a pointer, not the record (hover carries the full text via
-   title; the record's own rows keep everything). Unlike plan items, which
-   wrap: a task NAME is the card's content, an op ARG is its address. */
+/* One line per node, ellipsized — a command line can be arbitrarily long and
+   the node is a pointer, not the record (hover carries the full text). */
 .trace-card__text {
   min-width: 0;
   flex: 1;
@@ -4698,35 +4588,79 @@ button.session-item__badge--dismiss {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.trace-card__verb {
-  color: var(--muted-4);
-}
-.trace-card__row.is-running {
-  color: var(--ink);
-}
-.trace-card__row.is-running .plan-card__mark {
-  color: var(--banzhuan-led);
-}
-.trace-card__row.is-ok .plan-card__mark {
-  color: var(--banzhuan-led);
-  opacity: .75;
-}
-.trace-card__row.is-fail .plan-card__mark {
-  color: #9a5b5b;
-}
-/* The optical-centre nudge is for the plan card's wrapping rows; these are
-   single-line and centre-aligned. */
-.trace-card__row .plan-card__mark {
-  margin-top: 0;
-}
 .trace-card__note {
   flex: none;
   margin-left: auto;
-  padding-left: 8px;
+  padding-left: 6px;
   font-size: 11.5px;
   color: var(--muted-4);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* The ticker (ADR 0073): the newest line the step in flight is producing —
+   the file as it is written, the command as it prints — one mono line that
+   fades out at its right edge, with the LED block where the next character
+   lands. A new line rises into place; a growing line just flows. */
+.trace-ticker {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-top: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-2);
+  white-space: pre;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, #000 76%, transparent);
+  mask-image: linear-gradient(90deg, #000 76%, transparent);
+}
+.trace-ticker__line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  animation: trace-ticker-rise 180ms var(--ease-signature) both;
+}
+@keyframes trace-ticker-rise {
+  from {
+    opacity: .2;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* An edit's lines carry the diff stat's own greens and reds. */
+.trace-ticker__line.is-add {
+  color: #3f7d50;
+}
+.trace-ticker__line.is-del {
+  color: #a4544c;
+}
+:root[data-theme="dark"] .trace-ticker__line.is-add {
+  color: #6fa86f;
+}
+:root[data-theme="dark"] .trace-ticker__line.is-del {
+  color: #c4736b;
+}
+.trace-ticker__empty {
+  color: var(--muted-faint);
+}
+.trace-ticker__cursor {
+  flex: none;
+  width: 5px;
+  height: 11px;
+  margin-left: 1px;
+  background: var(--banzhuan-led);
+  opacity: .7;
+}
+/* The step finished: its last line stays, the cursor goes. */
+.trace-ticker.is-done .trace-ticker__cursor {
+  display: none;
+}
+.trace-ticker.is-done {
+  color: var(--muted-4);
 }
 
 /* ── 仓库 rail card (ADR 0058) — rides the .plan-card chrome ────────────
@@ -4957,21 +4891,26 @@ button.repo-card__path,
   transition: color 140ms ease;
 }
 /* Row entrance / exit, shared by every card in the family (repository,
-   plan, trace — card-motion.ts). The height animates to and from `auto`
-   (`interpolate-size`, Chromium 129+): a plan step that wraps to two
-   lines opens to its own height, not to a guessed cap. The 7px list gap
-   collapses with the row (the negative margin) so the rows below settle
-   without a jump; opacity leads the exit so the row is gone before its
-   space closes. */
+   trace — card-motion.ts). The height animates to and from `auto`
+   (`interpolate-size`, Chromium 129+): a row that wraps to two lines opens
+   to its own height, not to a guessed cap. The list gap (--card-row-gap,
+   7px unless the list says otherwise) collapses with the row (the negative
+   margin) so the rows below settle without a jump;
+   opacity leads the exit so the row is gone before its space closes. A
+   trace segment moves as one row, its steps and live pane with it. */
 .plan-card__row.is-entering,
-.plan-card__row.is-leaving {
+.plan-card__row.is-leaving,
+.trace-card__segment.is-entering,
+.trace-card__segment.is-leaving {
   interpolate-size: allow-keywords;
   overflow: hidden;
 }
-.plan-card__row.is-entering {
+.plan-card__row.is-entering,
+.trace-card__segment.is-entering {
   animation: card-row-in 300ms var(--ease-signature) both;
 }
-.plan-card__row.is-leaving {
+.plan-card__row.is-leaving,
+.trace-card__segment.is-leaving {
   animation: card-row-out 220ms ease both;
   pointer-events: none;
 }
@@ -4980,7 +4919,7 @@ button.repo-card__path,
     opacity: 0;
     transform: translateY(-4px);
     height: 0;
-    margin-top: -7px;
+    margin-top: calc(-1 * var(--card-row-gap, 7px));
   }
   60% {
     height: auto;
@@ -5008,13 +4947,16 @@ button.repo-card__path,
     opacity: 0;
     transform: translateY(-3px);
     height: 0;
-    margin-top: -7px;
+    margin-top: calc(-1 * var(--card-row-gap, 7px));
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .plan-card__row.is-entering,
-  .plan-card__row.is-leaving { animation: none; }
-  .plan-card__row.is-leaving { display: none; }
+  .plan-card__row.is-leaving,
+  .trace-card__segment.is-entering,
+  .trace-card__segment.is-leaving { animation: none; }
+  .plan-card__row.is-leaving,
+  .trace-card__segment.is-leaving { display: none; }
   .repo-card__all svg { transition: none; }
 }
 .trace-card__note.is-fail {
@@ -5025,12 +4967,7 @@ button.repo-card__path,
   .plan-card,
   .plan-card__list,
   .plan-card__meter-fill { transition: none; }
-  .trace-card__meter-fill { transition: none; }
-  .trace-card__meter-fill.is-live {
-    animation: none;
-    background: var(--banzhuan-led);
-  }
-  .trace-card__row { animation: none; }
+  .trace-ticker__line { animation: none; }
   .plan-card__row { animation: none; }
 }
 .activity-step {

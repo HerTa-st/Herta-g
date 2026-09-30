@@ -5,7 +5,6 @@ import { type FindingsLedger, MAX_FINDINGS } from "../findings-ledger.js";
 import type { MemoryManager } from "../memory-manager.js";
 import type { PermissionEngine } from "../permission-engine.js";
 import type { ReadLedger } from "../read-ledger.js";
-import { renderTodoState, type TodoStore } from "../todo-store.js";
 import type { ToolRegistry } from "../tool-registry.js";
 import type { TranscriptStore } from "../transcript-store.js";
 import type { AgentError } from "../types/errors.js";
@@ -44,9 +43,7 @@ import {
 } from "./stream-model-inference.js";
 import { persistOversizedResult } from "./tool-result-persistence.js";
 import {
-  renderEndCheck,
   renderStepNotice,
-  renderTodoNudge,
   renderWorkingState,
   type WorkingStateInput,
 } from "./working-state.js";
@@ -58,7 +55,6 @@ export interface BackendTurnDeps {
   permissions: PermissionEngine;
   backendBuilder: BackendContextBuilder;
   transcript: TranscriptStore;
-  todos: TodoStore;
   bg: BackgroundHost;
   bus: EventBus<AgentEvent>;
   clock: () => Date;
@@ -349,11 +345,6 @@ export async function* runBackendTurnLoop(
     });
 
     let iterations = 0;
-    // The end-of-run check (long-run study item 4): given once, on the
-    // iteration after the model first stops with its list unfinished.
-    let endCheckGiven = false;
-    let endCheckDue = false;
-    const hasTodoTool = deps.tools.get("todo_write") !== undefined;
     while (true) {
       if (iterations >= MAX_TURN_ITERATIONS) {
         // The step limit ends the run where it stands — like an interruption,
@@ -382,28 +373,16 @@ export async function* runBackendTurnLoop(
 
       // The state trailer, recomputed each call and appended by the translate
       // layer AFTER the transcript, so the cache-stable prefix is untouched:
-      // the todo list (ADR 0025 §2), the working state once old iterations
-      // are dropped (below), a reminder when a long run has no list, the
-      // steps left near the limit, and the end-of-run check.
+      // the working state once old iterations are dropped (below) and the
+      // steps left near the limit.
       const lang = handle.lang ?? "zh";
-      const todoState = renderTodoState(deps.todos.all(), lang);
-      const todoNudge =
-        hasTodoTool && deps.todos.all().length === 0
-          ? renderTodoNudge(iterations - 1, lang)
-          : "";
       const stepNotice = renderStepNotice(
         iterations,
         MAX_TURN_ITERATIONS,
         lang,
       );
-      const endCheck = endCheckDue
-        ? renderEndCheck(deps.todos.unfinished().length, lang)
-        : "";
-      endCheckDue = false;
       const trailerWith = (workingState: string): string =>
-        [todoState, workingState, todoNudge, stepNotice, endCheck]
-          .filter((s) => s.length > 0)
-          .join("\n\n");
+        [workingState, stepNotice].filter((s) => s.length > 0).join("\n\n");
       let trailingState = trailerWith("");
 
       // Working-set budget (ADR 0025 slice 2): deterministic two-phase trim
@@ -542,25 +521,7 @@ export async function* runBackendTurnLoop(
         // record already showed it delivered (the user block, Herta's
         // beat) — a message everyone but 板砖 had seen.
         const late = handle.takePendingUserInput?.() ?? [];
-        if (late.length === 0) {
-          // The end-of-run check (long-run study item 4): the model stopped
-          // with items on its list not completed — often work it did and
-          // never marked, sometimes work it skipped. It gets one more step,
-          // with the check in the trailer, to continue or make the list
-          // honest; the second stop ends the run whatever the list says.
-          // Not when no step is left, or the run is being stopped.
-          if (
-            !endCheckGiven &&
-            iterations < MAX_TURN_ITERATIONS &&
-            !handle.signal.aborted &&
-            deps.todos.unfinished().length > 0
-          ) {
-            endCheckGiven = true;
-            endCheckDue = true;
-            continue;
-          }
-          break;
-        }
+        if (late.length === 0) break;
         for (const text of late) {
           deps.transcript.appendUser(text, deps.clock());
         }
@@ -576,7 +537,6 @@ export async function* runBackendTurnLoop(
         signal: handle.signal,
         workspaceRoot: deps.workspaceRoot,
         reads: deps.reads,
-        todos: deps.todos,
         bg: deps.bg,
         bus: deps.bus,
         memory: deps.memory,
@@ -597,6 +557,17 @@ export async function* runBackendTurnLoop(
             layer: "backend",
             id: callId,
             message: progress.message,
+          });
+        };
+      const outputFor =
+        (callId: string) =>
+        (chunk: string): void => {
+          if (chunk.length === 0) return;
+          deps.bus.publish({
+            type: "tool.call.output",
+            layer: "backend",
+            id: callId,
+            chunk,
           });
         };
       // Malformed-argument containment. A call whose `arguments` were not
@@ -704,6 +675,7 @@ export async function* runBackendTurnLoop(
                   call,
                   ctxFor(call),
                   progressFor(call.id),
+                  outputFor(call.id),
                 );
               } catch (err) {
                 if (isAbortError(err)) throw err;
@@ -814,6 +786,7 @@ export async function* runBackendTurnLoop(
             call,
             ctxFor(call),
             progressFor(call.id),
+            outputFor(call.id),
           );
         } catch (err) {
           // An abort mid-tool (run_command's runner, the fs walkers — audit
@@ -1238,20 +1211,6 @@ export function summarizeInput(
       case "git_status":
       case "git_diff":
         return ""; // verb alone is enough
-      case "todo_write": {
-        // Compact progress ratio: "Planning 2/5" in the activity row.
-        if (Array.isArray(obj.todos)) {
-          const total = obj.todos.length;
-          const done = obj.todos.filter(
-            (t) =>
-              typeof t === "object" &&
-              t !== null &&
-              (t as { status?: unknown }).status === "completed",
-          ).length;
-          return total > 0 ? `${done}/${total}` : "";
-        }
-        return "";
-      }
       default:
         break; // unknown tool → JSON fallback below
     }

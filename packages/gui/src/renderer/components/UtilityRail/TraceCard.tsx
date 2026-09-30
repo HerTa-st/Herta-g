@@ -2,8 +2,13 @@ import { useEffect, useMemo, useRef } from "react";
 import { useListTransitions } from "../../hooks/useListTransitions.js";
 import { useReducedMotion } from "../../hooks/useReducedMotion.js";
 import { useT } from "../../i18n/LocaleProvider.js";
+import type { LiveToolView } from "../../ipc/bridge-types.js";
 import { VERB_KEY } from "../Workspace/step-display.js";
-import type { TraceNote, TraceOp } from "../Workspace/trace-context.js";
+import {
+  type TraceNote,
+  type TraceSegment,
+  tallySegment,
+} from "../Workspace/trace-context.js";
 import { useScrollEdges } from "../Workspace/useScrollEdges.js";
 import {
   CARD_ROW_ENTER_MS,
@@ -12,43 +17,46 @@ import {
 } from "./card-motion.js";
 import { useTraceCard } from "./useTraceCard.js";
 
+type T = ReturnType<typeof useT>;
+
+const PHASE_KEY = {
+  explore: "trace.phase.explore",
+  modify: "trace.phase.modify",
+  verify: "trace.phase.verify",
+} as const;
+
 /**
- * 板砖's 操作轨迹 as a rail card — the plan card's sibling and fallback
- * (2026-08-17). For a dispatch with no 任务清单 (every 极简 run, and the
- * 标准 briefs that skip the list) the rail used to show only the device
- * ring: THAT it was busy, never WHAT it was doing, while the conversation's
- * op rows scrolled away. This pins the record's own op rows — same strings,
- * same D7 sourcing as PlanCard; nothing here is a new channel.
+ * 板砖's 操作轨迹 as a rail card (2026-08-17), as a timeline of phases (ADR
+ * 0073; the owner's pick, 2026-09-30: "timeline + one flowing ticker line").
  *
- * Design language: it RIDES the .plan-card chrome classes (glass, slide-in,
- * fog, mark triad) so the rail has one card family, with a `trace-card`
- * variant for what differs — an indeterminate sweep meter while the run is
- * live (the todo card's determinate fill has a denominator; a trace does
- * not), one-line ellipsized rows with a dim result note, and a follow-tail
- * list that tracks the newest op. Per the 2026-07-27 form-not-motion rule
- * the row marks are static (▸ caret = the op in flight); the meter's sweep
- * is the card's single IDLE moving element, and `is-waiting` stills it —
- * parked on a permission gate, nothing is being worked (audit 2026-07-26).
- * Rows move on CHANGE (ADR 0058 §5.7, the family's shared motion): an op
- * that lands eases in at the tail, a row the sliding window drops eases
- * out at the head; the first trace lands still with the card's slide.
+ * One node per stretch of one phase — 探索, 修改, 验证 — down a hairline, so
+ * the run reads as the path it took. A finished node folds to one counted
+ * line (`探索 · 读取 parser.ts 等 3 个文件，检索 2 次`) with how it ended; the
+ * node in flight names its current step and, under it, one ticker line:
+ * the newest line of what that step is producing — the file as the model
+ * writes it, the command's output as it prints — flowing as it arrives. No
+ * code box: a step's output is often over in a moment, and a pane that
+ * appears and vanishes reads as flicker, not information. A step the model
+ * has written but not run yet waits below the one in flight, faint.
+ *
+ * Every node is the record's own op rows, re-read (D7); the ticker is the
+ * one thing the record does not carry, and it is screen-only — gone with the
+ * run. Chrome: the .plan-card family (glass, slide-in, fog). Form, not
+ * motion (2026-07-27): the node in flight is a hollow LED ring, dashed while
+ * parked on an approval; the only thing that moves is the text itself.
  */
 export function TraceCard(): JSX.Element | null {
   const t = useT();
-  const { trace, open, waiting, settled } = useTraceCard();
+  const { trace, live, open, waiting, settled } = useTraceCard();
   const reduced = useReducedMotion();
   const listRef = useRef<HTMLOListElement>(null);
   const edges = useScrollEdges(listRef, trace);
 
-  // Keyed by the op's ORDINAL within the whole dispatch, not the window
-  // index: once the list trims to its cap the window slides, and index keys
-  // would remount every row per append — replaying the entrance on the
-  // entire list.
   const keyed = useMemo(
     () =>
-      (trace?.ops ?? EMPTY).map((op, i) => ({
-        id: String((trace?.firstOrdinal ?? 0) + i),
-        op,
+      (trace?.segments ?? EMPTY).map((segment) => ({
+        id: String(segment.ordinal),
+        segment,
       })),
     [trace],
   );
@@ -58,49 +66,34 @@ export function TraceCard(): JSX.Element | null {
     cardRowMotion(reduced, settled),
   );
 
-  // Follow the tail: the newest op is the one being watched. A reader who
-  // scrolled up to inspect an earlier row keeps their place (the pin releases
-  // beyond ~1½ rows of drift) — same courtesy the conversation's own
-  // autoscroll extends. An entering row opens from zero height, so the
-  // tail is followed again once its entrance has ended — otherwise the
-  // scroll stopped short by the row's final height.
-  const ops = trace?.ops;
+  // Follow the tail — the node in flight is the one being watched — unless
+  // the reader scrolled up to look at an earlier one (the pin releases past
+  // ~1½ rows of drift). An entering node opens from zero height, so the tail
+  // is followed again once its entrance has ended.
   useEffect(() => {
     const el = listRef.current;
-    if (el === null || ops === undefined) return;
+    if (el === null || trace === null) return;
     const follow = (): void => {
       const drift = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (drift < 40 || el.scrollTop === 0) el.scrollTop = el.scrollHeight;
     };
     follow();
-    const t = setTimeout(follow, CARD_ROW_ENTER_MS + 20);
-    return () => clearTimeout(t);
-  }, [ops]);
+    const timer = setTimeout(follow, CARD_ROW_ENTER_MS + 20);
+    return () => clearTimeout(timer);
+  }, [trace]);
 
   if (trace === null) return null;
 
-  const noteText = (note: TraceNote): string => {
-    switch (note.kind) {
-      case "exit":
-        return `${t("activity.result.exit")} ${note.code}`;
-      case "signal":
-        return t("activity.bg.signal");
-      case "tests":
-        return `${t("activity.result.tests")} ${note.summary}`;
-      case "fail":
-        return note.code;
-      case "matches":
-        return `${note.n} ${t("activity.result.matches")}`;
-    }
-  };
-
-  // Counts cover the WHOLE dispatch; the list below is the recent window
-  // (trace-context trims to TRACE_MAX_ROWS so a long run cannot grow the
-  // DOM without bound; the list's CSS max-height bounds the card itself).
+  // Counts cover the WHOLE dispatch; the timeline is the recent window.
   const counts = [t("trace.card.steps", { n: String(trace.steps) })];
   if (trace.writes > 0) {
     counts.push(t("trace.card.files", { n: String(trace.writes) }));
   }
+  const current = trace.current;
+  // A row's segment as THIS trace has it: the transition list hands its
+  // items back a commit late, and the node in flight must be drawn from the
+  // same trace that says it is in flight.
+  const now = new Map(trace.segments.map((s) => [s.ordinal, s]));
 
   return (
     <section
@@ -115,78 +108,56 @@ export function TraceCard(): JSX.Element | null {
         <span className="plan-card__title">{t("trace.card.title")}</span>
         <span className="plan-card__count">{counts.join(" · ")}</span>
       </header>
-      {/* No denominator, so no fill fraction: while the run is live the
-          meter carries a slow sweep (the card's one moving element); settled,
-          it rests as a solid line — the same "done" register as the plan
-          meter reaching its end. */}
-      <div className="plan-card__meter" aria-hidden="true">
-        <span
-          className={`trace-card__meter-fill${trace.running ? " is-live" : ""}`}
-        />
-      </div>
       <ol
         ref={listRef}
-        className={`plan-card__list${edges.top ? " has-fog-top" : ""}${
-          edges.bottom ? " has-fog-bottom" : ""
-        }`}
+        className={`plan-card__list trace-card__list${
+          edges.top ? " has-fog-top" : ""
+        }${edges.bottom ? " has-fog-bottom" : ""}`}
       >
         {rows.map((row) => {
-          const op = row.item.op;
+          const segment =
+            (row.phase !== "leave"
+              ? now.get(row.item.segment.ordinal)
+              : undefined) ?? row.item.segment;
+          // The node holding the step being worked, while the dispatch is
+          // live — the newest between steps, while 板砖 thinks; one with
+          // steps queued behind it while they wait their turn.
+          const inFlight =
+            current !== null &&
+            row.phase !== "leave" &&
+            segment.ordinal === current.segment;
           return (
             <li
               key={row.key}
-              className={`plan-card__row trace-card__row is-${op.status}${rowPhaseClass(row.phase)}`}
+              className={`trace-card__segment trace-node is-${segment.phase} is-${segment.status}${
+                inFlight ? " is-in-flight" : ""
+              }${rowPhaseClass(row.phase)}`}
               aria-hidden={row.phase === "leave" || undefined}
             >
-              <span className="plan-card__mark" aria-hidden="true">
-                {op.status === "ok" && (
-                  <svg
-                    viewBox="0 0 10 10"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M1.5 5.2l2.4 2.4L8.5 2.6" />
-                  </svg>
+              <span className="trace-node__dot" aria-hidden="true" />
+              <div className="trace-node__body">
+                {inFlight ? (
+                  <InFlight
+                    segment={segment}
+                    step={segment.ops[current.op - segment.firstOpOrdinal]}
+                    live={live}
+                    t={t}
+                  />
+                ) : (
+                  <div className="trace-node__line">
+                    <span className="trace-node__phase">
+                      {t(PHASE_KEY[segment.phase])}
+                    </span>
+                    <span
+                      className="trace-card__text"
+                      title={foldedText(segment, t)}
+                    >
+                      {foldedText(segment, t)}
+                    </span>
+                    {segmentNote(segment, t)}
+                  </div>
                 )}
-                {op.status === "fail" && (
-                  <svg
-                    viewBox="0 0 10 10"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M2 2l6 6M8 2l-6 6" />
-                  </svg>
-                )}
-                {op.status === "running" && (
-                  <svg
-                    className="plan-card__caret"
-                    viewBox="0 0 8 10"
-                    aria-hidden="true"
-                  >
-                    <path d="M1.4 1.6l5.2 3.4-5.2 3.4z" />
-                  </svg>
-                )}
-              </span>
-              <span className="trace-card__text" title={opTitle(op, t)}>
-                <span className="trace-card__verb">{verbText(op, t)}</span>{" "}
-                {op.arg}
-              </span>
-              {op.note !== undefined && (
-                <span
-                  className={`trace-card__note${
-                    op.status === "fail" ? " is-fail" : ""
-                  }`}
-                >
-                  {noteText(op.note)}
-                </span>
-              )}
+              </div>
             </li>
           );
         })}
@@ -195,20 +166,226 @@ export function TraceCard(): JSX.Element | null {
   );
 }
 
-const EMPTY: readonly TraceOp[] = [];
-const keyOf = (k: { readonly id: string }): string => k.id;
-
-type T = ReturnType<typeof useT>;
-
-/** Localized verb via the record rows' own map; an unknown verb (a newer
- *  record on an older renderer) falls back to the raw token rather than a
- *  blank. */
-function verbText(op: TraceOp, t: T): string {
-  const key = VERB_KEY[op.verb];
-  return key !== undefined ? t(key) : op.verb;
+/**
+ * The node in flight: its phase and current step, and — while a live view
+ * belongs to it — the ticker: the newest line the step is producing. The
+ * line flows as it arrives; each new line rises into place, so the text
+ * reads as a stream rather than a flickering label.
+ */
+function InFlight(props: {
+  readonly segment: TraceSegment;
+  readonly step: TraceSegment["ops"][number] | undefined;
+  readonly live: LiveToolView | null;
+  readonly t: T;
+}): JSX.Element {
+  const { segment, step, t } = props;
+  // A read has no stream: its node names the step, and that is all.
+  const live = props.live?.streams === true ? props.live : null;
+  const text =
+    step === undefined
+      ? ""
+      : `${verbText(step.verb, t)} ${step.arg.length > 0 ? step.arg : "…"}`;
+  const ticker = live !== null ? tickerLine(live) : null;
+  return (
+    <>
+      <div className="trace-node__line">
+        <span className="trace-node__phase">{t(PHASE_KEY[segment.phase])}</span>
+        <span className="trace-card__text" title={text}>
+          {text}
+        </span>
+        {live !== null && live.lines > 0 ? (
+          <span className="trace-card__note">
+            {t("trace.live.lines", { n: String(live.lines) })}
+          </span>
+        ) : (
+          step?.note !== undefined && (
+            <span
+              className={`trace-card__note${
+                step.status === "fail" ? " is-fail" : ""
+              }`}
+            >
+              {noteText(step.note, t)}
+            </span>
+          )
+        )}
+      </div>
+      {live !== null && (
+        <div
+          className={`trace-ticker${live.done ? " is-done" : ""}${
+            live.ok === false ? " is-fail" : ""
+          }`}
+          data-testid="trace-ticker"
+        >
+          {ticker === null ? (
+            <span className="trace-ticker__empty">
+              {live.stage === "running" ? t("trace.live.noOutput") : "…"}
+            </span>
+          ) : (
+            <span
+              // A new line rises into place; the same line growing does not
+              // remount, so its characters simply flow in.
+              key={ticker.index}
+              className={`trace-ticker__line${
+                ticker.sign === "+"
+                  ? " is-add"
+                  : ticker.sign === "-"
+                    ? " is-del"
+                    : ""
+              }`}
+            >
+              {ticker.text}
+            </span>
+          )}
+          <span className="trace-ticker__cursor" aria-hidden="true" />
+        </div>
+      )}
+    </>
+  );
 }
 
-/** Full row text for the hover title — the visible row ellipsizes. */
-function opTitle(op: TraceOp, t: T): string {
-  return `${verbText(op, t)} ${op.arg}`;
+/**
+ * The ticker's line: the newest non-blank line of the view's tail. In a
+ * diff the sign is lifted off into a class (the add / remove tint); `index`
+ * counts the whole text's lines, so it changes exactly when a new line
+ * starts.
+ */
+export function tickerLine(view: LiveToolView): {
+  readonly text: string;
+  readonly sign: "+" | "-" | null;
+  readonly index: number;
+} | null {
+  const lines = view.tail.split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const raw = lines[i] ?? "";
+    const body = view.mode === "diff" ? raw.slice(1) : raw;
+    if (body.trim().length === 0) continue;
+    const sign =
+      view.mode === "diff" && (raw.startsWith("+") || raw.startsWith("-"))
+        ? (raw[0] as "+" | "-")
+        : null;
+    return {
+      text: body.trimEnd(),
+      sign,
+      index: view.lines - (lines.length - 1 - i),
+    };
+  }
+  return null;
+}
+
+const EMPTY: readonly TraceSegment[] = [];
+const keyOf = (k: { readonly id: string }): string => k.id;
+
+/** Localized verb via the record rows' own map; an unknown verb (a newer
+ *  record on an older renderer) falls back to the raw token. */
+function verbText(verb: string, t: T): string {
+  const key = VERB_KEY[verb];
+  return key !== undefined ? t(key) : verb;
+}
+
+function noteText(note: TraceNote, t: T): string {
+  switch (note.kind) {
+    case "exit":
+      return `${t("activity.result.exit")} ${note.code}`;
+    case "signal":
+      return t("activity.bg.signal");
+    case "tests":
+      return `${t("activity.result.tests")} ${note.summary}`;
+    case "fail":
+      return note.code;
+    case "matches":
+      return `${note.n} ${t("activity.result.matches")}`;
+  }
+}
+
+/** A path's last part: the name a reader recognises. */
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter((p) => p.length > 0);
+  return parts[parts.length - 1] ?? path;
+}
+
+type MessageKeyOf = Parameters<T>[0];
+
+/** A folded node's line: what it did — or, while it waits its turn, what it
+ *  is going to do, step by step (nothing has happened to count yet). */
+function foldedText(segment: TraceSegment, t: T): string {
+  if (segment.status !== "queued") return segmentSummary(segment, t);
+  return segment.ops
+    .map((op) => `${verbText(op.verb, t)} ${op.arg.length > 0 ? op.arg : "…"}`)
+    .join(t("trace.sum.sep"));
+}
+
+/** A finished segment in one line: what it did, counted (the ops' own
+ *  arguments for the names, verbatim). */
+export function segmentSummary(segment: TraceSegment, t: T): string {
+  const tally = tallySegment(segment.ops);
+  const parts: string[] = [];
+  const [firstRead] = tally.reads;
+  if (firstRead !== undefined) {
+    parts.push(
+      tally.reads.length === 1
+        ? t("trace.sum.readOne", { name: baseName(firstRead) })
+        : t("trace.sum.readMany", {
+            name: baseName(firstRead),
+            n: String(tally.reads.length),
+          }),
+    );
+  }
+  if (tally.searches > 0) {
+    parts.push(
+      tally.searches === 1
+        ? t("trace.sum.searchOne")
+        : t("trace.sum.searchMany", { n: String(tally.searches) }),
+    );
+  }
+  if (tally.inspects > 0) parts.push(t("trace.sum.inspect"));
+  const [firstWrite] = tally.writes;
+  if (firstWrite !== undefined) {
+    parts.push(
+      tally.writes.length === 1
+        ? t("trace.sum.writeOne", { name: baseName(firstWrite) })
+        : t("trace.sum.writeMany", {
+            name: baseName(firstWrite),
+            n: String(tally.writes.length),
+          }),
+    );
+  }
+  const [firstRun] = tally.runs;
+  if (firstRun !== undefined) {
+    parts.push(
+      tally.runs.length === 1
+        ? t("trace.sum.runOne", { cmd: firstRun })
+        : t("trace.sum.runMany", { n: String(tally.runs.length) }),
+    );
+  }
+  const counted = (n: number, one: MessageKeyOf, many: MessageKeyOf): void => {
+    if (n === 0) return;
+    parts.push(n === 1 ? t(one) : t(many, { n: String(n) }));
+  };
+  counted(tally.digests, "trace.sum.digestOne", "trace.sum.digestMany");
+  counted(tally.memories, "trace.sum.memoryOne", "trace.sum.memoryMany");
+  counted(tally.stops, "trace.sum.stopOne", "trace.sum.stopMany");
+  return parts.join(t("trace.sum.sep"));
+}
+
+/** How a finished segment ended: its last step's result, or how many of
+ *  its steps failed when the last one did not. */
+function segmentNote(segment: TraceSegment, t: T): JSX.Element | null {
+  const last = segment.ops[segment.ops.length - 1];
+  if (last?.note !== undefined) {
+    return (
+      <span
+        className={`trace-card__note${last.status === "fail" ? " is-fail" : ""}`}
+      >
+        {noteText(last.note, t)}
+      </span>
+    );
+  }
+  if (segment.failures > 0 && last?.status !== "fail") {
+    return (
+      <span className="trace-card__note is-fail">
+        {t("trace.sum.failed", { n: String(segment.failures) })}
+      </span>
+    );
+  }
+  return null;
 }

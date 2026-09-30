@@ -27,6 +27,8 @@ interface ToolBufEntry {
   id?: string;
   name?: string;
   argsBuf: string;
+  /** A `tool-call-delta` has gone out for this call. */
+  announced?: boolean;
 }
 
 export async function* mapStream(
@@ -91,10 +93,28 @@ export async function* mapStream(
         ) {
           entry.name = tc.function.name;
         }
+        toolBuf.set(tc.index, entry);
         if (typeof tc.function?.arguments === "string") {
           entry.argsBuf += tc.function.arguments;
+          // The live view of a call being written (ADR 0073). A fragment that
+          // lands before the id and name are known is not lost: it is in
+          // argsBuf, and the first delta after them carries the whole buffer.
+          if (
+            entry.id !== undefined &&
+            entry.name !== undefined &&
+            tc.function.arguments.length > 0
+          ) {
+            const argsDelta =
+              entry.announced === true ? tc.function.arguments : entry.argsBuf;
+            entry.announced = true;
+            yield {
+              type: "tool-call-delta",
+              id: entry.id,
+              tool: entry.name,
+              argsDelta,
+            };
+          }
         }
-        toolBuf.set(tc.index, entry);
       }
     }
 

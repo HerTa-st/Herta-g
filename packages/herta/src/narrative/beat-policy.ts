@@ -45,8 +45,6 @@ export function workflowKindForBeat(tool: string): string | null {
     case "command_output":
     case "command_stop":
       return "run";
-    case "todo_write":
-      return "plan";
     case "git_status":
     case "git_diff":
       return "inspect";
@@ -70,7 +68,7 @@ export function workflowKindForBeat(tool: string): string | null {
  *  - `patch.preview` → `patch.preview:first`.
  *  - `verification.finished` with `passed: false` → `verification.finished`;
  *    a passing run (or one whose outcome is unknown) → null (2026-09-03).
- *  - `plan.updated` → null.
+ *  - `tool.call.delta` / `tool.call.output` (the live views) → null.
  *  - Turn lifecycle events → null (handled separately via reset()).
  *
  * **N2 (2026-05-23)**: previously `tool.call.started` fired a beat

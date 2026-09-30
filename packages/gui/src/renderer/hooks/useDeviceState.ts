@@ -62,7 +62,7 @@ function fineWorkingState(record: TerminalRecord): BanzhuanDeviceState {
       case "Stopping":
         return "runningCommand";
       default:
-        // Planning / Saving memory — no fine state defined; coarse working.
+        // Saving memory — no fine state defined; coarse working.
         return "delegated";
     }
   }

@@ -390,7 +390,6 @@ export const zh = {
   "activity.verb.reading": "读取",
   "activity.verb.writing": "写入",
   "activity.verb.running": "运行",
-  "activity.verb.planning": "规划",
   "activity.verb.inspecting": "检查",
   "activity.verb.savingMemory": "保存记忆",
   "activity.verb.searching": "检索",
@@ -416,8 +415,6 @@ export const zh = {
   "activity.bg.stopped": "已停止",
   "activity.bg.exited": "已退出",
   "activity.bg.signal": "信号中止",
-  "activity.todo.list": "任务清单",
-  "activity.todo.step": "步骤",
   // Attachments (ADR 0033). The unreadable reasons are deliberately four
   // distinct strings rather than one "读取失败": the user needs to know
   // whether to convert the file, split it, or that we simply cannot read it.
@@ -506,14 +503,33 @@ export const zh = {
   "viewer.log.branch": "分支",
   "viewer.log.search": "搜索提交信息",
   "viewer.log.noMatch": "没有匹配的提交",
-  "activity.plan.more": "还有 {n} 项",
-  "plan.card.title": "任务清单",
-  "plan.card.itemsUnavailable": "本次记录无清单明细",
-  // 操作轨迹 rail card (2026-08-17) — the plan card's fallback for
-  // dispatches with no 任务清单 (every 极简 run).
+  // 操作轨迹 rail card (2026-08-17; phases and the live pane, ADR 0073).
   "trace.card.title": "操作轨迹",
   "trace.card.steps": "{n} 步",
   "trace.card.files": "{n} 文件",
+  "trace.phase.explore": "探索",
+  "trace.phase.modify": "修改",
+  "trace.phase.verify": "验证",
+  // A finished segment's one-line summary, composed from these parts.
+  "trace.sum.readOne": "读取 {name}",
+  "trace.sum.readMany": "读取 {name} 等 {n} 个文件",
+  "trace.sum.searchOne": "检索 1 次",
+  "trace.sum.searchMany": "检索 {n} 次",
+  "trace.sum.inspect": "检查仓库状态",
+  "trace.sum.writeOne": "修改 {name}",
+  "trace.sum.writeMany": "修改 {name} 等 {n} 个文件",
+  "trace.sum.runOne": "运行 {cmd}",
+  "trace.sum.runMany": "运行 {n} 条命令",
+  "trace.sum.digestOne": "摘要 1 份文档",
+  "trace.sum.digestMany": "摘要 {n} 份文档",
+  "trace.sum.memoryOne": "保存 1 条记忆",
+  "trace.sum.memoryMany": "保存 {n} 条记忆",
+  "trace.sum.stopOne": "停止 1 个后台命令",
+  "trace.sum.stopMany": "停止 {n} 个后台命令",
+  "trace.sum.sep": "，",
+  "trace.sum.failed": "{n} 次失败",
+  "trace.live.lines": "{n} 行",
+  "trace.live.noOutput": "尚无输出",
   // 仓库 rail card (ADR 0058): the workspace's repository, under the device.
   "repo.card.title": "仓库",
   "repo.card.clean": "工作区干净",

@@ -239,13 +239,22 @@ describe("classifyBeatTrigger — event → trigger", () => {
     ).toBeNull();
   });
 
-  it("returns null on plan.updated (redundant with tool.started:plan)", () => {
-    const ev: AgentEvent = {
-      type: "plan.updated",
+  it("returns null on the live views — a call's streaming arguments, a command's output (ADR 0073)", () => {
+    const delta: AgentEvent = {
+      type: "tool.call.delta",
       layer: "backend",
-      todos: [],
+      id: "c1",
+      tool: "str_replace_editor",
+      argsDelta: '{"command":"create"',
     };
-    expect(classifyBeatTrigger(ev)).toBeNull();
+    const output: AgentEvent = {
+      type: "tool.call.output",
+      layer: "backend",
+      id: "c1",
+      chunk: "FAIL src/a.test.ts\n",
+    };
+    expect(classifyBeatTrigger(delta)).toBeNull();
+    expect(classifyBeatTrigger(output)).toBeNull();
   });
 
   it("returns null on turn lifecycle events (handled separately by reset)", () => {

@@ -94,7 +94,19 @@ interface Waiter {
   dropped: number;
   /** The shell process serving this command. */
   child: ChildProcess;
+  /** The live view of this command's output (ADR 0073): whole lines, the
+   *  protocol lines taken out. Null when nothing watches. */
+  live: ((text: string) => void) | null;
+  /** The incomplete last line held back from `live`. */
+  livePartial: string;
+  /** The command's marker line has gone by: nothing more is its output. */
+  liveDone: boolean;
 }
+
+/** A held-back partial line longer than this goes to the live view as it
+ *  stands (a `\r` progress bar) — unless it may be a protocol line. */
+const LIVE_PARTIAL_MAX = 4_096;
+const PROTOCOL_LINE_RE = /__HERTA_(WS|PD)_[0-9a-f]{12}__:/;
 
 export class PersistentShell implements BackgroundProcess {
   readonly id = SHELL_BG_ID;
@@ -298,6 +310,7 @@ export class PersistentShell implements BackgroundProcess {
       const window = this.tail + text;
       this.tail = window.slice(-(MARKER_LEN - 1));
       this.buf += text;
+      if (this.waiter?.child === child) this.feedLive(this.waiter, text);
       this.onOutput(window);
     };
     child.stdout?.on("data", onData);
@@ -408,6 +421,42 @@ export class PersistentShell implements BackgroundProcess {
     this.msysPs = ps;
     this.shellGroup = group;
     this.onShellPid?.(group.winpid, { ...group, ps });
+  }
+
+  /**
+   * Hand the waiting command's output to its live view (ADR 0073), a whole
+   * line at a time: the shell's protocol lines — the workspace and pid lines
+   * of a fresh shell, the command's own marker line — are recognisable only
+   * whole. The marker line ends the command's output; what follows it
+   * belongs to no command. Separate from `buf`, which this never touches.
+   */
+  private feedLive(w: Waiter, text: string): void {
+    if (w.live === null || w.liveDone) return;
+    const s = w.livePartial + text;
+    const cut = s.lastIndexOf("\n");
+    if (cut === -1) {
+      if (s.length > LIVE_PARTIAL_MAX && !s.startsWith("__HERTA_")) {
+        w.livePartial = "";
+        w.live(s);
+      } else {
+        w.livePartial = s;
+      }
+      return;
+    }
+    w.livePartial = s.slice(cut + 1);
+    const out: string[] = [];
+    for (const line of s.slice(0, cut).split("\n")) {
+      if (line.includes(w.marker)) {
+        w.liveDone = true;
+        w.livePartial = "";
+        // The wrapper's printf opens the marker with a newline of its own.
+        if (out[out.length - 1] === "") out.pop();
+        break;
+      }
+      if (PROTOCOL_LINE_RE.test(line)) continue;
+      out.push(line);
+    }
+    if (out.length > 0) w.live(`${out.join("\n")}\n`);
   }
 
   private failWaiter(how: { shellExited: boolean; timedOut: boolean }): void {
@@ -542,7 +591,13 @@ export class PersistentShell implements BackgroundProcess {
    */
   async run(
     command: string,
-    opts: { timeoutMs: number; signal?: AbortSignal },
+    opts: {
+      timeoutMs: number;
+      signal?: AbortSignal;
+      /** The command's output as it arrives, whole lines, protocol lines
+       *  removed (ADR 0073). Not redacted — the caller does that. */
+      onOutput?: (text: string) => void;
+    },
   ): Promise<ShellRunResult> {
     while (this.waiter !== null) {
       await new Promise((r) => setTimeout(r, 25));
@@ -581,6 +636,9 @@ export class PersistentShell implements BackgroundProcess {
         signal: opts.signal,
         dropped: 0,
         child,
+        live: opts.onOutput ?? null,
+        livePartial: "",
+        liveDone: false,
       };
       w.timer = setTimeout(() => {
         // Timeout: the state is unknowable now — kill and let the next

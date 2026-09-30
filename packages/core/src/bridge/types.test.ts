@@ -44,7 +44,6 @@ describe("bridge types", () => {
       tests: [],
       permissions: [],
       residualRisks: [],
-      nextActions: [],
     };
     // The structural assertion: no `summary` property at the top level.
     expect("summary" in report).toBe(false);

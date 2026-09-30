@@ -38,7 +38,7 @@ export interface BackendPromptFrame {
   /**
    * The per-iteration state trailer, recomputed by the turn loop on every
    * provider call and appended by `translateBackend` as a trailing system
-   * message AFTER `messages`: the current todo list (ADR 0025 §2); once old
+   * message AFTER `messages`: once old
    * iterations have been dropped from the transcript, the working state the
    * harness keeps (files changed, live background commands, findings, the
    * user's steers — `working-state.ts`); and, near the step limit, the

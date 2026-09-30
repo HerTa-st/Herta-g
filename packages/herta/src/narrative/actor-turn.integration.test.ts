@@ -82,7 +82,6 @@ function mkDeps(opts: {
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }) as never,
   } as unknown as CodingAgentRuntime;
   return {
@@ -248,7 +247,6 @@ describe("runActorCompletionTurn — end-to-end (think → speak rhythm)", () =>
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;
@@ -376,7 +374,6 @@ describe("runActorCompletionTurn — Slice 13 end-to-end (mood routing)", () => 
           tests: [],
           permissions: [],
           residualRisks: [],
-          nextActions: [],
         } as never;
       },
     } as unknown as CodingAgentRuntime;

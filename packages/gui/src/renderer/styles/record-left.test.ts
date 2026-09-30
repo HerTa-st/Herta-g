@@ -87,14 +87,10 @@ describe("the record's left edge is one token", () => {
     );
   });
 
-  it("the LED-centre gutters derive from it, so they track the edge", () => {
-    // The history panel's rule and the plan strip's hairline both hang from
-    // the LED's centre (edge + half the 7px dot). Hard-coded at 11px they
-    // would drift the moment the edge moved.
-    for (const selector of [
-      ".activity-line__history-inner",
-      ".activity-plan",
-    ]) {
+  it("the LED-centre gutter derives from it, so it tracks the edge", () => {
+    // The history panel's rule hangs from the LED's centre (edge + half the
+    // 7px dot). Hard-coded at 11px it would drift the moment the edge moved.
+    for (const selector of [".activity-line__history-inner"]) {
       const body = ruleBody(selector);
       expect(body, selector).not.toBeNull();
       expect(body, selector).toMatch(

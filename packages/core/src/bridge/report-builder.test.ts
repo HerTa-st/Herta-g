@@ -20,10 +20,11 @@ describe("ExecutionReportBuilder", () => {
     expect(report.tests).toEqual([]);
     expect(report.permissions).toEqual([]);
     expect(report.residualRisks).toEqual([]);
-    expect(report.nextActions).toEqual([]);
     // The structural assertion: no `summary` property — the backend doesn't
     // write a self-paraphrase that Herta would re-render.
     expect("summary" in report).toBe(false);
+    // Nor a todo carry-over (ADR 0073): the list it came from is gone.
+    expect("nextActions" in report).toBe(false);
   });
 
   it("accumulates entries across all collection adders", () => {
@@ -48,7 +49,6 @@ describe("ExecutionReportBuilder", () => {
         summary: "approved by user",
       })
       .addResidualRisk("full suite not run")
-      .addNextAction("run pnpm test")
       .build();
 
     expect(report.changedFiles).toHaveLength(1);
@@ -56,7 +56,6 @@ describe("ExecutionReportBuilder", () => {
     expect(report.tests).toHaveLength(1);
     expect(report.permissions).toHaveLength(1);
     expect(report.residualRisks).toEqual(["full suite not run"]);
-    expect(report.nextActions).toEqual(["run pnpm test"]);
   });
 
   it("returns independent arrays per build call", () => {

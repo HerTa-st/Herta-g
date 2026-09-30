@@ -79,7 +79,6 @@ import type { EventBus } from "../event-bus.js";
 import type { FindingsLedger } from "../findings-ledger.js";
 import type { MemoryManager } from "../memory-manager.js";
 import type { ReadLedger } from "../read-ledger.js";
-import type { TodoStore } from "../todo-store.js";
 import type { AgentEvent } from "./events.js";
 
 export interface ToolContext {
@@ -87,7 +86,6 @@ export interface ToolContext {
   signal: AbortSignal;
   workspaceRoot: string;
   reads: ReadLedger;
-  todos: TodoStore;
   /** Per-brief managed background commands (ADR 0025 slice 4). */
   bg: BackgroundHost;
   bus: EventBus<AgentEvent>;
@@ -131,6 +129,11 @@ export interface ToolCallJournal {
 
 export type ProgressFn = (event: { id: string; message: string }) => void;
 
+/** A running command's output, a chunk at a time as it arrives (ADR 0073):
+ *  the live view only — the result still carries what the model and the
+ *  record get. */
+export type OutputFn = (chunk: string) => void;
+
 export interface HertaTool {
   name: string;
   /**
@@ -160,5 +163,7 @@ export interface HertaTool {
     call: ToolCallRequest,
     ctx: ToolContext,
     progress: ProgressFn,
+    /** Absent where nothing watches (tests, direct calls). */
+    output?: OutputFn,
   ): Promise<ToolResult>;
 }

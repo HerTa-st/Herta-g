@@ -183,10 +183,6 @@ type OpVerb = Extract<
   NonNullable<SystemBlock["digest"]>,
   { kind: "op" }
 >["verb"];
-type TodoItem = {
-  readonly content: string;
-  readonly status: "pending" | "in_progress" | "completed";
-};
 /** One section of a block's evidence detail (ADR 0029) — the structured lane
  *  the GUI localizes the 展开明细 / "show detail" pane from. */
 type EvidenceSection = NonNullable<SystemBlock["evidence"]>[number];
@@ -196,14 +192,15 @@ type EvidenceSection = NonNullable<SystemBlock["evidence"]>[number];
  *
  * Every system row below is the SHAPE THE REAL BRIDGE PROJECTS — body wording,
  * English chrome, and the structured `digest` that lets the GUI localize it
- * (读取/写入/运行, 任务清单, 步骤 k/n). Rewritten 2026-08-01 after diffing the
+ * (读取/写入/运行). Rewritten 2026-08-01 after diffing the
  * demo against seven real transcripts in `.herta/transcript/v2` and against
  * projectBackendEvent itself: the old rows were hand-written Chinese prose
  * ("搜索 addListener 调用点", "↳ 17 处，横跨 6 个文件", "↳ 89 passed") that the
- * harness cannot emit, carried no digest, and skipped the patch-preview and
- * todo rows entirely — so the showcase advertised a record the app never
- * writes. Keep them honest: if a row here has no counterpart in
- * backend-bridge.ts, it does not belong in the demo.
+ * harness cannot emit, carried no digest, and skipped the patch-preview rows
+ * entirely — so the showcase advertised a record the app never writes. Keep
+ * them honest: if a row here has no counterpart in the record projection, it
+ * does not belong in the demo (the todo rows left with the todo list, ADR
+ * 0073).
  */
 const ask = (text: string): TerminalRecordBlock => ({ kind: "user", text });
 const say = (text: string): TerminalRecordBlock => ({
@@ -302,32 +299,6 @@ const attachmentRow = (a: {
       path: a.path,
       lines: a.lines,
       chars: a.chars,
-    },
-  };
-};
-/** The dispatch's FIRST todo_write projects the full layout; every later one a
- *  compact progress row. Item text is backend-authored and stays verbatim. */
-const todoRow = (items: readonly TodoItem[], layout: boolean): SystemBlock => {
-  const completed = items.filter((i) => i.status === "completed").length;
-  const current = items.find((i) => i.status === "in_progress")?.content;
-  const mark = (s: TodoItem["status"]): string =>
-    s === "completed" ? "[x]" : s === "in_progress" ? "[~]" : "[ ]";
-  return {
-    kind: "system",
-    label: CO,
-    body: layout
-      ? [
-          `todo list (${items.length}):`,
-          ...items.map((i) => `${mark(i.status)} ${i.content}`),
-        ].join("\n")
-      : `todo ${completed}/${items.length}${current === undefined ? "" : `: ${current}`}`,
-    digest: {
-      kind: "todo",
-      total: items.length,
-      completed,
-      // The layout block carries no `current` — its [~] mark says the same.
-      ...(layout || current === undefined ? {} : { current }),
-      items: items.map((i) => ({ content: i.content, status: i.status })),
     },
   };
 };
@@ -502,30 +473,6 @@ const CALL_SITES = [
   "packages/core/src/tools/registry.ts:1",
   "packages/core/src/verification/runner.ts:1",
 ];
-
-/** `todo_write` is full-list replacement, so each update carries the WHOLE
- *  list: steps before `done` are completed, `done` itself is in flight. */
-const plan = (steps: readonly string[], done: number): readonly TodoItem[] =>
-  steps.map(
-    (content, i): TodoItem => ({
-      content,
-      status: i < done ? "completed" : i === done ? "in_progress" : "pending",
-    }),
-  );
-
-const ZH_STEPS = [
-  "清点 addListener 的调用点",
-  "把 event-bus.ts 换成类型化订阅",
-  "跑 @herta/core 的测试",
-];
-const ZH_PLAN = (done: number): readonly TodoItem[] => plan(ZH_STEPS, done);
-
-const EN_STEPS = [
-  "Count every addListener call site",
-  "Move event-bus.ts to typed subscriptions",
-  "Run @herta/core's tests",
-];
-const EN_PLAN = (done: number): readonly TodoItem[] => plan(EN_STEPS, done);
 
 /** The previewed patch. `addListener` survives as a shell because he asked for
  *  the public interface not to move — which is what lets her claim it didn't. */
@@ -764,15 +711,12 @@ const ZH: DemoContent = {
           say(
             "瞧，这就叫需求：文件、症状、约束、验收条件，四样齐了。\n@板砖，先数清楚有多少处调用点，一处都别漏；改完跑 core 的测试。",
           ),
-          todoRow(ZH_PLAN(0), true),
           op("Reading", '"addListener"'),
           op("Running", "rg -c addListener packages/core/src"),
           exitRow(0, CALL_SITES),
           say("六个文件，十七处。最脏的是 event-bus.ts 自己——九处。"),
-          todoRow(ZH_PLAN(1), false),
           patchPreview("packages/core/src/event-bus.ts", EVENT_BUS_DIFF_ZH),
           op("Writing", "packages/core/src/event-bus.ts"),
-          todoRow(ZH_PLAN(2), false),
           op("Running", "pnpm test --filter @herta/core"),
           testsRow("exit 0, 12.31s"),
           doneMarker({
@@ -817,7 +761,7 @@ const EN: DemoContent = {
   // The zh twin above carries the design notes; this is the same record in her
   // English register. System-row bodies are identical — their chrome is English
   // by contract and the GUI localizes from the digest, so an EN session shows
-  // Reading / Writing / Task list where zh shows 读取 / 写入 / 任务清单.
+  // Reading / Writing where zh shows 读取 / 写入.
   showcase: () =>
     makeShowcase([
       {
@@ -953,17 +897,14 @@ const EN: DemoContent = {
           say(
             "There. That's a request: file, symptom, constraint, acceptance — all four.\n@板砖, count every call site first, don't miss one; run core's tests once the edit's in.",
           ),
-          todoRow(EN_PLAN(0), true),
           op("Reading", '"addListener"'),
           op("Running", "rg -c addListener packages/core/src"),
           exitRow(0, CALL_SITES),
           say(
             "Six files, seventeen sites. The filthiest one is event-bus.ts itself — nine.",
           ),
-          todoRow(EN_PLAN(1), false),
           patchPreview("packages/core/src/event-bus.ts", EVENT_BUS_DIFF_EN),
           op("Writing", "packages/core/src/event-bus.ts"),
-          todoRow(EN_PLAN(2), false),
           op("Running", "pnpm test --filter @herta/core"),
           testsRow("exit 0, 12.31s"),
           doneMarker({

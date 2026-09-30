@@ -8,6 +8,11 @@ import type {
 } from "../types/provider.js";
 import type { ToolCallRequest } from "../types/tool.js";
 
+/** A call's streaming arguments go out on the bus at most this often… */
+export const ARGS_DELTA_MS = 40;
+/** …or once this much has gathered (ADR 0073). */
+export const ARGS_DELTA_CHARS = 2_048;
+
 export interface ModelInferenceResult {
   /** Accumulated text deltas in stream order. */
   text: string;
@@ -53,6 +58,29 @@ export async function streamModelInference(
   const toolCalls: ToolCallRequest[] = [];
   const deltas: AgentEvent[] = [];
   let finishReason: ModelInferenceResult["finishReason"] = "error";
+  // Argument fragments, coalesced per call (ADR 0073): the provider sends
+  // one per token, and every bus subscriber queues each event — a long file
+  // written token by token overflowed the session's bounded agent queue,
+  // whose "dropped" sentinel also costs the lifecycle signals around it. A
+  // call's text goes out at most every ARGS_DELTA_MS (or ARGS_DELTA_CHARS),
+  // and whatever is held goes out before the finished call.
+  const heldArgs = new Map<
+    string,
+    { tool: string; text: string; at: number }
+  >();
+  const publishArgs = (id: string): void => {
+    const held = heldArgs.get(id);
+    if (held === undefined || held.text.length === 0) return;
+    opts.bus.publish({
+      type: "tool.call.delta",
+      layer: opts.layer,
+      id,
+      tool: held.tool,
+      argsDelta: held.text,
+    });
+    held.text = "";
+    held.at = Date.now();
+  };
 
   for await (const pevent of opts.provider.streamChat(
     opts.frame,
@@ -69,13 +97,30 @@ export async function streamModelInference(
       text += pevent.text;
     } else if (pevent.type === "reasoning-delta") {
       reasoning += pevent.text;
+    } else if (pevent.type === "tool-call-delta") {
+      // Bus only: the live view of a call being written (ADR 0073). Not a
+      // generator delta — nothing downstream replays argument text.
+      let held = heldArgs.get(pevent.id);
+      if (held === undefined) {
+        held = { tool: pevent.tool, text: "", at: 0 };
+        heldArgs.set(pevent.id, held);
+      }
+      held.text += pevent.argsDelta;
+      if (
+        Date.now() - held.at >= ARGS_DELTA_MS ||
+        held.text.length >= ARGS_DELTA_CHARS
+      ) {
+        publishArgs(pevent.id);
+      }
     } else if (pevent.type === "tool-call-request") {
+      publishArgs(pevent.call.id);
       toolCalls.push(pevent.call);
     } else if (pevent.type === "finish") {
       finishReason = pevent.reason;
       break;
     }
   }
+  for (const id of heldArgs.keys()) publishArgs(id);
 
   return { text, reasoning, toolCalls, finishReason, deltas };
 }

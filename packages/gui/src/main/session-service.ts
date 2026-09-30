@@ -41,6 +41,7 @@ import type {
   SessionSnapshot,
 } from "../renderer/ipc/bridge-types.js";
 import { slimAgentEventForRenderer } from "../shared/agent-event-wire.js";
+import { createLiveToolFeed } from "../shared/live-tool-feed.js";
 import type { VoiceEngine } from "./app-global-settings.js";
 import {
   type InteractionLang,
@@ -453,12 +454,14 @@ export function startForwarders(session: Session, send: Send): () => void {
   void pump(session.subscribeRecord(), EVT.record);
   void pump(session.subscribeOverlay(), EVT.overlay);
   void pump(session.subscribeSpeech(), EVT.speech);
-  // The raw stream is a trace; the renderer wants its signals only.
-  void pump(
-    session.subscribeAgentEvents(),
-    EVT.agent,
-    slimAgentEventForRenderer,
-  );
+  // The raw stream is a trace; the renderer wants its signals only — and,
+  // folded from it, the live views of the call in flight (ADR 0073): a
+  // bounded tail per call, ten times a second at most.
+  const liveFeed = createLiveToolFeed((snapshot) => send(EVT.live, snapshot));
+  void pump(session.subscribeAgentEvents(), EVT.agent, (e) => {
+    liveFeed.push(e);
+    return slimAgentEventForRenderer(e);
+  });
   void pump(session.subscribeTurnLifecycle(), EVT.turn);
   void pump(session.subscribeTitle(), EVT.title);
   void pump(session.subscribeWorkspace(), EVT.workspace);
@@ -473,6 +476,7 @@ export function startForwarders(session: Session, send: Send): () => void {
   }
   return () => {
     live = false;
+    liveFeed.close();
     for (const it of iterators) {
       // Resolves the parked next() with {done:true}; best-effort (a generator
       // mid-yield settles on its own).

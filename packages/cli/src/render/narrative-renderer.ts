@@ -14,12 +14,6 @@ import {
   type SlowStreamController,
 } from "@herta/herta";
 import { aliasBanzhuanDisplay, aliasBanzhuanPlain } from "./banzhuan-alias.js";
-import {
-  planChecklist,
-  planStepLine,
-  type TodoDigest,
-  todoDigestOf,
-} from "./plan-strip.js";
 import type { Style } from "./style.js";
 import { localizeSystemBlock } from "./system-localize.js";
 
@@ -50,10 +44,6 @@ import { localizeSystemBlock } from "./system-localize.js";
  *   - `herta` thought: skipped (internal monologue, never rendered).
  *   - `system` blocks: dim `→ <label>` header, then body with 2-space
  *     indentation per line, in dim color.
- *   - `system` blocks carrying a todo digest render as the PLAN STRIP
- *     (see plan-strip.ts and `renderPlanBlock` below) instead of their
- *     English-chrome body, and a plan in scope re-anchors itself with one
- *     line when a Herta beat has split the dispatch.
  *
  * SPEC v0.2 §9 (rendering), §5.3 (system labels), Slice 9 §5, Slice 10 §6.
  */
@@ -232,38 +222,6 @@ export class NarrativeRenderer implements ActorStreamingSink {
    */
   private pendingBrickTail = "";
 
-  // -- Plan-strip state (see plan-strip.ts) ---------------------------------
-  //
-  // The plan is a property of the DISPATCH, not of the block that happens to
-  // carry it (the same premise as the GUI's `planContext`). The GUI derives
-  // that by scanning the record backward; this renderer walks every block
-  // exactly once, in order, so it tracks the same thing forward — which also
-  // gives it what a record scan cannot answer: whether anything was PRINTED
-  // between two blocks.
-
-  /** Newest todo digest in scope, or null between dispatches. Cleared by the
-   *  real dispatch boundaries — a user block, and a done/noop marker (the run
-   *  whose plan this was has ended; its marker summary is the answer now). */
-  private plan: TodoDigest | null = null;
-
-  /** `total` of the last CHECKLIST printed for the current dispatch, or null
-   *  when none has been. Drives "print the full list again only when the plan
-   *  changed SHAPE" — under full-list replacement a step added or dropped
-   *  makes the printed list wrong, while a status flip does not. */
-  private planChecklistTotal: number | null = null;
-
-  /** Herta speech has been written since the last plan line. The beat-split
-   *  signal: a continuation group in the GUI forgets the plan because it sees
-   *  only its own blocks; here the plan simply scrolled away above the beat.
-   *
-   *  Speech only. A permission prompt scrolls the plan away just as far, but
-   *  it is drawn by `permission-prompt.ts` straight to the stream — the
-   *  renderer never sees it, and it is user-only UI the record does not carry
-   *  (D7). Teaching the renderer about it would need new plumbing; the
-   *  approved operation's own `→ 系统` Writing block follows immediately, so
-   *  the gap is short. Deliberately out of scope, not overlooked. */
-  private beatSincePlanLine = false;
-
   // -- ActorStreamingSink methods ------------------------------------------
 
   beginHertaStream(surface: "speech" | "thought"): void {
@@ -296,15 +254,7 @@ export class NarrativeRenderer implements ActorStreamingSink {
     // renderer's OWN ANSI (style.bright) is applied AFTER the strip and is
     // never touched.
     const safe = stripDisplayUnsafe(text);
-    if (safe.length > 0) {
-      this.out.write(this.style.bright(safe));
-      // Beat-split signal, set on the single write primitive every streaming
-      // path funnels through (paced, raw-chunk, non-TTY fast-forward) so no
-      // lane can produce visible speech without arming the re-anchor. A
-      // retracted (vetoed) stream leaves it armed for speech that ended up
-      // erased; the retry re-arms it anyway, so the outcome is identical.
-      this.beatSincePlanLine = true;
-    }
+    if (safe.length > 0) this.out.write(this.style.bright(safe));
     if (this.streamingSurface === null) this.streamingSurface = "speech";
   }
 
@@ -702,10 +652,7 @@ export class NarrativeRenderer implements ActorStreamingSink {
   private renderBlock(block: TerminalRecordBlock): void {
     switch (block.kind) {
       case "user":
-        // Dispatch boundary: a new turn's plan has nothing to do with the
-        // last one's. (Nothing is printed — the user typed this.)
-        this.resetPlan();
-        return;
+        return; // the user typed it; no echo
       case "herta":
         if (block.surface === "thought") return;
         this.renderHerta(block.text);
@@ -733,10 +680,6 @@ export class NarrativeRenderer implements ActorStreamingSink {
     if (trimmed.length === 0) return;
     this.out.write(this.style.bright(trimmed));
     this.out.write("\n");
-    // Committed-block speech lane (the streaming lanes arm this in
-    // writeSpeechChunk): a beat rendered from the record splits the dispatch
-    // just as visibly as a streamed one.
-    this.beatSincePlanLine = true;
   }
 
   private renderSystem(block: SystemBlock): void {
@@ -746,89 +689,13 @@ export class NarrativeRenderer implements ActorStreamingSink {
     // English twin (System / Coprocessor, Done · N files · tests P/F). zh is
     // byte-identical. Mirrors the GUI's ActivityBlock. See system-localize.ts.
     const { label, body } = localizeSystemBlock(block, this.lang);
-
-    const digest = todoDigestOf(block);
-    if (digest !== null) {
-      this.renderPlanBlock(label, body, digest);
-      return;
-    }
-    if (block.role === "done-marker" || block.role === "noop-marker") {
-      // The dispatch is over: render the marker, then drop the plan. A later
-      // group must never re-anchor a plan whose run already finished — the
-      // same boundary the GUI's `planContext` stops its backward scan at.
-      this.writeSystemBlock(label, body);
-      this.resetPlan();
-      return;
-    }
-    // Beat split: backend activity is resuming and the plan is somewhere up
-    // the scrollback, above Herta's speech. One line puts it back in view.
-    // Gated to the 差分协处理器 lane — that is where op / test / exit / bg rows
-    // live; a 系统 block can be a compaction summary or a workspace line,
-    // which the plan has no business heading.
-    if (
-      this.plan !== null &&
-      this.beatSincePlanLine &&
-      block.label === "差分协处理器"
-    ) {
-      this.writePlanReanchor(this.plan);
-    }
+    // A legacy todo block (records before ADR 0073) prints as the body the
+    // record holds, like any other row.
     this.writeSystemBlock(label, body);
   }
 
-  /**
-   * Render a todo projection as the plan strip: the full CHECKLIST when the
-   * plan's shape changed (first projection of the dispatch, or a step added /
-   * dropped), one localized STEP LINE otherwise.
-   *
-   * Display-only (D7) — `fallbackBody` is the record's own body, and it is
-   * what still renders for a digest with no `items`: a record persisted before
-   * 2026-07-26 has an unknown list, and its layout body is the only list that
-   * exists. Such a block still updates `plan`, so its counts keep driving the
-   * re-anchor.
-   */
-  private renderPlanBlock(
-    label: string,
-    fallbackBody: string,
-    digest: TodoDigest,
-  ): void {
-    this.plan = digest;
-    const checklist =
-      this.planChecklistTotal === digest.total
-        ? null
-        : planChecklist(digest, this.lang);
-    if (checklist !== null) {
-      this.planChecklistTotal = digest.total;
-      this.writeSystemBlock(label, checklist.join("\n"));
-    } else if (digest.items === undefined) {
-      this.writeSystemBlock(label, fallbackBody);
-    } else {
-      this.writeSystemBlock(label, planStepLine(digest, this.lang));
-    }
-    this.beatSincePlanLine = false;
-  }
-
-  /**
-   * The one-line re-anchor, written WITHOUT a `→ <label>` header and led by
-   * `⋯` (the same "this is chrome, not an event" glyph as the compaction
-   * hint): it restates a plan the record already projected rather than
-   * reporting something new, and must not read as another coprocessor block.
-   */
-  private writePlanReanchor(digest: TodoDigest): void {
-    const line = stripDisplayUnsafe(planStepLine(digest, this.lang));
-    this.out.write(`  ${this.style.dim(`⋯ ${line}`)}\n`);
-    this.beatSincePlanLine = false;
-  }
-
-  /** Forget the current dispatch's plan (turn boundary / run finished). */
-  private resetPlan(): void {
-    this.plan = null;
-    this.planChecklistTotal = null;
-    this.beatSincePlanLine = false;
-  }
-
   /** `→ <label>` header + 2-space-indented dim body. The single write path
-   *  for every system block, plan strip included, so the non-plan rendering
-   *  stays byte-for-byte what it was. */
+   *  for every system block. */
   private writeSystemBlock(label: string, body: string): void {
     this.out.write(`${this.style.dim(`→ ${label}`)}\n`);
     // Collapse long diff previews for visual density. The full diff

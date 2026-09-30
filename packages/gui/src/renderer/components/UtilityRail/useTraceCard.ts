@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { opVerbOf } from "../../../shared/op-verb.js";
 import { useApprovalPending } from "../../hooks/useApprovalPending.js";
 import {
   useSessionScoped,
@@ -6,77 +7,206 @@ import {
   useSessionScopedTimer,
 } from "../../hooks/useSessionScoped.js";
 import { useSessionSelector } from "../../hooks/useSessionSelector.js";
-import { planScope } from "../Workspace/plan-context.js";
+import type { LiveToolSnapshot, LiveToolView } from "../../ipc/bridge-types.js";
+import { commandPhase, opPhase } from "../Workspace/op-phase.js";
 import {
-  settleTrace,
+  buildTrace,
+  type PendingOp,
   type TraceContext,
+  type TraceFocus,
+  type TraceOp,
   traceScope,
 } from "../Workspace/trace-context.js";
-import { PLAN_HOLD_MS, PLAN_SLIDE_MS } from "./usePlanCard.js";
+import {
+  withoutWorkspaceCd,
+  workspaceRelative,
+} from "../Workspace/workspace-path.js";
+import { CARD_HOLD_MS, CARD_SLIDE_MS } from "./card-motion.js";
 
-/** Mirrors usePlanCard's unmount slack — same two-phase retire, same
- *  asymmetric failure directions (late = a moment of collapsed box; early =
- *  content torn out mid-slide). */
+/** Slack past the slide before the retracted card is dropped (see
+ *  useRepoCard's REPO_UNMOUNT_SLACK_MS for why it runs long). */
 const TRACE_UNMOUNT_SLACK_MS = 120;
+
+const NO_PENDING: ReturnType<typeof pendingSteps> = {
+  steps: [],
+  focus: null,
+};
 
 export interface TraceCardState {
   readonly trace: TraceContext | null;
+  /** The call the ticker follows (ADR 0073) while the run is live — the
+   *  most recently heard-from one, when its step is the one in flight.
+   *  Null otherwise. */
+  readonly live: LiveToolView | null;
   readonly open: boolean;
   /** Parked on a permission gate: the newest op is WAITING, not being
-   *  worked — the card's live meter stills (same discipline as PlanCard's
-   *  is-waiting, audit 2026-07-26). */
+   *  worked (audit 2026-07-26). */
   readonly waiting: boolean;
-  /** A first trace has been on screen: appended ops are CHANGES and enter
+  /** A first trace has been on screen: appended rows are CHANGES and enter
    *  with the row motion (ADR 0058 §5.7); false while the card retracts. */
   readonly settled: boolean;
 }
 
 /**
- * The rail 操作轨迹 card's visibility (2026-08-17) — usePlanCard's shape,
- * point for point (session-scoped state, hold-then-slide retract, the
- * unknown-scope hold), with one extra rule:
+ * A live call as the step it is (or will be, while still being written):
+ * the verb its op row carries, the argument, the phase, and the status the
+ * view knows. Null for a call that makes no op row.
  *
- * **PlanCard wins the slot.** The trace is the fallback surface for a
- * dispatch with no 任务清单 — every 极简 dispatch (ADR 0040 ships no todo
- * tool) and the 标准 briefs where 板砖 skips the list. The moment a todo
- * projection exists for the current dispatch, this card clears IMMEDIATELY
- * (no hold, no slide — the plan card is already sliding in over the same
- * rail position, and two cards narrating one dispatch would stack). While a
- * held PLAN is on screen after its run, `planScope` still reports it, so
- * the suppression covers the hold window too.
+ * Once dispatched, the step is named by the record's own summary, so it
+ * reads exactly as the row that replaces it; before, by what the arguments
+ * say — a path only once it has streamed in whole, relative to the
+ * workspace as the record spells it.
+ */
+export function stepOf(
+  view: LiveToolView,
+  workspace: string | null = null,
+): PendingOp | null {
+  const verb = opVerbOf(
+    view.tool,
+    view.tool === "str_replace_editor" && !view.streams,
+  );
+  if (verb === null) return null;
+  const status: PendingOp["status"] = !view.done
+    ? "running"
+    : view.ok === false
+      ? "fail"
+      : "ok";
+  const arg =
+    view.summary !== undefined
+      ? // The editor's summary leads with its command word; the row does not.
+        view.tool === "str_replace_editor"
+        ? view.summary
+            .replace(/^(view|create|str_replace|insert)\s*/, "")
+            .trim()
+        : view.summary.trim()
+      : verb === "Running"
+        ? withoutWorkspaceCd(view.commandLine ?? "", workspace)
+        : workspaceRelative(view.path ?? "", workspace);
+  return {
+    verb,
+    arg,
+    phase: verb === "Running" ? commandPhase(arg) : opPhase(verb, arg),
+    status,
+    ...(verb === "Running" && arg.length === 0
+      ? { tentative: true as const }
+      : {}),
+  };
+}
+
+/**
+ * The run's steps the record does not have yet, in order — the card's tail.
  *
- * Timers share PlanCard's constants so the two cards leave with the same
- * rhythm — the rail has one retire gesture, not two.
+ * The record trails the backend: by a moment when a call is dispatched, by
+ * seconds — several steps — while Herta speaks a beat (its drain waits on
+ * her, lab 2026-09-30). Main numbers each op-making call as the record will
+ * number its row, so the steps missing from the record are exactly those
+ * numbered at or past its op count: no text is matched. Calls still being
+ * written come after them — unless the record is already AHEAD of the feed
+ * (a row landed before the snapshot that dispatched it), when a draft may
+ * be that very row.
+ *
+ * A call written but not dispatched, and not the one being written, is
+ * QUEUED: one message's calls run one after another, so it waits behind the
+ * call in flight (lab 2026-09-30: a file drafted behind a running command
+ * was drawn as the step in flight, the command's output under it).
+ *
+ * `focus`: the focused call's step — the one the ticker follows — by its
+ * whole-dispatch index, with the status its view knows (ahead of the
+ * record's, whose result row may not have landed); null when it has none.
+ *
+ * `recordOps` null: the record window was cut short of the dispatch's start
+ * and cannot be counted — nothing is appended rather than a guess.
+ */
+export function pendingSteps(
+  live: LiveToolSnapshot,
+  recordOps: number | null,
+  workspace: string | null = null,
+): { readonly steps: PendingOp[]; readonly focus: TraceFocus | null } {
+  if (recordOps === null) return { steps: [], focus: null };
+  const focus = live.views.find((v) => v.id === live.focus);
+  const focusStep = focus !== undefined ? stepOf(focus, workspace) : null;
+  let focusOp =
+    focus?.ordinal !== undefined && focus.ordinal < recordOps
+      ? focus.ordinal
+      : null;
+  const dispatched = live.views
+    .filter((v) => v.ordinal !== undefined && v.ordinal >= recordOps)
+    .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+  const drafts =
+    recordOps <= live.startedOps ? live.views.filter((v) => !v.started) : [];
+  const steps: PendingOp[] = [];
+  for (const v of [...dispatched, ...drafts]) {
+    const step = stepOf(v, workspace);
+    if (step === null) continue;
+    if (v === focus) focusOp = recordOps + steps.length;
+    steps.push(
+      !v.started && v !== focus ? { ...step, status: "queued" } : step,
+    );
+  }
+  return {
+    steps,
+    focus:
+      focusOp !== null && focusStep !== null
+        ? { op: focusOp, status: focusStep.status }
+        : null,
+  };
+}
+
+/**
+ * The rail 操作轨迹 card (2026-08-17; the timeline, ADR 0073) — the one
+ * rail card that says what 板砖 is doing. Session-scoped state, a
+ * hold-then-slide retract, and the unknown-scope hold, as the repository
+ * card has them.
+ *
+ * The record decides the steps; the live views add what the record cannot
+ * have yet — the steps it has not caught up with, the call the model is
+ * still writing, and what the step in flight is producing (the ticker). A
+ * dispatch whose first step is still being written already opens the card.
  */
 export function useTraceCard(): TraceCardState {
   const record = useSessionSelector((s) => s.record);
+  const liveSnapshot = useSessionSelector((s) => s.live);
+  const backendActive = useSessionSelector((s) => s.backendActive);
+  const workspace = useSessionSelector((s) => s.backendWorkspace);
   const waiting = useApprovalPending();
-  // One scan per record commit (not per streaming delta) — same memo shape
-  // as usePlanCard.
+  // One scan per record commit (not per streaming delta).
   const scope = useMemo(() => traceScope(record), [record]);
-  const plan = useMemo(() => planScope(record), [record]);
+  // The views outlive the backend's own end until the record catches up
+  // (the store keeps them); once the record says the dispatch ended, they
+  // describe nothing on it — unless a new run is already writing.
+  const usable = backendActive || scope.kind === "trace";
+  const recordOps =
+    scope.kind === "trace" ? (scope.complete ? scope.ops.length : null) : 0;
+  // By value: a live snapshot lands ten times a second, and the tail steps
+  // (their verbs, arguments, statuses) change a few times a call — the
+  // timeline is rebuilt only then.
+  const pendingJson = JSON.stringify(
+    usable ? pendingSteps(liveSnapshot, recordOps, workspace) : NO_PENDING,
+  );
+  const { steps: pending, focus: focusStep } = useMemo(
+    () => JSON.parse(pendingJson) as ReturnType<typeof pendingSteps>,
+    [pendingJson],
+  );
+  const focus = usable
+    ? (liveSnapshot.views.find((v) => v.id === liveSnapshot.focus) ?? null)
+    : null;
 
-  const [trace, setTrace] = useSessionScoped<TraceContext | null>(null);
+  const [ops, setOps] = useSessionScoped<readonly TraceOp[] | null>(null);
+  /** The dispatch's marker landed: the held view shows it finished. */
+  const [ended, setEnded] = useSessionScoped(false);
   const [open, setOpen] = useSessionScoped(false);
   const [settled, setSettled] = useSessionScoped(false);
   const showing = useSessionScopedRef(false);
   const retract = useSessionScopedTimer();
   const unmount = useSessionScopedTimer();
+  const hasPending = pending.length > 0;
 
   useEffect(() => {
-    if (plan.kind === "plan") {
-      // The plan owns the slot — stand down without ceremony.
+    if (scope.kind === "trace" || hasPending) {
       retract.clear();
       unmount.clear();
-      showing.current = false;
-      setOpen(false);
-      setTrace(null);
-      return;
-    }
-    if (scope.kind === "trace") {
-      retract.clear();
-      unmount.clear();
-      setTrace(scope.trace);
+      setOps(scope.kind === "trace" ? scope.ops : []);
+      setEnded(false);
       setOpen(true);
       showing.current = true;
       return;
@@ -84,21 +214,65 @@ export function useTraceCard(): TraceCardState {
     if (scope.kind === "unknown") return;
     if (!showing.current) return;
     // "ended": the held view settles its running tail — the marker landed,
-    // nothing is in flight anymore (settleTrace is idempotent).
+    // nothing is in flight anymore — and keeps the run as the record has it.
     if (scope.kind === "ended") {
-      setTrace((prev) => (prev === null ? prev : settleTrace(prev)));
+      setEnded(true);
+      if (scope.ops.length > 0) setOps(scope.ops);
     }
     retract.arm(() => {
       showing.current = false;
       setOpen(false);
-      unmount.arm(() => setTrace(null), PLAN_SLIDE_MS + TRACE_UNMOUNT_SLACK_MS);
-    }, PLAN_HOLD_MS);
-  }, [scope, plan, retract, unmount, setTrace, setOpen, showing]);
+      unmount.arm(() => setOps(null), CARD_SLIDE_MS + TRACE_UNMOUNT_SLACK_MS);
+    }, CARD_HOLD_MS);
+  }, [scope, hasPending, retract, unmount, setOps, setEnded, setOpen, showing]);
 
-  // One commit behind what is on screen — usePlanCard's own latch.
+  // The record as it is NOW while it has the dispatch in view — the live
+  // one, or the one whose marker just landed — not the state copy, which
+  // the effect above updates a commit later (lab 2026-09-30: pairing the
+  // copy with the current live views dropped a landed step for a frame; at
+  // the marker, the copy drew a step long done in flight again). The copy
+  // is what the held view keeps once the scope has moved on.
+  const isEnded = scope.kind === "ended" || (scope.kind !== "trace" && ended);
+  const current =
+    ops === null
+      ? null
+      : scope.kind === "trace"
+        ? scope.ops
+        : scope.kind === "ended" && scope.ops.length > 0
+          ? scope.ops
+          : ops;
+  const trace = useMemo(
+    () =>
+      current === null
+        ? null
+        : buildTrace(current, {
+            pending: isEnded ? [] : pending,
+            focus: isEnded ? null : focusStep,
+            settled: isEnded,
+          }),
+    [current, pending, focusStep, isEnded],
+  );
+
+  // One commit behind what is on screen: the render that first draws an
+  // open card lands its rows still; this arms motion for the changes after.
+  const hasTrace = trace !== null;
   useEffect(() => {
-    setSettled(open && trace !== null);
-  }, [open, trace, setSettled]);
+    setSettled(open && hasTrace);
+  }, [open, hasTrace, setSettled]);
 
-  return { trace, open, waiting, settled };
+  return {
+    trace,
+    // The ticker is the focused call's: it goes under the step in flight
+    // only when that step IS the focused call's.
+    live:
+      open &&
+      !isEnded &&
+      focusStep !== null &&
+      trace?.current?.op === focusStep.op
+        ? focus
+        : null,
+    open,
+    waiting,
+    settled,
+  };
 }

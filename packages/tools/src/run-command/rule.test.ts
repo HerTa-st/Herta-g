@@ -8,7 +8,6 @@ import {
   NoopMemoryManager,
   ReadLedger,
   RulePermissionEngine,
-  TodoStore,
 } from "@herta/core";
 import { FakeAskResolver } from "@herta/core/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,7 +38,6 @@ function ctxFor(workspaceRoot: string) {
     signal: new AbortController().signal,
     workspaceRoot,
     reads: new ReadLedger(),
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),

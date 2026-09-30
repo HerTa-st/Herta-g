@@ -6,7 +6,6 @@ import {
   MAX_FINDINGS,
   NoopMemoryManager,
   ReadLedger,
-  TodoStore,
 } from "@herta/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkTmpWorkspace, type TmpWorkspace } from "../testing/tmp-workspace.js";
@@ -23,7 +22,6 @@ function ctx(workspaceRoot: string, findings = new FindingsLedger()) {
     signal: new AbortController().signal,
     workspaceRoot,
     reads: new ReadLedger(),
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),
@@ -199,8 +197,7 @@ describe("report_finding (ADR 0039)", () => {
   });
 
   // ADR 0016 amendment (2026-09-03): `claim` reaches the user verbatim, so
-  // the description names the conversation's language for it (twin of
-  // todo_write's item-text line).
+  // the description names the conversation's language for it.
   it("names the session's language for the claim; zh is the default", () => {
     const zh = reportFindingTool().schema().description;
     expect(zh).toContain("Write `claim` in Chinese (中文)");

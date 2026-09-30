@@ -32,6 +32,12 @@ import type {
   WorkspaceTrustState,
 } from "@herta/app-server";
 import type { WorkspaceTrust } from "@herta/core";
+import type { LiveToolSnapshot } from "../../shared/live-tool-feed.js";
+
+export type {
+  LiveToolSnapshot,
+  LiveToolView,
+} from "../../shared/live-tool-feed.js";
 
 /** A point-in-time snapshot of a session, returned by open/create and
  *  carried by the reset event. Mirrors the app-server Session's
@@ -854,6 +860,11 @@ export interface HertaBridge {
    *  card. OPTIONAL: fakes and the website demo omit the pair, and the card
    *  then never mounts. */
   onRepo?(cb: (e: RepoEvent) => void): () => void;
+  /** The live views of 板砖's call in flight (ADR 0073) — the file it is
+   *  writing, the command's output — folded and throttled in main. OPTIONAL:
+   *  fakes and the website demo omit it, and the trace card then shows the
+   *  record's rows alone. */
+  onLive?(cb: (e: LiveToolSnapshot) => void): () => void;
   /** Ask the active session to probe its repository again; the answer
    *  arrives through `onRepo`. The card asks on window focus. */
   refreshRepo?(): Promise<void>;

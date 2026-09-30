@@ -71,7 +71,6 @@ function mkDeps(
         tests: [],
         permissions: [],
         residualRisks: [],
-        nextActions: [],
       }) as never,
   } as unknown as CodingAgentRuntime;
   return {

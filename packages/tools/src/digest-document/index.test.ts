@@ -7,7 +7,6 @@ import {
   InMemoryEventBus,
   NoopMemoryManager,
   ReadLedger,
-  TodoStore,
 } from "@herta/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { reportFindingTool } from "../report-finding/index.js";
@@ -32,7 +31,6 @@ function ctxFor(workspaceRoot: string, signal?: AbortSignal) {
     signal: signal ?? new AbortController().signal,
     workspaceRoot,
     reads: new ReadLedger(),
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),

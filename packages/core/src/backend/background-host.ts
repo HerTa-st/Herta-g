@@ -2,7 +2,7 @@
  * Per-brief registry of managed background commands (ADR 0025 slice 4).
  * Lives in core so ToolContext can carry it (tools implement the
  * concrete process entries; the runtime owns the lifecycle). Reset per
- * `runBrief` like the transcript/todo/read-ledger state, and — the
+ * `runBrief` like the transcript/read-ledger state, and — the
  * load-bearing rule — `stopAll()` runs when the brief ends, so a
  * background dev server can never outlive the dispatch that started it
  * (the shell policy's "no unmanaged backgrounding", kept).

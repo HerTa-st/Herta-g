@@ -13,8 +13,10 @@ import type {
   TurnLifecycleEvent,
   WorkspaceEvent,
 } from "@herta/app-server";
+import { EMPTY_LIVE } from "../../shared/live-tool-feed.js";
 import type {
   HertaBridge,
+  LiveToolSnapshot,
   NavBlockedEvent,
   SessionError,
   SessionNoSession,
@@ -87,6 +89,12 @@ export interface SessionSnapshotView {
    *  drives the multi-row shimmer in ActivityBlock. Reset with the backend
    *  turn lifecycle. */
   readonly backendInFlight: number;
+  /** The live views of 板砖's run (ADR 0073) — its recent calls, numbered as
+   *  the record will number their op rows, and the focused call's stream
+   *  (the file it is writing, a command's output) — as main last sent them.
+   *  Kept past the backend's end (the record trails it), cleared by the next
+   *  run and by a reset. Screen-only: never in the record. */
+  readonly live: LiveToolSnapshot;
   /** Renderer wall-clock (Date.now) when the @板砖 backend turn started (its
    *  backend-layer turn.started). Anchors the backend activity timer to the
    *  actual 板砖 start, NOT turnStartedAt — which begins when Herta's turn
@@ -229,6 +237,7 @@ const INITIAL: SessionSnapshotView = {
   turnStartedAt: null,
   backendActive: false,
   backendInFlight: 0,
+  live: EMPTY_LIVE,
   backendStartedAt: null,
   backendError: false,
   backendSucceededSeq: 0,
@@ -353,6 +362,10 @@ export class SessionStore {
       ...(bridge.onResume !== undefined
         ? [bridge.onResume((e) => this.onResume(e))]
         : []),
+      // Optional: the live views of the call in flight (ADR 0073).
+      ...(bridge.onLive !== undefined
+        ? [bridge.onLive((e) => this.onLive(e))]
+        : []),
     ];
     // Subscribed: now ask for the state. Main's own push at did-finish-load
     // can land before this line after a reload, and was then lost — the
@@ -363,6 +376,16 @@ export class SessionStore {
   }
 
   private navBlockSeq = 0;
+
+  /** Main's newest live views (ADR 0073). Only while a run is live: once
+   *  the backend has ended, the views it left are what the trace card shows
+   *  until the record catches up, and a late snapshot (main's own clearing
+   *  one included) must not replace them. */
+  private onLive(e: LiveToolSnapshot): void {
+    if (!this.snapshot.backendActive) return;
+    if (e.views.length === 0 && this.snapshot.live.views.length === 0) return;
+    this.emit({ ...this.snapshot, live: e });
+  }
 
   /** Main's answer on the 继续 offer changed. A dropped-events sentinel
    *  says nothing about it; the next reset re-syncs. */
@@ -726,6 +749,7 @@ export class SessionStore {
       turnStartedAt: e.turn !== undefined ? Date.now() : null,
       backendActive: e.turn?.backendActive ?? false,
       backendInFlight: 0,
+      live: EMPTY_LIVE,
       backendStartedAt: e.turn?.backendActive === true ? Date.now() : null,
       backendError: false,
       backendSucceededSeq: 0,
@@ -945,6 +969,7 @@ export class SessionStore {
         ...this.snapshot,
         backendActive: true,
         backendInFlight: 0,
+        live: EMPTY_LIVE,
         backendStartedAt: Date.now(),
         backendError: false,
       });
@@ -954,6 +979,9 @@ export class SessionStore {
       // backendStartedAt is intentionally left set (carried via spread): the
       // ActivityBlock already froze its elapsed against its captured start; the
       // actor turn-finished clears it. A second @板砖 dispatch re-stamps it.
+      // The live views are KEPT: the record trails the backend by the length of
+      // Herta's beats (lab 2026-09-30), and the trace card needs the last
+      // views until the done-marker lands. The next run clears them.
       this.emit({
         ...this.snapshot,
         backendActive: false,

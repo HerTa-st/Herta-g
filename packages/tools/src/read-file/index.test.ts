@@ -7,7 +7,6 @@ import {
   InMemoryEventBus,
   NoopMemoryManager,
   ReadLedger,
-  TodoStore,
 } from "@herta/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkTmpWorkspace, type TmpWorkspace } from "../testing/tmp-workspace.js";
@@ -24,7 +23,6 @@ function ctx(workspaceRoot: string, reads = new ReadLedger()) {
     signal: new AbortController().signal,
     workspaceRoot,
     reads,
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),

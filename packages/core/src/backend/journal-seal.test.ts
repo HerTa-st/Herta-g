@@ -219,15 +219,14 @@ describe("each open call is decided (ADR 0071 §1.3)", () => {
     ).toEqual(["read_interrupted"]);
   });
 
-  it("todo_write / report_finding: not applied", async () => {
+  it("report_finding: not applied", async () => {
     expect(
       await outcomeOf([
         start(),
-        asks(call("c1", "todo_write"), call("c2", "report_finding")),
-        dispatched("c1"),
+        asks(call("c2", "report_finding")),
         dispatched("c2"),
       ]),
-    ).toEqual(["state_not_applied", "state_not_applied"]);
+    ).toEqual(["state_not_applied"]);
   });
 
   it("a command, or anything else with side effects: outcome unknown", async () => {
@@ -353,7 +352,7 @@ describe("what the seal reports", () => {
         asks(
           call("c1", "run_command", { command: "npm   run\n dev" }),
           call("c2", "read_file", { path: "README.md" }),
-          call("c3", "todo_write", { todos: [] }),
+          call("c3", "report_finding", { claim: "x", cites: [] }),
         ),
       ],
       disk({}),
@@ -361,54 +360,8 @@ describe("what the seal reports", () => {
     expect(plan?.calls.map((c) => c.step)).toEqual([
       "run_command npm run dev",
       "read_file README.md",
-      "todo_write",
+      "report_finding",
     ]);
-  });
-
-  it("the open todos come from the last todo list that took effect", async () => {
-    const list = (items: Array<[string, string]>) => ({
-      todos: items.map(([content, status]) => ({ content, status })),
-    });
-    const plan = await planSeal(
-      [
-        start(),
-        asks(
-          call(
-            "t1",
-            "todo_write",
-            list([
-              ["a", "in_progress"],
-              ["b", "pending"],
-            ]),
-          ),
-        ),
-        answer("t1"),
-        asks(
-          call(
-            "t2",
-            "todo_write",
-            list([
-              ["a", "completed"],
-              ["b", "in_progress"],
-            ]),
-          ),
-        ),
-        answer("t2"),
-        asks(
-          call(
-            "t3",
-            "todo_write",
-            list([
-              ["a", "completed"],
-              ["b", "completed"],
-            ]),
-          ),
-        ),
-        answer("t3", false),
-      ],
-      disk({}),
-    );
-    expect(plan?.openTodos).toEqual(["b"]);
   });
 
   it("processes: those with no exit, with a relaunch's finding when there is one, on their call's closer", async () => {
@@ -650,22 +603,15 @@ describe("continuing a run (ADR 0071 §1.4–§1.5)", () => {
     expect(text).not.toContain("Process 5");
   });
 
-  it("state: the last todo list that took effect, the findings, the files already changed", async () => {
+  it("state: the findings, the files already changed", async () => {
     const plan = await planResume(
       [
         start(),
         asks(
-          call("t1", "todo_write", {
-            todos: [
-              { content: "fix", status: "completed" },
-              { content: "test", status: "in_progress" },
-            ],
-          }),
           call("f1", "report_finding"),
           call("e1", "edit_file"),
           call("e2", "write_new_file"),
         ),
-        answer("t1"),
         {
           kind: "message",
           message: {
@@ -689,10 +635,6 @@ describe("continuing a run (ADR 0071 §1.4–§1.5)", () => {
       disk({ [abs("b.ts")]: "N" }),
       AT,
     );
-    expect(plan?.todos).toEqual([
-      { content: "fix", status: "completed" },
-      { content: "test", status: "in_progress" },
-    ]);
     expect(plan?.findings).toEqual([
       { claim: "the cache is stale", cites: ["a.ts:3"] },
     ]);

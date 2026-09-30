@@ -22,6 +22,44 @@ function fakeFrame(): ProviderPromptFrame {
 }
 
 describe("streamModelInference", () => {
+  it("coalesces a call's argument fragments (ADR 0073): hundreds of token-sized deltas become a handful of bus events that concatenate to the whole, flushed before the finished call", async () => {
+    const bus = new InMemoryEventBus<AgentEvent>();
+    const events: AgentEvent[] = [];
+    bus.onAny((e) => events.push(e));
+    const args = JSON.stringify({ path: "a.ts", file_text: "x".repeat(600) });
+    const pieces = args.match(/.{1,2}/g) ?? [];
+    const provider = new FakeProvider({
+      turns: [
+        [
+          ...pieces.map((argsDelta) => ({
+            type: "tool-call-delta" as const,
+            id: "c1",
+            tool: "write_new_file",
+            argsDelta,
+          })),
+          {
+            type: "tool-call-request",
+            call: { id: "c1", tool: "write_new_file", input: JSON.parse(args) },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+      ],
+    });
+    await streamModelInference({
+      provider,
+      frame: fakeFrame(),
+      signal: new AbortController().signal,
+      bus,
+      layer: "backend",
+    });
+    const deltas = events.flatMap((e) =>
+      e.type === "tool.call.delta" ? [e.argsDelta] : [],
+    );
+    expect(pieces.length).toBeGreaterThan(300);
+    expect(deltas.length).toBeLessThan(10);
+    expect(deltas.join("")).toBe(args);
+  });
+
   it("accumulates text deltas and emits each delta on the bus", async () => {
     const bus = new InMemoryEventBus<AgentEvent>();
     const events: AgentEvent[] = [];

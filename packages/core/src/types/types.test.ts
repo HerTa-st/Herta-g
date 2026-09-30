@@ -15,6 +15,10 @@ function describeEvent(e: AgentEvent): string {
       return e.tool;
     case "tool.call.progress":
       return e.message;
+    case "tool.call.delta":
+      return `${e.tool}:${e.argsDelta}`;
+    case "tool.call.output":
+      return e.chunk;
     case "tool.call.finished":
       return `tool.call.finished:tool=${e.tool}/id=${e.id}`;
     case "permission.requested":
@@ -27,8 +31,6 @@ function describeEvent(e: AgentEvent): string {
       return e.command;
     case "verification.finished":
       return "verified";
-    case "plan.updated":
-      return `${e.todos.length} todos`;
     case "turn.finished":
       return `${e.summary.durationMs}ms`;
     case "turn.failed":
@@ -49,7 +51,7 @@ function describeEvent(e: AgentEvent): string {
 }
 
 describe("AgentEvent type union", () => {
-  it("compiles with all 19 variants exhaustively handled (each with a layer field)", () => {
+  it("compiles with all 20 variants exhaustively handled (each with a layer field)", () => {
     expect(typeof describeEvent).toBe("function");
   });
 });

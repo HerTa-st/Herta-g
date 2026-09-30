@@ -14,7 +14,6 @@ import {
   ReadLedger,
   RulePermissionEngine,
   type RunCommandData,
-  TodoStore,
 } from "@herta/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkTmpWorkspace, type TmpWorkspace } from "../testing/tmp-workspace.js";
@@ -42,7 +41,6 @@ function ctxFor(workspaceRoot: string) {
     signal: new AbortController().signal,
     workspaceRoot,
     reads: new ReadLedger(),
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     memory: new NoopMemoryManager(),
@@ -88,6 +86,40 @@ d("bash tool (real bash)", () => {
     expect(
       (ctx.bg.getInternal(SHELL_BG_ID) as PersistentShell).isRunning(),
     ).toBe(false);
+  });
+
+  it("streams the command's output to the live view — whole lines, redacted, no protocol lines — on the first call of a fresh shell and after (ADR 0073)", async () => {
+    ws = await mkTmpWorkspace({});
+    const ctx = ctxFor(ws.root);
+    const tool = bashTool({ bashPath: BASH as string });
+    const chunks: string[] = [];
+    const r = await tool.run(
+      call(
+        "echo one; sleep 0.2; echo two; echo API_TOKEN=sk-abcdefghijklmnopqrst; printf 'tail-no-newline'",
+      ),
+      ctx,
+      noopProgress,
+      (chunk) => chunks.push(chunk),
+    );
+    expect(r.ok).toBe(true);
+    const seen = chunks.join("");
+    // (The wrapper's marker opens on a newline of its own, which ends an
+    // unterminated last line — a display tail does not mind.)
+    expect(seen).toBe(
+      "one\ntwo\nAPI_TOKEN=[REDACTED:env_secret]\ntail-no-newline\n",
+    );
+    // Nothing of the shell's own protocol reaches the view.
+    expect(seen).not.toContain("__HERTA_");
+    // Streamed, not handed over at the end: the lines before the sleep came
+    // in a chunk of their own.
+    expect(chunks.length).toBeGreaterThan(1);
+    // A second call on the same shell streams too, and only its own output.
+    const second: string[] = [];
+    await tool.run(call("echo three", "c2"), ctx, noopProgress, (c) =>
+      second.push(c),
+    );
+    expect(second.join("")).toBe("three\n");
+    await ctx.bg.stopAll();
   });
 
   it("non-zero exit is appended the trained way; state persists across calls in one brief", async () => {

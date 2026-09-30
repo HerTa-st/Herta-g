@@ -24,11 +24,8 @@ import {
   buildBridgeFailureMarker,
   buildDoneMarker,
   buildNoopMarker,
-  buildTodoLayoutBlock,
-  buildTodoProgressBlock,
   projectBackendEvent,
   sanitizeSystemBlock,
-  todoProgressSignature,
 } from "./backend-record-projection.js";
 import {
   extractRecentDialogue,
@@ -169,14 +166,16 @@ async function invokeBanzhuanBridgeInner(
   // this dispatch, harvested from finished command results as they project.
   let gitCommit: string | undefined;
   let gitPushedRef: string | undefined;
-  // First-todo-layout latch + progress-row dedup + background-row state (all
-  // reset per backend turn.started): see the PROCESS-phase comments at their
-  // use sites.
-  let todoLayoutProjected = false;
-  let lastTodoSignature: string | null = null;
+  // Background-row state (reset per backend turn.started): see the
+  // PROCESS-phase comments at its use site.
   const bgLastState = new Map<string, string>();
 
   const unsubscribe = deps.bus.onAny((event: AgentEvent) => {
+    // The live views (ADR 0073) — a call's arguments as they stream, a
+    // command's output as it prints — are for the screen only: nothing here
+    // projects or beats on them, and they arrive a token or a line at a time.
+    if (event.type === "tool.call.delta" || event.type === "tool.call.output")
+      return;
     eventQueue.push(event);
   });
 
@@ -336,8 +335,6 @@ async function invokeBanzhuanBridgeInner(
             staged = [];
             blockedCallIds.clear();
           }
-          todoLayoutProjected = false;
-          lastTodoSignature = null;
           bgLastState.clear();
         }
 
@@ -346,41 +343,6 @@ async function invokeBanzhuanBridgeInner(
           else if (event.type === "permission.resolved") {
             permissionPending = false;
             if (event.decision === "blocked") blockedCallIds.add(event.id);
-          }
-        }
-
-        // Todo projection (ADR 0025 §2 rendering + 2026-07-23 progress rows):
-        // the FIRST todo_write of the dispatch projects as ONE full layout
-        // block so user and Herta share the plan; every LATER update projects
-        // as a compact "todo k/n: <current>" progress row so the record (and
-        // the GUI's live activity line) show which step 板砖 is on. A rewrite
-        // that moves neither the counts nor the in-flight item is
-        // suppressed — projecting every near-identical list would spam the
-        // record (see todoProgressSignature for what that costs). The
-        // unfinished tail still rides the done-marker (↳ 待办).
-        if (
-          event.type === "plan.updated" &&
-          event.layer === "backend" &&
-          event.todos.length > 0
-        ) {
-          const signature = todoProgressSignature(event.todos);
-          if (!todoLayoutProjected) {
-            todoLayoutProjected = true;
-            lastTodoSignature = signature;
-            const todoBlock = sanitizeSystemBlock(
-              buildTodoLayoutBlock(event.todos),
-            );
-            projectedAny = true;
-            current = [...current, todoBlock];
-            deps.sink?.flushBlocks(current);
-          } else if (signature !== lastTodoSignature) {
-            lastTodoSignature = signature;
-            const progressBlock = sanitizeSystemBlock(
-              buildTodoProgressBlock(event.todos),
-            );
-            projectedAny = true;
-            current = [...current, progressBlock];
-            deps.sink?.flushBlocks(current);
           }
         }
 

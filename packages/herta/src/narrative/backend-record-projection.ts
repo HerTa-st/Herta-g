@@ -20,9 +20,6 @@ import type {
   ShowExcerptData,
   SystemBlock,
   SystemBlockDigest,
-  TodoDigestItem,
-  TodoItem,
-  TodoStatus,
 } from "@herta/core";
 import {
   composeMarkerSummary,
@@ -83,24 +80,13 @@ export function sanitizeDigest(digest: SystemBlockDigest): SystemBlockDigest {
         cites: digest.cites.map(cleanBody),
       };
     case "todo":
-      // Every string here is backend-authored item text: `current` (the
-      // in-flight step) and each `items[].content` (the full list both todo
-      // block kinds carry). Sanitize all of them — a renderer prints the
-      // items, and compaction may yet learn to. Counts and the `status`
-      // literals (a harness-owned enum) pass through.
+      // Legacy (ADR 0073): nothing writes a todo digest now; the case keeps
+      // the switch total, and still cleans the one string it carried.
       return {
         ...digest,
         ...(digest.current === undefined
           ? {}
           : { current: cleanBody(digest.current) }),
-        ...(digest.items === undefined
-          ? {}
-          : {
-              items: digest.items.map((item) => ({
-                ...item,
-                content: cleanBody(item.content),
-              })),
-            }),
       };
     case "attachment":
       // The filename and path come from OUTSIDE the workspace — the user
@@ -326,13 +312,6 @@ export function projectBackendEventUnsanitized(
 
   switch (event.type) {
     case "tool.call.started": {
-      // todo_write projects from `plan.updated` instead (2026-07-23): the
-      // event carries the full structured list, so the drain emits the first
-      // layout block + compact "todo k/n: <current>" progress rows. A
-      // started-row here would double-project every update ("Planning 2/3"
-      // AND the progress row); a FAILED todo_write still surfaces via the
-      // tool.call.finished failure row below.
-      if (event.tool === "todo_write") return null;
       const label = workflowLabel(event.tool, event.inputSummary);
       if (label === null) return null;
       // The editor's summary leads with its command word so the verb can be
@@ -718,8 +697,6 @@ export function workflowLabel(
       // Not a run. Herta reads these rows, and `Running bg-1` on the stop
       // call read as a second launch (real session 2026-08-16).
       return "Stopping";
-    case "todo_write":
-      return "Planning";
     case "git_status":
     case "git_diff":
       return "Inspecting";
@@ -882,14 +859,6 @@ export function buildDoneMarker(
     detailParts.push(`↳ 风险: ${items.join("; ")}`);
     sections.push({ kind: "risks", items });
   }
-  // Unfinished todos (ADR 0025 §2): folded from the report's nextActions so
-  // the next dispatch inherits them through workingHistory (which reads the
-  // marker body + evidenceDetail), and Herta can name what's still open.
-  if (report.nextActions.length > 0) {
-    const items = report.nextActions.slice(0, 5);
-    detailParts.push(`↳ 待办: ${items.join("; ")}`);
-    sections.push({ kind: "todos", items });
-  }
   // The backend's own findings (R-1, persona re-test 2026-08-11). Everything
   // above is a BY-PRODUCT of the run — files touched, risks left, work
   // outstanding — and a run can legitimately produce none of them: a survey,
@@ -942,103 +911,6 @@ export function buildDoneMarker(
     ...(evidenceDetail !== undefined ? { evidenceDetail } : {}),
     ...(sections.length > 0 ? { evidence: sections } : {}),
   };
-}
-
-/** The digest's structured copy of the list. A fresh array of fresh objects,
- *  never the caller's — a record block is durable and must not alias the
- *  backend's live todo state. */
-export function todoDigestItems(
-  todos: readonly TodoItem[],
-): readonly TodoDigestItem[] {
-  return todos.map((t) => ({ content: t.content, status: t.status }));
-}
-
-/**
- * The dispatch's first todo layout as one record block (ADR 0025 §2
- * rendering). English chrome header (matching every other projected row's
- * chrome — renderers localize from the digest), item text verbatim as the
- * backend wrote it. Status marks mirror the todo states:
- * `[ ]` pending · `[~]` in_progress · `[x]` completed.
- */
-export function buildTodoLayoutBlock(todos: readonly TodoItem[]): SystemBlock {
-  const mark = (status: TodoStatus): string =>
-    status === "completed" ? "[x]" : status === "in_progress" ? "[~]" : "[ ]";
-  const completed = todos.filter((t) => t.status === "completed").length;
-  const lines = todos.map((t) => `${mark(t.status)} ${t.content}`);
-  return {
-    kind: "system",
-    label: "差分协处理器",
-    body: [`todo list (${todos.length}):`, ...lines].join("\n"),
-    // No `current` here — the layout's [~] mark already shows it; `current`
-    // is the progress rows' field (buildTodoProgressBlock below). `items`,
-    // by contrast, rides BOTH kinds: a renderer reading "the newest todo
-    // digest" must find a list there whether or not an update has landed
-    // yet, and one code path beats a layout-parse plus a counts-only path.
-    digest: {
-      kind: "todo",
-      total: todos.length,
-      completed,
-      items: todoDigestItems(todos),
-    },
-  };
-}
-
-/**
- * A LATER todo_write update as one compact progress row (2026-07-23, user
- * request: with a 任务清单 in play, the record should show which step 板砖
- * is on). English chrome like every projected row; the in_progress item's
- * text rides both the body and the digest (`current`) so the GUI can render
- * a localized "步骤 k/n · <item>" line. Replaces the old "Planning k/n" op
- * row (suppressed at tool.call.started). Compaction and the dream digest
- * skip kind "todo" — working state, not an outcome — exactly as they did
- * for the Planning rows.
- *
- * The one-line body is deliberately lossy (counts + the in-flight step); the
- * digest's `items` carries the full list behind it, because under full-list
- * replacement the plan a renderer should show is the plan on THIS update,
- * not the one the layout block froze.
- */
-export function buildTodoProgressBlock(
-  todos: readonly TodoItem[],
-): SystemBlock {
-  const completed = todos.filter((t) => t.status === "completed").length;
-  const current = todos.find((t) => t.status === "in_progress")?.content;
-  return {
-    kind: "system",
-    label: "差分协处理器",
-    body: `todo ${completed}/${todos.length}${current === undefined ? "" : `: ${current}`}`,
-    digest: {
-      kind: "todo",
-      total: todos.length,
-      completed,
-      ...(current === undefined ? {} : { current }),
-      items: todoDigestItems(todos),
-    },
-  };
-}
-
-/** Dedup signature for todo progress: a rewrite that changes none of the
- *  list length, the completed count, or the in-flight item projects nothing.
- *
- *  `total` joined the signature on 2026-07-26. Full-list replacement lets
- *  板砖 legitimately grow or prune the plan mid-run, and with a
- *  `completed|current` signature an ADDED (or dropped) step while the same
- *  item stayed in flight projected NOTHING — so the record's last
- *  `todo k/n` row, and every renderer reading it, went on quoting a stale n
- *  for the rest of the dispatch.
- *
- *  Deliberately NOT in the signature: item text and ordering. A pending
- *  tail gets reworded constantly, and a row per reword would spam the
- *  record — which IS Herta's prompt, not just a screen. The trade is
- *  explicit: the newest projected digest's `items` can lag a pure reword of
- *  a non-in-flight item until the next update that does move a count or the
- *  in-flight step. The numbers and the step being worked — what a reader
- *  acts on — stay honest; item text is eventually consistent. */
-export function todoProgressSignature(todos: readonly TodoItem[]): string {
-  const completed = todos.filter((t) => t.status === "completed").length;
-  const current = todos.find((t) => t.status === "in_progress")?.content ?? "";
-  // Free text last: an item containing "|" then cannot collide across fields.
-  return `${completed}|${todos.length}|${current}`;
 }
 
 /**
@@ -1119,14 +991,13 @@ const CUTOFF_WORD: Record<CutoffOutcome, string> = {
 export interface CrashMarkerInput {
   readonly steps: readonly CutoffStep[];
   readonly changedFiles: readonly string[];
-  readonly openTodos: readonly string[];
 }
 
 /**
  * The done-marker the harness writes when a session opens on a run the app
  * exited during (ADR 0071 §1.2): state 中断, `crashed`, and in its detail
  * each step that had no result with the outcome the seal decided, the files
- * the run changed, and its unfinished todos — so the next dispatch's
+ * the run changed — so the next dispatch's
  * `workingHistory` and Herta read what happened, and rewind's changed-file
  * warning still fires. Sanitized here: it is built outside the bridge.
  */
@@ -1152,11 +1023,6 @@ export function buildCrashMarker(input: CrashMarkerInput): SystemBlock {
     const paths = input.changedFiles.slice(0, 20);
     detailParts.push(`↳ 改动文件: ${paths.join(", ")}`);
     sections.push({ kind: "files", paths });
-  }
-  if (input.openTodos.length > 0) {
-    const items = input.openTodos.slice(0, 5);
-    detailParts.push(`↳ 待办: ${items.join("; ")}`);
-    sections.push({ kind: "todos", items });
   }
   return sanitizeSystemBlock({
     kind: "system",

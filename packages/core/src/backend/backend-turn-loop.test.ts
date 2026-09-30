@@ -13,7 +13,6 @@ import {
 import { ReadLedger } from "../read-ledger.js";
 import { FakeAskResolver } from "../testing/fake-ask-resolver.js";
 import { FakeProvider } from "../testing/fake-provider.js";
-import { TodoStore } from "../todo-store.js";
 import { InMemoryToolRegistry } from "../tool-registry.js";
 import { TranscriptStore } from "../transcript-store.js";
 import type { AgentEvent } from "../types/events.js";
@@ -22,7 +21,6 @@ import type {
   ProviderEvent,
   ProviderPromptFrame,
 } from "../types/provider.js";
-import type { TodoItem } from "../types/todo.js";
 import type { HertaTool } from "../types/tool.js";
 import { setUsageNoteSink, type UsageNote } from "../usage-note.js";
 import { BackendContextBuilder } from "./backend-context-builder.js";
@@ -47,7 +45,6 @@ function buildDeps(provider: FakeProvider) {
     permissions: new NoopPermissionEngine(),
     backendBuilder: new BackendContextBuilder({ tools }),
     transcript: new TranscriptStore(),
-    todos: new TodoStore(),
     bg: new BackgroundHost(),
     bus: new InMemoryEventBus<AgentEvent>(),
     clock: () => new Date("2026-05-07T00:00:00.000Z"),
@@ -302,7 +299,6 @@ describe("runBackendTurnLoop", () => {
       permissions: new NoopPermissionEngine(),
       backendBuilder: new BackendContextBuilder({ tools }),
       transcript: new TranscriptStore(),
-      todos: new TodoStore(),
       bg: new BackgroundHost(),
       bus: new InMemoryEventBus<AgentEvent>(),
       clock: () => new Date("2026-05-07T00:00:00.000Z"),
@@ -394,7 +390,6 @@ describe("runBackendTurnLoop", () => {
       permissions: new NoopPermissionEngine(),
       backendBuilder: new BackendContextBuilder({ tools }),
       transcript: new TranscriptStore(),
-      todos: new TodoStore(),
       bg: new BackgroundHost(),
       bus: new InMemoryEventBus<AgentEvent>(),
       clock: () => new Date("2026-05-07T00:00:00.000Z"),
@@ -462,7 +457,6 @@ describe("runBackendTurnLoop", () => {
       permissions: new NoopPermissionEngine(),
       backendBuilder: countingBuilder,
       transcript: new TranscriptStore(),
-      todos: new TodoStore(),
       bg: new BackgroundHost(),
       bus: new InMemoryEventBus<AgentEvent>(),
       clock: () => new Date("2026-05-07T00:00:00.000Z"),
@@ -536,7 +530,6 @@ describe("runBackendTurnLoop", () => {
       permissions: new NoopPermissionEngine(),
       backendBuilder: new BackendContextBuilder({ tools }),
       transcript: new TranscriptStore(),
-      todos: new TodoStore(),
       bg: new BackgroundHost(),
       bus: new InMemoryEventBus<AgentEvent>(),
       clock: () => new Date("2026-05-07T00:00:00.000Z"),
@@ -764,7 +757,7 @@ describe("context budget + oversized-result persistence (ADR 0025 slice 2)", () 
     expect(trailer).toContain("1. the cache is stale (src/a.ts:3)");
     expect(trailer).toContain("「先别动测试」");
     if (first?.role === "assistant") {
-      expect(first.text).toContain("末尾的任务清单和工作状态");
+      expect(first.text).toContain("末尾的工作状态");
     }
   });
 
@@ -1606,23 +1599,6 @@ describe("summarizeInput (tool-aware working-state argument)", () => {
     expect(summarizeInput("git_diff", { staged: true })).toBe("");
   });
 
-  it("returns the done/total ratio for todo_write", () => {
-    expect(
-      summarizeInput("todo_write", {
-        todos: [
-          { content: "a", status: "completed" },
-          { content: "b", status: "in_progress" },
-          { content: "c", status: "pending" },
-        ],
-      }),
-    ).toBe("1/3");
-  });
-
-  it("returns empty for todo_write with an empty or malformed list", () => {
-    expect(summarizeInput("todo_write", { todos: [] })).toBe("");
-    expect(summarizeInput("todo_write", { foo: 1 })).toBe("");
-  });
-
   it("truncates a long path to the ~80-char cap with an ellipsis", () => {
     const longPath = `src/${"a".repeat(120)}.ts`;
     const out = summarizeInput("read_file", { path: longPath });
@@ -1774,7 +1750,6 @@ describe("runBackendTurnLoop — provider error resilience", () => {
       permissions: new NoopPermissionEngine(),
       backendBuilder: new BackendContextBuilder({ tools }),
       transcript: new TranscriptStore(),
-      todos: new TodoStore(),
       bg: new BackgroundHost(),
       bus: new InMemoryEventBus<AgentEvent>(),
       clock: () => new Date("2026-05-07T00:00:00.000Z"),
@@ -2157,34 +2132,16 @@ describe("one permission gate for the serial and the parallel path (2026-09-03)"
   });
 });
 
-describe("long runs: the end-of-run check, the todo reminder, the run's note (long-run study items 4–6, 2026-09-29)", () => {
-  /** A todo_write stand-in: the real tool lives in @herta/tools. */
-  const todoWrite: HertaTool = {
-    name: "todo_write",
-    schema: () => ({ name: "todo_write", description: "", inputSchema: {} }),
-    run: async (call, ctx) => {
-      ctx.todos.replace((call.input as { todos: TodoItem[] }).todos);
-      return { ok: true, summary: "todos updated" };
-    },
-  };
+describe("long runs and live views: the run's note, the stop, the live argument and output events (2026-09-29, ADR 0073)", () => {
   const noop: HertaTool = {
     name: "noop",
     schema: () => ({ name: "noop", description: "", inputSchema: {} }),
     run: async () => ({ ok: true, summary: "noop" }),
   };
-  const writeTodos = (id: string, todos: TodoItem[]): ProviderEvent[] => [
-    {
-      type: "tool-call-request",
-      call: { id, tool: "todo_write", input: { todos } },
-    },
-    { type: "finish", reason: "tool_calls" },
-  ];
   const stop = (text: string): ProviderEvent[] => [
     { type: "text-delta", text },
     { type: "finish", reason: "stop" },
   ];
-  const trailerOf = (frame: ProviderPromptFrame): string =>
-    "trailingState" in frame ? (frame.trailingState ?? "") : "";
 
   async function drain(
     deps: Parameters<typeof runBackendTurnLoop>[0],
@@ -2199,157 +2156,126 @@ describe("long runs: the end-of-run check, the todo reminder, the run's note (lo
     return events;
   }
 
-  it("a run that stops with its list unfinished gets ONE more step, with the check in the trailer; the second stop ends it", async () => {
-    const trailers: string[] = [];
+  it("a run ends at the model's first stop — no end-of-run check asks for another step (ADR 0073)", async () => {
     const provider = new FakeProvider({
       turns: [
-        writeTodos("t1", [
-          { content: "patch parser.ts", status: "completed" },
-          { content: "run parser tests", status: "pending" },
-        ]),
+        [
+          {
+            type: "tool-call-request",
+            call: { id: "c1", tool: "noop", input: {} },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
         stop("done"),
-        (frame) => {
-          trailers.push(trailerOf(frame));
-          return stop("the tests are left");
-        },
-        // A fourth call would exhaust the script and fail the turn.
+        // A third call would exhaust the script and fail the turn.
       ],
     });
     const deps = buildDeps(provider);
-    deps.tools.register(todoWrite);
+    deps.tools.register(noop);
     const events = await drain(deps);
-
     expect(events.map((e) => e.type)).toContain("turn.finished");
     expect(events.map((e) => e.type)).not.toContain("turn.failed");
-    expect(trailers[0]).toContain(
-      "收尾检查：你已经停下，但任务清单里还有 1 项没有完成",
-    );
-    // The list itself leads the same trailer, so the check can point at it.
-    expect(trailers[0]?.indexOf("## 当前任务清单")).toBe(0);
-    expect(deps.todos.unfinished()).toHaveLength(1);
   });
 
-  it("the check is not repeated: a run that marks its list after it, then stops, ends there", async () => {
-    const trailers: string[] = [];
+  it("a call's arguments reach the bus as they stream, under the id its tool.call.started carries; a command's output reaches it a chunk at a time", async () => {
+    const shell: HertaTool = {
+      name: "shell",
+      schema: () => ({ name: "shell", description: "", inputSchema: {} }),
+      run: async (_call, _ctx, _progress, output) => {
+        output?.("line 1\n");
+        output?.("");
+        output?.("line 2\n");
+        return { ok: true, summary: "exit 0" };
+      },
+    };
     const provider = new FakeProvider({
       turns: [
-        writeTodos("t1", [{ content: "run parser tests", status: "pending" }]),
+        [
+          {
+            type: "tool-call-delta",
+            id: "c1",
+            tool: "shell",
+            argsDelta: '{"cmd":',
+          },
+          {
+            type: "tool-call-delta",
+            id: "c1",
+            tool: "shell",
+            argsDelta: '"ls"}',
+          },
+          {
+            type: "tool-call-request",
+            call: { id: "c1", tool: "shell", input: { cmd: "ls" } },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
         stop("done"),
-        (frame) => {
-          trailers.push(trailerOf(frame));
-          return writeTodos("t2", [
-            { content: "run parser tests", status: "completed" },
-          ]);
-        },
-        (frame) => {
-          trailers.push(trailerOf(frame));
-          return stop("all done");
-        },
       ],
     });
     const deps = buildDeps(provider);
-    deps.tools.register(todoWrite);
-    const events = await drain(deps);
+    deps.tools.register(shell);
+    const seen: AgentEvent[] = [];
+    deps.bus.onAny((e) => seen.push(e));
+    await drain(deps);
 
-    expect(events.map((e) => e.type)).toContain("turn.finished");
-    expect(trailers[0]).toContain("收尾检查");
-    expect(trailers[1]).not.toContain("收尾检查");
-    expect(deps.todos.unfinished()).toHaveLength(0);
-  });
-
-  it("no check when the list is finished, or when the run is being stopped", async () => {
-    // Finished: one todo_write, one stop, nothing more asked of the model.
-    const done = new FakeProvider({
-      turns: [
-        writeTodos("t1", [{ content: "patch", status: "completed" }]),
-        stop("done"),
-      ],
-    });
-    const doneDeps = buildDeps(done);
-    doneDeps.tools.register(todoWrite);
-    expect((await drain(doneDeps)).map((e) => e.type)).toContain(
-      "turn.finished",
-    );
-
-    // Stopped: the user presses Stop just as the model says it is done — the
-    // late steer drain after the final inference is exactly that moment.
-    const controller = new AbortController();
-    const stopping = new FakeProvider({
-      turns: [
-        writeTodos("t1", [{ content: "patch", status: "pending" }]),
-        stop("done"),
-      ],
-    });
-    const stoppingDeps = buildDeps(stopping);
-    stoppingDeps.tools.register(todoWrite);
-    let drains = 0;
-    const events: AgentEvent[] = [];
-    for await (const e of runBackendTurnLoop(stoppingDeps, sampleBrief, {
-      signal: controller.signal,
-      userMessages: sampleUserMessages,
-      takePendingUserInput: () => {
-        drains += 1;
-        if (drains === 3) controller.abort();
-        return [];
+    const deltas = seen.filter((e) => e.type === "tool.call.delta");
+    expect(deltas).toEqual([
+      {
+        type: "tool.call.delta",
+        layer: "backend",
+        id: "c1",
+        tool: "shell",
+        argsDelta: '{"cmd":',
       },
-    })) {
-      events.push(e);
-    }
-    expect(drains).toBe(3);
-    expect(events.map((e) => e.type)).toContain("turn.finished");
-  });
-
-  it("a long run with no list is reminded every 10 steps; a run with a list, or without todo_write, never is", async () => {
-    function looping(steps: number, trailers: string[]): ProviderAdapter {
-      let call = 0;
-      return {
-        async *streamChat(frame) {
-          trailers.push(trailerOf(frame));
-          call += 1;
-          if (call > steps) {
-            yield* stop("done");
-            return;
-          }
-          yield {
-            type: "tool-call-request",
-            call: { id: `c${call}`, tool: "noop", input: {} },
-          };
-          yield { type: "finish", reason: "tool_calls" };
-        },
-      };
-    }
-    const nudge = "还没有任务清单";
-
-    const trailers: string[] = [];
-    const withTool = {
-      ...buildDeps(new FakeProvider({ turns: [] })),
-      provider: looping(21, trailers),
-    };
-    withTool.tools.register(todoWrite);
-    withTool.tools.register(noop);
-    await drain(withTool);
-    const nudged = trailers
-      .map((t, i) => (t.includes(nudge) ? i : -1))
-      .filter((i) => i >= 0);
-    // Frame i is built after i steps: reminded after 10 and after 20.
-    expect(nudged).toEqual([10, 20]);
-    expect(trailers[10]).toContain("这次运行已经走了 10 步");
-
-    // Without todo_write in the session there is nothing to remind of.
-    const bare: string[] = [];
-    const noTool = buildDeps(new FakeProvider({ turns: [] }));
-    noTool.tools.register(noop);
-    await drain({ ...noTool, provider: looping(21, bare) });
-    expect(bare.some((t) => t.includes(nudge))).toBe(false);
-
-    // A run that keeps a list is not reminded.
-    const listed: string[] = [];
-    const withList = buildDeps(new FakeProvider({ turns: [] }));
-    withList.tools.register(todoWrite);
-    withList.tools.register(noop);
-    withList.todos.replace([{ content: "step", status: "completed" }]);
-    await drain({ ...withList, provider: looping(21, listed) });
-    expect(listed.some((t) => t.includes(nudge))).toBe(false);
+      {
+        type: "tool.call.delta",
+        layer: "backend",
+        id: "c1",
+        tool: "shell",
+        argsDelta: '"ls"}',
+      },
+    ]);
+    const started = seen.find((e) => e.type === "tool.call.started");
+    expect(started?.type === "tool.call.started" && started.id).toBe("c1");
+    // Empty chunks are dropped; the rest arrive in order, stamped with the call.
+    expect(seen.filter((e) => e.type === "tool.call.output")).toEqual([
+      {
+        type: "tool.call.output",
+        layer: "backend",
+        id: "c1",
+        chunk: "line 1\n",
+      },
+      {
+        type: "tool.call.output",
+        layer: "backend",
+        id: "c1",
+        chunk: "line 2\n",
+      },
+    ]);
+    // Bus only: the generator surface replays no argument or output text.
+    const yielded = await drain({
+      ...buildDeps(
+        new FakeProvider({
+          turns: [
+            [
+              {
+                type: "tool-call-delta",
+                id: "c2",
+                tool: "noop",
+                argsDelta: "{}",
+              },
+              {
+                type: "tool-call-request",
+                call: { id: "c2", tool: "noop", input: {} },
+              },
+              { type: "finish", reason: "tool_calls" },
+            ],
+            stop("done"),
+          ],
+        }),
+      ),
+    });
+    expect(yielded.some((e) => e.type === "tool.call.delta")).toBe(false);
   });
 
   it("reports the run's trims once, however it ends — how many frames were cleared or dropped, and how far past the budget it grew", async () => {

@@ -1,5 +1,6 @@
 import type {
   HertaTool,
+  OutputFn,
   ProgressFn,
   ToolCallRequest,
   ToolContext,
@@ -14,6 +15,7 @@ export interface ToolRegistry {
     call: ToolCallRequest,
     ctx: ToolContext,
     progress: ProgressFn,
+    output?: OutputFn,
   ): Promise<ToolResult>;
 }
 
@@ -43,6 +45,7 @@ export class InMemoryToolRegistry implements ToolRegistry {
     call: ToolCallRequest,
     ctx: ToolContext,
     progress: ProgressFn,
+    output?: OutputFn,
   ): Promise<ToolResult> {
     const tool = this.tools.get(call.tool);
     if (!tool) {
@@ -56,6 +59,6 @@ export class InMemoryToolRegistry implements ToolRegistry {
         summary: `unknown tool: ${call.tool}`,
       };
     }
-    return tool.run(call, ctx, progress);
+    return tool.run(call, ctx, progress, output);
   }
 }

@@ -127,7 +127,7 @@ export function translateBackend(
   for (const m of frame.messages) {
     messages.push(...toOpenAI(m, thinking));
   }
-  // The per-iteration state trailer (todo list, working state, steps left):
+  // The per-iteration state trailer (working state, steps left):
   // trails the transcript so the stable prefix keeps its prompt-cache bytes;
   // recomputed each call by the turn loop and never part of the durable
   // transcript.

@@ -100,6 +100,7 @@ export const EVT = {
   voice: "session:voice",
   repo: "session:repo",
   resume: "session:resume",
+  live: "session:live",
   windowMaximized: "window:maximized",
   windowFullScreen: "window:fullScreen",
   openSettings: "app:openSettings",

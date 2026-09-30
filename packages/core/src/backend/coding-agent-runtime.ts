@@ -13,7 +13,6 @@ import { CALL_ERROR_DENY_CODES } from "../permission-deny-codes.js";
 import type { PermissionEngine, RiskLevel } from "../permission-engine.js";
 import { ReadLedger } from "../read-ledger.js";
 import { countDiffLines } from "../text/diff-lines.js";
-import { TodoStore } from "../todo-store.js";
 import type { ToolRegistry } from "../tool-registry.js";
 import { TranscriptStore } from "../transcript-store.js";
 import type { AgentEvent } from "../types/events.js";
@@ -39,7 +38,7 @@ import { renderScopedMemory } from "./scoped-memory.js";
 /**
  * Tools whose SUCCESS argues that the task advanced (audit 2026-07-24, 1.2).
  * Read-only and bookkeeping tools — read_file, search_text, glob,
- * git_status, git_diff, todo_write, command_output — execute successfully
+ * git_status, git_diff, command_output — execute successfully
  * while changing nothing, so counting them as completion evidence let a
  * backend that merely investigated report 完成.
  */
@@ -276,8 +275,8 @@ export class CodingAgentRuntime {
   /**
    * Continue a run the app exited during, or the user stopped (ADR 0071
    * §1.5), from its journal: the same base frame, the conversation with every
-   * open step closed and the harness's note after it, the todo list and
-   * findings that took effect, the files already changed. It appends to the
+   * open step closed and the harness's note after it, the findings that
+   * took effect, the files already changed. It appends to the
    * same journal under a `resume` entry. Nothing is re-run.
    *
    * Rejects with `kind: "resume_unavailable"` when the journal holds no run
@@ -349,7 +348,6 @@ export class CodingAgentRuntime {
           if (message.role === "user") steers.push(message.text);
         },
       });
-      const todos = new TodoStore();
       const reads = new ReadLedger();
       const bg = new BackgroundHost();
       const findings = new FindingsLedger();
@@ -365,7 +363,6 @@ export class CodingAgentRuntime {
         for (const m of resume.messages.slice(0, -1)) {
           if (m.role === "user") steers.push(m.text);
         }
-        todos.replace(resume.todos);
         for (const f of resume.findings) {
           findings.add(f);
           builder.addEvidence({
@@ -492,7 +489,7 @@ export class CodingAgentRuntime {
             // Only tools that CHANGE something count toward a completion
             // claim (audit 2026-07-24, 1.2). `ToolResult.ok` means the tool
             // EXECUTED, not that the task advanced — so read_file, glob,
-            // search_text, git_status, todo_write and friends all argued for
+            // search_text, git_status and friends all argued for
             // "completed", and a backend that read three files and said "that
             // function doesn't exist here, I can't do this" reported 完成.
             // That marker is durable, Herta reads it as ground truth
@@ -618,7 +615,6 @@ export class CodingAgentRuntime {
         permissions: this.deps.permissions,
         backendBuilder: this.deps.backendBuilder,
         transcript,
-        todos,
         bg,
         findings,
         bus: this.deps.bus,
@@ -819,14 +815,6 @@ export class CodingAgentRuntime {
         builder.addChangedFile(file);
       }
 
-      // Fold unfinished todos into nextActions (ADR 0025 §2) — for every
-      // outcome, including failed: an honest unfinished list is exactly
-      // what the next dispatch (via the done-marker → workingHistory) and
-      // Herta's commentary need to see.
-      for (const todo of todos.unfinished()) {
-        builder.addNextAction(todo.content);
-      }
-
       if (failed) {
         // An interrupt is a distinct ending, not a failure (1.4). So is the
         // step limit: the run stopped where it stood, and it can be
@@ -859,9 +847,9 @@ export class CodingAgentRuntime {
           // as a residual-risk line. A refusal now CAPS the status.
           //
           // "Landed" is mutations/verification — deliberately NOT
-          // `hasOkEvidence`, which counts read_file/todo_write/git_status
-          // and would call a run that only READ things "partial" instead of
-          // 受阻 (and see 1.2 on that counting generally).
+          // `hasOkEvidence`, which would call a run that only READ things
+          // "partial" instead of 受阻 (and see 1.2 on that counting
+          // generally).
           const landed =
             partialReport.changedFiles.length > 0 ||
             partialReport.tests.length > 0;
@@ -869,16 +857,8 @@ export class CodingAgentRuntime {
         } else {
           // Only SUCCESSFUL tool results (or harvested tests/files) argue
           // for completion; a run whose evidence is all failures reports
-          // partial rather than claiming success. Open todos cap it too,
-          // as a refusal does (owner 2026-09-29, long-run study item 4):
-          // the loop gave the model one end-of-run check to finish or make
-          // the list honest, so an item still open is work left undone, and
-          // 完成 beside a ↳ 待办 line would claim otherwise.
-          builder.setStatus(
-            hasOkEvidence && todos.unfinished().length === 0
-              ? "completed"
-              : "partial",
-          );
+          // partial rather than claiming success.
+          builder.setStatus(hasOkEvidence ? "completed" : "partial");
         }
       }
 

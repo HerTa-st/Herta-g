@@ -23,7 +23,6 @@ export class ExecutionReportBuilder {
    *  could not attribute — listed ahead of the per-tool ones, so a reader
    *  that shows only the first few (the done-marker shows five) keeps them. */
   private readonly leadingRisks: string[] = [];
-  private readonly nextActions: string[] = [];
   private endedBy: AgentExecutionReport["endedBy"];
 
   constructor(private readonly taskId: string) {}
@@ -68,11 +67,6 @@ export class ExecutionReportBuilder {
     return this;
   }
 
-  addNextAction(action: string): this {
-    this.nextActions.push(action);
-    return this;
-  }
-
   build(): AgentExecutionReport {
     if (this.taskId.length === 0) {
       throw new Error("ExecutionReportBuilder: taskId must be non-empty");
@@ -95,7 +89,6 @@ export class ExecutionReportBuilder {
       tests: [...this.tests],
       permissions: [...this.permissions],
       residualRisks: [...this.leadingRisks, ...this.residualRisks],
-      nextActions: [...this.nextActions],
       ...(this.endedBy !== undefined ? { endedBy: this.endedBy } : {}),
     };
   }

@@ -31,6 +31,7 @@ import type {
   DreamConfig,
   HertaBridge,
   InteractionLanguageChoice,
+  LiveToolSnapshot,
   MiniMaxRefusalState,
   MiniMaxVoiceState,
   ModelConfig,
@@ -298,6 +299,8 @@ export interface MockHertaBridge {
   emitRepo(e: RepoEvent): void;
   /** The 继续 offer's stream (ADR 0071 §1.4). */
   emitResume(e: ResumeEvent): void;
+  /** The live views of the call in flight (ADR 0073). */
+  emitLive(e: LiveToolSnapshot): void;
 }
 
 const DEFAULT_SNAPSHOT: SessionSnapshot = {
@@ -326,6 +329,7 @@ export function createMockHertaBridge(
   const workspaceCbs = new Set<(e: WorkspaceEvent) => void>();
   const repoCbs = new Set<(e: RepoEvent) => void>();
   const resumeCbs = new Set<(e: ResumeEvent) => void>();
+  const liveCbs = new Set<(e: LiveToolSnapshot) => void>();
   const voiceCbs = new Set<(e: VoiceCueEvent) => void>();
   const updateCbs = new Set<(e: UpdateState) => void>();
   const navBlockedCbs = new Set<(e: NavBlockedEvent) => void>();
@@ -977,6 +981,7 @@ export function createMockHertaBridge(
     onMiniMaxSpeech: (cb) => sub(minimaxSpeechCbs, cb),
     onWorkspace: (cb) => sub(workspaceCbs, cb),
     onRepo: (cb) => sub(repoCbs, cb),
+    onLive: (cb) => sub(liveCbs, cb),
     refreshRepo: async () => {
       calls.refreshRepo += 1;
     },
@@ -1027,6 +1032,9 @@ export function createMockHertaBridge(
     },
     emitResume: (e) => {
       for (const cb of resumeCbs) cb(e);
+    },
+    emitLive: (e) => {
+      for (const cb of liveCbs) cb(e);
     },
     emitVoice: (e) => {
       for (const cb of voiceCbs) cb(e);
