@@ -43,6 +43,40 @@ describe("processTree (ADR 0071 §1.6)", () => {
     it("nothing when nothing of it runs", () => {
       expect(tree([row(99, 10_000)])).toEqual([]);
     });
+
+    it("a gone parent's children are ours only if they started while the run's app lived (review 2026-09-30)", () => {
+      // pid 11 is free again. 21 started under it while the app lived; 22
+      // started under it long after — a later holder of pid 11 started it and
+      // exited, and nothing else tells them apart.
+      const rows = [row(21, 10_050, 11), row(22, 900_100, 11)];
+      expect(processTree(rows, ROOT, "win32", { notAfter: 60_000 })).toEqual([
+        21,
+      ]);
+      // The window still applies: a child stamped just past the bound is ours.
+      expect(processTree(rows, ROOT, "win32", { notAfter: 895_500 })).toEqual([
+        21, 22,
+      ]);
+      // Without the bound the old answer stands.
+      expect(processTree(rows, ROOT, "win32")).toEqual([21, 22]);
+      // A parent still running as itself needs no bound: its children are its.
+      expect(
+        processTree(
+          [row(11, 10_000), row(22, 900_100, 11), row(33, 950_000, 22)],
+          ROOT,
+          "win32",
+          { notAfter: 60_000 },
+        ),
+      ).toEqual([11, 22, 33]);
+      // Once a child is found running, its own children are its, bound or not.
+      expect(
+        processTree(
+          [row(21, 10_050, 11), row(31, 900_000, 21)],
+          ROOT,
+          "win32",
+          { notAfter: 60_000 },
+        ),
+      ).toEqual([21, 31]);
+    });
   });
 
   describe("posix: the recorded process and its process group", () => {

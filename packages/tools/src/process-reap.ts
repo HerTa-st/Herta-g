@@ -134,6 +134,15 @@ async function posixProcesses(): Promise<ProcessRow[]> {
  *   to what it started. Each child must have started after its parent, and
  *   when the parent's pid now names a later process, before that one — its
  *   own children are someone else's.
+ *   A parent that is GONE has one more bound, `notAfter`: the pid may have
+ *   been held in between by a process that started children of its own and
+ *   exited — Windows reuses pids fast, and hours may pass before the
+ *   relaunch — so a child of a dead parent is taken only when it started
+ *   while the run's app was still alive (review 2026-09-30). A child the
+ *   launcher started after the app died is left alone: that is the safe
+ *   direction, and the launcher itself is caught when it still runs.
+ *   Once a node is found running, its own children need no such bound: it
+ *   has held its pid since it started.
  * - POSIX: the members of its process group (the run's commands are group
  *   leaders, and an orphan keeps its group) that started after it — unless
  *   the pid now names a later process, which the kernel only allows once
@@ -143,6 +152,7 @@ export function processTree(
   rows: readonly ProcessRow[],
   root: { readonly pid: number; readonly startedAt: number },
   platform: NodeJS.Platform = process.platform,
+  opts: { readonly notAfter?: number } = {},
 ): number[] {
   const byPid = new Map(rows.map((r) => [r.pid, r]));
   const holder = byPid.get(root.pid);
@@ -172,18 +182,23 @@ export function processTree(
   }
   const found: number[] = rootRuns ? [root.pid] : [];
   const seen = new Set<number>(found);
+  const notAfter =
+    opts.notAfter === undefined
+      ? Number.POSITIVE_INFINITY
+      : opts.notAfter + SAME_PROCESS_WINDOW_MS;
   const walk = (pid: number, startedAt: number): void => {
     const now = byPid.get(pid);
+    const runs =
+      now !== undefined && sameProcessStart(now.startedAt, startedAt);
     // The pid now names a process that is not ours: children it started
     // after it began are its own.
     const reusedAt =
-      now !== undefined && !sameProcessStart(now.startedAt, startedAt)
-        ? now.startedAt
-        : Number.POSITIVE_INFINITY;
+      now !== undefined && !runs ? now.startedAt : Number.POSITIVE_INFINITY;
     for (const c of children.get(pid) ?? []) {
       if (seen.has(c.pid)) continue;
       if (c.startedAt + SAME_PROCESS_WINDOW_MS < startedAt) continue;
       if (c.startedAt >= reusedAt) continue;
+      if (!runs && c.startedAt > notAfter) continue;
       seen.add(c.pid);
       found.push(c.pid);
       walk(c.pid, c.startedAt);

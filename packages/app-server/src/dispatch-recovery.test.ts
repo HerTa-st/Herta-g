@@ -499,6 +499,34 @@ describe("the launch reaper (ADR 0071 §1.6)", () => {
     expect(summary.fates).toEqual([{ pid: 11, fate: "ended" }]);
   });
 
+  it("a child of a gone launcher is ours only if it started while the app lived — a later holder of the pid may have started the rest (review 2026-09-30)", async () => {
+    const s = crashed((ws) => [
+      start(ws, { at: new Date(9_000).toISOString() }),
+      {
+        kind: "spawn",
+        callId: "c1",
+        pid: 11,
+        startedAt: 10_000,
+        command: "bash (persistent shell)",
+        role: "shell",
+      },
+      // A process the run saw end: the app lived at least until then.
+      { kind: "exit", pid: 12, at: 40_000 },
+    ]);
+    await markJournalOpen(s.journalPath, true);
+    const p = probe({
+      21: [10_050, 11, 11], // the real shell, started while the app lived
+      31: [900_000, 21, 21], // its command: the shell runs, so it is ours
+      22: [400_000, 11, 11], // under the dead pid 11, long after: a stranger's
+    });
+    const summary = await reapOrphanedDispatches(
+      dispatchJournalDir(s.transcriptDir),
+      p,
+    );
+    expect(p.killed.sort()).toEqual([21, 31]);
+    expect(summary.fates).toEqual([{ pid: 11, fate: "ended" }]);
+  });
+
   it("reaches an MSYS shell's commands through its process group, where Windows' parent ids are broken", async () => {
     // Cygwin's fork/exec: the command's Windows parent (a forked bash) exited
     // once it exec'd, so no parent-id walk leads from the shell to it.

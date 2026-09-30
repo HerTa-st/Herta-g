@@ -6,6 +6,7 @@ import {
   hashFile,
   type JournalHost,
   type JournalProcessFate,
+  journalLastAlive,
   type LastTurnEnd,
   markJournalOpen,
   openDispatch,
@@ -251,12 +252,15 @@ export async function reapOrphanedDispatches(
       } catch {
         table = null;
       }
+      // The latest moment the run's app is known to have lived: a child of a
+      // process that is gone is ours only if it started before that.
+      const notAfter = journalLastAlive(entries);
       for (const t of targets) {
         if (table === null) {
           found.push({ pid: t.pid, fate: "unverified" });
           continue;
         }
-        const tree = await reachable(table, t, probe);
+        const tree = await reachable(table, t, probe, notAfter);
         if (tree.length === 0) {
           // Neither it nor anything it started still runs.
           found.push({ pid: t.pid, fate: "gone" });
@@ -295,14 +299,18 @@ interface LeftBehind {
  * (`processTree`), and for an MSYS shell every member of its process group
  * — Cygwin's fork/exec leaves a command's Windows parent dead, so only
  * MSYS's own table leads there. A member must be no older than the shell,
- * and its own descendants come along.
+ * and its own descendants come along. `notAfter` bounds a child of a
+ * process that is gone (see `processTree`); a group member of a shell that
+ * is gone is bounded the same way, since MSYS reuses its pids too.
  */
 async function reachable(
   table: readonly ProcessRow[],
   t: LeftBehind,
   probe: ProcessProbe,
+  notAfter?: number,
 ): Promise<number[]> {
-  const found = new Set(processTree(table, t));
+  const opts = notAfter === undefined ? {} : { notAfter };
+  const found = new Set(processTree(table, t, undefined, opts));
   if (t.msys !== undefined) {
     let msys: readonly MsysRow[] = [];
     try {
@@ -311,6 +319,13 @@ async function reachable(
       // No MSYS table: what the Windows table reached is all there is.
     }
     const byPid = new Map(table.map((r) => [r.pid, r]));
+    const shell = byPid.get(t.pid);
+    const shellRuns =
+      shell !== undefined && sameProcessStart(shell.startedAt, t.startedAt);
+    const bound =
+      !shellRuns && notAfter !== undefined
+        ? notAfter + SAME_PROCESS_WINDOW_MS
+        : Number.POSITIVE_INFINITY;
     for (const winpid of msysGroupWinpids(msys, {
       pgid: t.msys.pgid,
       winpid: t.pid,
@@ -318,11 +333,13 @@ async function reachable(
       const row = byPid.get(winpid);
       if (
         row === undefined ||
-        row.startedAt + SAME_PROCESS_WINDOW_MS < t.startedAt
+        row.startedAt + SAME_PROCESS_WINDOW_MS < t.startedAt ||
+        row.startedAt > bound
       ) {
         continue;
       }
-      for (const pid of processTree(table, row)) found.add(pid);
+      for (const pid of processTree(table, row, undefined, opts))
+        found.add(pid);
     }
   }
   return [...found];

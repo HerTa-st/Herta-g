@@ -142,7 +142,10 @@ export type DispatchJournalEntry =
        *  own table leads from the shell to what it started. */
       readonly msys?: { readonly pgid: number; readonly ps: string };
     }
-  | { readonly kind: "exit"; readonly pid: number }
+  /** A process the run started ended while the run was alive. `at` (epoch
+   *  ms) is one more moment the app is known to have lived, for the reaper's
+   *  bound (`journalLastAlive`); journals from before it have none. */
+  | { readonly kind: "exit"; readonly pid: number; readonly at?: number }
   /** A relaunch checked a process the run left behind (ADR 0071 §1.6). */
   | {
       readonly kind: "reap";
@@ -319,7 +322,7 @@ export class DispatchJournal {
         }).catch(() => undefined);
       },
       recordExit: (pid) => {
-        void this.append({ kind: "exit", pid });
+        void this.append({ kind: "exit", pid, at: Date.now() });
       },
     };
   }
@@ -367,6 +370,33 @@ export async function readDispatchJournal(
     return null;
   }
   return parseDispatchJournal(text);
+}
+
+/**
+ * The latest moment a journal shows its run's app alive: the start, a
+ * resume, a process started, a process seen ending. Undefined when nothing
+ * is stamped. The seal's and the reaper's own entries are written after the
+ * app died and carry no time, so they never move it. The reaper bounds what
+ * it takes for an orphan by this (ADR 0071 §1.6, amended 2026-09-30).
+ */
+export function journalLastAlive(
+  entries: readonly DispatchJournalEntry[],
+): number | undefined {
+  let last: number | undefined;
+  const seen = (t: number | undefined): void => {
+    if (
+      t !== undefined &&
+      Number.isFinite(t) &&
+      (last === undefined || t > last)
+    )
+      last = t;
+  };
+  for (const e of entries) {
+    if (e.kind === "start" || e.kind === "resume") seen(Date.parse(e.at));
+    else if (e.kind === "spawn") seen(e.startedAt);
+    else if (e.kind === "exit") seen(e.at);
+  }
+  return last;
 }
 
 /** The entries in a journal's text (see `readDispatchJournal`). Pure. */

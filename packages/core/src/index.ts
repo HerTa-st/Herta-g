@@ -68,6 +68,7 @@ export {
   type JournalProcessFate,
   type JournalSpawnRole,
   type JournalStartEntry,
+  journalLastAlive,
   journalUnavailableResult,
   markJournalOpen,
   openJournalIndexPath,
