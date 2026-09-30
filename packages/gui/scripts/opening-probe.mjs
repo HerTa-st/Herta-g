@@ -438,7 +438,12 @@ if (painted !== undefined && revealed !== undefined && ended !== undefined) {
     // it can be neither passed nor failed on its frames. Its marks — the
     // worker, the sheet, the opening to its end — are still judged. A real
     // missing figure shows as frames DURING the hold without ink, below.
-    notObserved = `the recording began at ${firstFrame} ms, after the reveal at ${revealed} ms`;
+    const why = `the recording began at ${firstFrame} ms, after the reveal at ${revealed} ms`;
+    // Where frames are only reported (Linux under Xvfb at scale 2: about
+    // one per opening), not seeing the opening is that surface's known
+    // limit — noted with the rest, not raised as a warning on every build.
+    if (JUDGE_FRAMES) notObserved = why;
+    else report.unjudged = [...(report.unjudged ?? []), why];
   } else if (hold.length === 0) {
     flag(
       frames.length === 0
