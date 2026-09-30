@@ -353,7 +353,11 @@ export class SessionAttachments {
    * SURVIVING block still cites is kept: content-hashed names make
    * re-attaching the same document idempotent, so two blocks can share one
    * stored file. Sidecars (outline, ADR 0043 digest) go with their text,
-   * exactly as the ✕ takes them.
+   * and the original's copy (ADR 0038 amendment, `source`) goes too — the
+   * same set the ✕ takes (2026-10-01: the GC used to leave the original
+   * behind, and skipped a scanned PDF's block outright because its only
+   * stored file IS the source). The original is kept by the same rule as the
+   * text: while a surviving block cites it.
    *
    * PICTURES are the exception (owner 2026-08-27): a withdrawn image block
    * RESTAGES into the composer strip instead of being deleted — the copy is
@@ -373,7 +377,13 @@ export class SessionAttachments {
     for (const b of surviving) {
       if (b.kind !== "system" || b.digest?.kind !== "attachment") continue;
       if (b.digest.path.length > 0) kept.add(b.digest.path);
+      const source = b.digest.source;
+      if (source !== undefined && source.length > 0) kept.add(source);
     }
+    // Only a harness-written path under this session's attachment directory
+    // that no surviving block cites; null otherwise.
+    const orphan = (p: string | undefined): string | null =>
+      p?.startsWith(prefix) === true && !kept.has(p) ? p : null;
     const toRemove: string[] = [];
     const restaged: StagedImage[] = [];
     const restagedPaths = new Set<string>();
@@ -381,21 +391,26 @@ export class SessionAttachments {
       if (b.kind !== "system" || b.digest?.kind !== "attachment") continue;
       const d = b.digest;
       if (d.unreadable === "removed") continue; // the ✕ already took the files
-      if (!d.path.startsWith(prefix)) continue; // harness-written, or nothing stored
-      if (kept.has(d.path)) continue;
+      // The original's copy stands on its own: a scanned PDF (or a document
+      // we store but do not decode) has no text path at all, and the source
+      // is the one file it left on disk.
+      const source = orphan(d.source);
+      if (source !== null) toRemove.push(source);
+      const text = orphan(d.path); // nothing stored, or a surviving citation
+      if (text === null) continue;
       if (d.image !== undefined) {
-        if (restagedPaths.has(d.path)) continue; // one owner per file
+        if (restagedPaths.has(text)) continue; // one owner per file
         if (this.staged.size < MAX_STAGED_IMAGES) {
           const img = this.staged.restage(b);
           if (img !== null) {
             restaged.push(img);
-            restagedPaths.add(d.path);
+            restagedPaths.add(text);
             continue;
           }
         }
         // Strip full, or not restageable after all — the GC takes it.
       }
-      toRemove.push(d.path, digestSidecarFor(d.path));
+      toRemove.push(text, digestSidecarFor(text));
       const outline = d.outline?.path;
       if (outline?.startsWith(prefix) === true) {
         toRemove.push(outline);

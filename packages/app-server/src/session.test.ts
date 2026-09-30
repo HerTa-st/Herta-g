@@ -1878,6 +1878,11 @@ describe("Session — attachFiles (ADR 0033)", () => {
     expect(existsSync(join(backendWs, ...sidecar.split("/")))).toBe(true);
     const digestRel = rel.replace(/\.txt$/, ".digest.txt");
     writeFileSync(join(backendWs, ...digestRel.split("/")), "# 文档摘要\n");
+    // The original's copy (ADR 0038 amendment) is part of the same set: the
+    // ✕ takes it, so the rewind must too (2026-10-01 — it was left behind).
+    const source = digest?.kind === "attachment" ? (digest.source ?? "") : "";
+    expect(source).toMatch(/\.pdf$/);
+    expect(existsSync(join(backendWs, ...source.split("/")))).toBe(true);
 
     const r = await session.rewindLastTurn();
     expect(r.ok).toBe(true);
@@ -1891,6 +1896,73 @@ describe("Session — attachFiles (ADR 0033)", () => {
     expect(existsSync(join(backendWs, ...rel.split("/")))).toBe(false);
     expect(existsSync(join(backendWs, ...sidecar.split("/")))).toBe(false);
     expect(existsSync(join(backendWs, ...digestRel.split("/")))).toBe(false);
+    expect(existsSync(join(backendWs, ...source.split("/")))).toBe(false);
+    await cleanup();
+  });
+
+  it("rewind removes a scanned PDF's original — a block whose ONLY stored file is the source (2026-10-01)", async () => {
+    // A scan keeps no text (ADR 0038 §4) but keeps its original for the
+    // viewer, so its digest path is empty and the source is the one file on
+    // disk. The GC used to skip any block without a text path, leaving that
+    // copy with no row and no ✕ to take it back.
+    const { makePdf } = await import("./testing/document-fixtures.js");
+    const { session, backendWs, srcDir, cleanup } = await mkAttachSession();
+    await session.submitText("hi");
+    writeFileSync(join(srcDir, "scan.pdf"), makePdf([[], []]));
+    const a = await session.attachFiles([join(srcDir, "scan.pdf")]);
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const block = session.record.find(
+      (b) => b.kind === "system" && b.digest?.kind === "attachment",
+    );
+    const digest = block?.kind === "system" ? block.digest : undefined;
+    expect(digest).toMatchObject({ path: "", unreadable: "empty" });
+    const source = digest?.kind === "attachment" ? (digest.source ?? "") : "";
+    expect(source).toMatch(/\.pdf$/);
+    expect(existsSync(join(backendWs, ...source.split("/")))).toBe(true);
+
+    const r = await session.rewindLastTurn();
+    expect(r.ok).toBe(true);
+    expect(
+      session.record.some(
+        (b) => b.kind === "system" && b.digest?.kind === "attachment",
+      ),
+    ).toBe(false);
+    expect(existsSync(join(backendWs, ...source.split("/")))).toBe(false);
+    await cleanup();
+  });
+
+  it("rewind keeps an ORIGINAL a surviving block still cites — for a text PDF and a scan alike (2026-10-01)", async () => {
+    // Re-attaching the same document writes the same content-hashed names,
+    // the original's copy included. Withdrawing the later blocks must leave
+    // the earlier rows' originals in place, or their viewer opens nothing.
+    const { makePdf } = await import("./testing/document-fixtures.js");
+    const { session, backendWs, srcDir, cleanup } = await mkAttachSession();
+    writeFileSync(join(srcDir, "book.pdf"), makePdf([["one"], ["two"]]));
+    writeFileSync(join(srcDir, "scan.pdf"), makePdf([[], []]));
+    const docs = [join(srcDir, "book.pdf"), join(srcDir, "scan.pdf")];
+    const first = await session.attachFiles(docs);
+    expect(first.ok).toBe(true);
+    await session.submitText("看看这两个文件");
+    const again = await session.attachFiles(docs);
+    expect(again.ok).toBe(true);
+    const stored = (): string[] =>
+      session.record.flatMap((b) =>
+        b.kind === "system" && b.digest?.kind === "attachment"
+          ? [b.digest.path, b.digest.source ?? ""].filter((p) => p !== "")
+          : [],
+      );
+    const before = [...new Set(stored())];
+    // book: text + original; scan: original only.
+    expect(before).toHaveLength(3);
+
+    const r = await session.rewindLastTurn();
+    expect(r.ok).toBe(true);
+    // The pre-send blocks survive, so every file they cite must too.
+    expect([...new Set(stored())].sort()).toEqual([...before].sort());
+    for (const rel of before) {
+      expect(existsSync(join(backendWs, ...rel.split("/")))).toBe(true);
+    }
     await cleanup();
   });
 
