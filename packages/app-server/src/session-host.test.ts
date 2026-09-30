@@ -458,15 +458,26 @@ describe("renameSession", () => {
     expect(host.listSessions()[0]?.title).toBe("新的 名字");
   });
 
-  it("renames the open session through its titler, and answers its topics for the rail", async () => {
+  it("renames the open session through its titler once it has a message, and refuses while it has none — nothing to anchor a topic at (review 2026-09-30)", async () => {
     const cfg = mkConfig();
     const host = createSessionHost(cfg);
-    const s = await host.createSession({});
+    // A fresh session: a name kept here would show on the sidebar's card
+    // and be dropped by the next open, which keeps no title without a
+    // user turn. Refused, and nothing written.
+    const fresh = await host.createSession({});
+    expect(await host.renameSession?.(fresh.sessionId, "我起的名字")).toEqual({
+      ok: false,
+    });
+    expect(
+      existsSync(join(cfg.transcriptDir, `${fresh.sessionId}.title.json`)),
+    ).toBe(false);
+    await host.closeActiveSession();
 
+    persistClosedSession(cfg, "spoken", [{ kind: "user", text: "hi" }]);
+    const s = await host.openSession({ sessionId: "spoken" });
     const r = await host.renameSession?.(s.sessionId, "我起的名字");
-
-    // A fresh session has no user message: nothing to anchor a topic at.
-    expect(r).toEqual({ ok: true, title: "我起的名字", topics: [] });
+    expect(r?.ok).toBe(true);
+    expect(r?.ok === true && r.title).toBe("我起的名字");
     expect(s.title).toBe("我起的名字");
     expect(readSessionTitle(cfg.transcriptDir, s.sessionId)).toBe("我起的名字");
     await host.closeActiveSession();

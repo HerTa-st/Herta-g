@@ -80,7 +80,7 @@ function capturing(inner: ProviderAdapter): ProviderAdapter & {
  *  the 中断 state), with its journal — or not — beside it. */
 async function stoppedSession(
   cfg: AppServerConfig,
-  journal: { contract: string } | null,
+  journal: { contract: string; workspaceRoot?: string } | null,
 ): Promise<SessionImpl> {
   const sessionId = "stopped";
   const persister = V2RecordPersister.forNewSession({
@@ -123,6 +123,9 @@ async function stoppedSession(
           at: "2026-09-28T10:00:00.000Z",
           contract: journal.contract,
           recordLength: 2,
+          ...(journal.workspaceRoot !== undefined
+            ? { workspaceRoot: journal.workspaceRoot }
+            : {}),
           brief: { taskId: "t" },
           frame: {
             userMessages: [{ text: "跑一下测试" }],
@@ -178,16 +181,24 @@ describe("the 继续 offer (ADR 0071 §1.4)", () => {
     }
   });
 
-  it("is not made for a session with no journal (older than ADR 0071), nor for a run under another contract", async () => {
+  it("is not made for a session with no journal (older than ADR 0071), nor for a run under another contract or in another workspace", async () => {
     const old = await stoppedSession(mkConfig(), null);
     const other = await stoppedSession(mkConfig(), { contract: "minimal" });
+    // The run's workspace was changed since (review 2026-09-30): continuing
+    // it here would run the old run's paths in the new place.
+    const moved = await stoppedSession(mkConfig(), {
+      contract: "standard",
+      workspaceRoot: join(mkConfig().workspaceRoot, "elsewhere"),
+    });
     try {
       expect(old.resumable).toBe(false);
       expect(other.resumable).toBe(false);
+      expect(moved.resumable).toBe(false);
       expect(await old.continueInterrupted()).toEqual({ unavailable: true });
     } finally {
       await old.close();
       await other.close();
+      await moved.close();
     }
   });
 });
