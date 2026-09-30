@@ -7,24 +7,34 @@ import { type Segment, segmentSpeech } from "../../lib/segment-speech.js";
 import { Tooltip } from "../Tooltip/Tooltip.js";
 import { BubbleTime } from "./BubbleTime.js";
 
-/** How long the copy button says "copied" before it reads "copy" again. */
+/** How long the copy button says "copied" (or "failed") before it reads
+ *  "copy" again. */
 const COPIED_MS = 1500;
 
 /**
  * Copy the reply (ADR 0072 §3): her prose only — the code cards keep their
  * deliberate lack of a copy affordance (Slice 5 Q1, `replyProse`). Beside
  * the timestamp in the hover-revealed action row, dressed as the user
- * bubble's rewind; it confirms with a check for a moment.
+ * bubble's rewind; it confirms with a check for a moment. A write the
+ * platform refuses is said, not swallowed: the button read 已复制 for nothing
+ * while main denied the clipboard permission (2026-09-30).
  */
 function CopyReply(props: { readonly text: string }): JSX.Element {
   const t = useT();
-  const [copied, setCopied] = useState(false);
+  const [outcome, setOutcome] = useState<"idle" | "copied" | "failed">("idle");
   useEffect(() => {
-    if (!copied) return;
-    const id = window.setTimeout(() => setCopied(false), COPIED_MS);
+    if (outcome === "idle") return;
+    const id = window.setTimeout(() => setOutcome("idle"), COPIED_MS);
     return () => window.clearTimeout(id);
-  }, [copied]);
-  const label = t(copied ? "workspace.copied" : "workspace.copyReply");
+  }, [outcome]);
+  const label = t(
+    outcome === "copied"
+      ? "workspace.copied"
+      : outcome === "failed"
+        ? "workspace.copyFailed"
+        : "workspace.copyReply",
+  );
+  const copied = outcome === "copied";
   return (
     // Portaled: the button sits at the column's LEFT edge (the rewind sits
     // at the right), so an in-flow pill centred on it ran past the
@@ -35,9 +45,14 @@ function CopyReply(props: { readonly text: string }): JSX.Element {
         className={`message-copy${copied ? " is-copied" : ""}`}
         aria-label={label}
         onClick={() => {
-          void navigator.clipboard?.writeText(props.text).then(
-            () => setCopied(true),
-            () => undefined,
+          const write = navigator.clipboard?.writeText(props.text);
+          if (write === undefined) {
+            setOutcome("failed");
+            return;
+          }
+          void write.then(
+            () => setOutcome("copied"),
+            () => setOutcome("failed"),
           );
         }}
       >

@@ -43,6 +43,7 @@ import {
   quitDisposals,
   quitsWhenAllWindowsClosed,
 } from "./quit-policy.js";
+import { rendererPermissionAllowed } from "./renderer-permissions.js";
 import { shouldReloadAfterCrash } from "./renderer-recovery.js";
 import {
   appWorkspaceRoot,
@@ -587,16 +588,19 @@ void app
     const s = await readGlobalSettings(app.getPath("userData")).catch(
       () => ({}) as Awaited<ReturnType<typeof readGlobalSettings>>,
     );
-    // Deny every renderer permission request (audit BL22). Electron grants them
-    // by default, and this renderer asks for none: its only `navigator.` use is
-    // `navigator.language`, and `new Audio(herta-voice://…)` needs no
-    // permission. So a blanket deny costs nothing today and means a future
-    // dependency cannot quietly acquire the camera, the microphone, geolocation
-    // or notifications on a window that also holds the app's IPC bridge.
-    session.defaultSession.setPermissionRequestHandler((_wc, _perm, done) => {
-      done(false);
+    // Deny every renderer permission but one (audit BL22; the exception and
+    // its reason in renderer-permissions.ts). Electron grants them by default,
+    // and a deny by default means a future dependency cannot quietly acquire
+    // the camera, the microphone, geolocation or notifications on a window
+    // that also holds the app's IPC bridge. Both handlers decide alike: the
+    // check handler answers `navigator.clipboard.writeText`, the request
+    // handler whatever asks the user.
+    session.defaultSession.setPermissionRequestHandler((_wc, perm, done) => {
+      done(rendererPermissionAllowed(perm));
     });
-    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionCheckHandler((_wc, perm) =>
+      rendererPermissionAllowed(perm),
+    );
 
     // Content-Security-Policy (audit BL2). Injected here rather than as a <meta>
     // tag so dev and packaged can differ — Vite needs eval and its HMR socket,

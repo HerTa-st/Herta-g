@@ -389,6 +389,7 @@ export const en = {
   // Copy a reply (ADR 0072 §3): her prose, without the code.
   "workspace.copyReply": "Copy reply",
   "workspace.copied": "Copied",
+  "workspace.copyFailed": "Copy failed",
   "workspace.editsNotReverted": "Edited files were not reverted",
   "workspace.rewindFailed": "Rewind failed",
   "workspace.processing": "Working…",
@@ -477,6 +478,7 @@ export const en = {
   "viewer.copyPath": "Copy path",
   "viewer.copySha": "Copy commit id",
   "viewer.copied": "Copied",
+  "viewer.copyFailed": "Copy failed",
   "viewer.openExternal": "Open in default app",
   "viewer.notFound": "File no longer exists or was moved",
   "viewer.binary": "Binary file — open with the default app",

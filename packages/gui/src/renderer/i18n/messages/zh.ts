@@ -370,6 +370,7 @@ export const zh = {
   // Copy a reply (ADR 0072 §3): her prose, without the code.
   "workspace.copyReply": "复制回复",
   "workspace.copied": "已复制",
+  "workspace.copyFailed": "复制失败",
   "workspace.editsNotReverted": "改动的文件未撤销",
   "workspace.rewindFailed": "撤回失败",
   "workspace.processing": "处理中…",
@@ -461,6 +462,7 @@ export const zh = {
   "viewer.copyPath": "复制路径",
   "viewer.copySha": "复制提交号",
   "viewer.copied": "已复制",
+  "viewer.copyFailed": "复制失败",
   "viewer.openExternal": "用系统应用打开",
   "viewer.notFound": "文件不存在或已被移动",
   "viewer.binary": "二进制文件——用系统应用打开查看",

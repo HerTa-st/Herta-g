@@ -922,6 +922,40 @@ describe("FileViewerPanel — UX review 2026-09-22", () => {
     }
   });
 
+  it("a write the platform refuses says so instead of Copied (2026-09-30)", async () => {
+    const mock = createMockHertaBridge();
+    Object.assign(mock.bridge, {
+      readWorkspaceFile: vi.fn(async () => ({
+        ok: true as const,
+        content: "x",
+        truncated: false,
+        size: 1,
+        relative: "src/a.ts",
+      })),
+    });
+    const writeText = vi.fn(async () => {
+      throw new DOMException("Write permission denied.", "NotAllowedError");
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      const h = renderWithSession(ui(), { mock });
+      h.openSession("s1");
+      fireEvent.click(screen.getByTestId("probe"));
+      await screen.findByTestId("file-viewer");
+      const copy = screen.getByRole("button", { name: "Copy path" });
+      copy.focus();
+      fireEvent.click(copy);
+      await waitFor(() =>
+        expect(screen.getByRole("tooltip").textContent).toBe("Copy failed"),
+      );
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
   it("closing the viewer hands focus back to what opened it (item 2)", async () => {
     const mock = createMockHertaBridge();
     Object.assign(mock.bridge, {

@@ -238,6 +238,22 @@ describe("HertaBubble", () => {
     );
   });
 
+  it("a write the platform refuses is said, not shown as copied (2026-09-30)", async () => {
+    const writeText = vi.fn(async () => {
+      throw new DOMException("Write permission denied.", "NotAllowedError");
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderWithLocale(<HertaBubble text="改好了。" at={justNow()} lang="en" />);
+    fireEvent.click(screen.getByLabelText("Copy reply"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Copy failed")).toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText("Copied")).not.toBeInTheDocument();
+  });
+
   it("the copy button's pill is lifted onto the body, so the scroller's edge cannot cut it (owner 2026-09-29)", () => {
     vi.useFakeTimers();
     try {

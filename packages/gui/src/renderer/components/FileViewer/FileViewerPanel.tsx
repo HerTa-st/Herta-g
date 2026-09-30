@@ -143,7 +143,7 @@ export function FileViewerPanel(): JSX.Element | null {
             ? { kind: "log" }
             : viewerKindFor(path);
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   const [modes, setModes] = useState<Readonly<Record<string, ViewMode>>>({});
   const panelRef = useRef<HTMLElement | null>(null);
   // What the body currently shows, so a re-read of the same tab keeps it on
@@ -158,7 +158,7 @@ export function FileViewerPanel(): JSX.Element | null {
   // tab keeps its target and reads nothing.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `target` is the re-read trigger, not an input
   useEffect(() => {
-    setCopied(false);
+    setCopied("idle");
     if (path === null || sessionId === null) return;
     let alive = true;
     const key = `${kindInfo.kind}:${path}`;
@@ -268,10 +268,11 @@ export function FileViewerPanel(): JSX.Element | null {
   }, [target]);
 
   // "Copied" is a moment, not a state: it reverts on its own (UX review
-  // 2026-09-22, item 21 — it stayed until the path changed).
+  // 2026-09-22, item 21 — it stayed until the path changed). So is a refused
+  // write, which is said rather than swallowed (2026-09-30).
   useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), COPIED_MS);
+    if (copied === "idle") return;
+    const timer = window.setTimeout(() => setCopied("idle"), COPIED_MS);
     return () => window.clearTimeout(timer);
   }, [copied]);
 
@@ -454,11 +455,13 @@ export function FileViewerPanel(): JSX.Element | null {
           {!isLog && (
             <Tooltip
               label={
-                copied
+                copied === "copied"
                   ? t("viewer.copied")
-                  : isCommit
-                    ? t("viewer.copySha")
-                    : t("viewer.copyPath")
+                  : copied === "failed"
+                    ? t("viewer.copyFailed")
+                    : isCommit
+                      ? t("viewer.copySha")
+                      : t("viewer.copyPath")
               }
               placement="bottom"
               align="center"
@@ -471,9 +474,14 @@ export function FileViewerPanel(): JSX.Element | null {
                   isCommit ? t("viewer.copySha") : t("viewer.copyPath")
                 }
                 onClick={() => {
-                  navigator.clipboard?.writeText(relative).then(
-                    () => setCopied(true),
-                    () => undefined,
+                  const write = navigator.clipboard?.writeText(relative);
+                  if (write === undefined) {
+                    setCopied("failed");
+                    return;
+                  }
+                  void write.then(
+                    () => setCopied("copied"),
+                    () => setCopied("failed"),
                   );
                 }}
               >
