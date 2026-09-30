@@ -3,7 +3,57 @@ import {
   classifyCommand,
   classifyShellBody,
   readerPathCandidates,
+  writtenOperands,
 } from "./classifier.js";
+
+describe("writtenOperands — what a command WRITES, for the write guard (2026-09-30)", () => {
+  it("names exactly the written operands, per program", () => {
+    expect(writtenOperands(["cp", "-r", "a", "b"])).toEqual(["a", "b"]);
+    expect(writtenOperands(["cp", "--target-directory=d", "a"])).toEqual([
+      "d",
+      "a",
+    ]);
+    expect(writtenOperands(["tee", "-a", "x", "y"])).toEqual(["x", "y"]);
+    // The script is text, not a target.
+    expect(writtenOperands(["sed", "-i", "s/.herta/x/", "README.md"])).toEqual([
+      "README.md",
+    ]);
+    expect(writtenOperands(["sed", "-i", "-e", "s/a/b/", "f1", "f2"])).toEqual([
+      "f1",
+      "f2",
+    ]);
+    expect(writtenOperands(["sed", "s/a/b/", "f"])).toEqual([]); // not in place
+    expect(writtenOperands(["sort", "-o", "out", "in"])).toEqual(["out"]);
+    expect(writtenOperands(["sort", "-uoout", "in"])).toEqual(["out"]);
+    expect(writtenOperands(["sort", "--output=out", "in"])).toEqual(["out"]);
+    expect(writtenOperands(["uniq", "in", "out"])).toEqual(["out"]);
+    expect(writtenOperands(["uniq", "in"])).toEqual([]);
+    expect(
+      writtenOperands(["find", "src", "-name", "*.x", "-fprint", "list"]),
+    ).toEqual(["src", "list"]);
+    expect(writtenOperands(["find", "src", "-name", "*.x"])).toEqual([]);
+    expect(writtenOperands(["dd", "if=a", "of=b"])).toEqual(["b"]);
+    expect(writtenOperands(["cat", "a"])).toEqual([]);
+  });
+
+  it("a guard's denial turns any verdict into a block; without one nothing changes", () => {
+    const guard = {
+      path: (op: string) => (op.startsWith(".herta") ? "state" : null),
+      body: (body: string) => (body.includes(".herta") ? "state" : null),
+    };
+    expect(
+      classifyCommand(["cp", "a", ".herta/x"], { writeGuard: guard }).kind,
+    ).toBe("block");
+    expect(
+      classifyCommand(["sh", "-c", "echo > .herta/x"], { writeGuard: guard })
+        .kind,
+    ).toBe("block");
+    expect(classifyCommand(["cp", "a", "b"], { writeGuard: guard }).kind).toBe(
+      "ask",
+    );
+    expect(classifyCommand(["cp", "a", ".herta/x"]).kind).toBe("ask");
+  });
+});
 
 describe("classifyCommand — block phase", () => {
   it("blocks rm -rf /", () => {

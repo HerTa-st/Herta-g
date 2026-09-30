@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import {
   basename,
@@ -278,6 +278,91 @@ export function gitDirShapeWriteDenial(
     dir = join(dir, raw[i] as string);
   }
   return null;
+}
+
+/** The deepest existing ancestor of `candidate`, realpath-ed, with the
+ *  not-yet-created suffix re-joined — the sync twin of
+ *  {@link realpathViaExistingAncestor}, for the sync shell classifier.
+ *  Bounded by path depth; the raw candidate when nothing resolves. */
+function realpathSyncViaExistingAncestor(candidate: string): string {
+  let dir = candidate;
+  const suffix: string[] = [];
+  while (true) {
+    try {
+      return join(realpathSync(dir), ...suffix.reverse());
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return candidate;
+      suffix.push(basename(dir));
+      dir = parent;
+    }
+  }
+}
+
+/** True when a path RELATIVE to the workspace passes through `.herta`
+ *  (the filesystem's case policy, Win32's trimmed spelling). */
+function relativeTouchesHerta(
+  workspaceRoot: string,
+  absolute: string,
+): boolean {
+  if (!isPathInside(workspaceRoot, absolute)) return false;
+  const rel = relativePath(workspaceRoot, absolute);
+  if (rel === "") return false;
+  return rel
+    .split(sep)
+    .map(winCanonicalizeSegment)
+    .some((seg) => caseNormalize(seg) === caseNormalize(".herta"));
+}
+
+/**
+ * Denial message when a COMMAND would write into the harness's own state —
+ * `.herta` anywhere beneath the workspace — else null (2026-09-30).
+ *
+ * `.herta/permissions.json` holds the project's command allow rules AND the
+ * workspace's trust choice (ADR 0030, ADR 0064); beside it sit memory, logs
+ * and attachments. The editors could never write there (the structural
+ * denial in {@link resolveSafePath}), but a shell could: a redirect, `tee`,
+ * `cp`, `rm` are classes the trust tier answers with no card, so one line in
+ * a trusted workspace — every managed one, by default — planted rules or trust
+ * that outlived the session and a later switch back to 逐项确认. Codex keeps
+ * `.codex`, Claude Code its settings, Cursor `.cursor` out of the agent's
+ * reach for the same reason: a harness that obeys a file the agent can write
+ * has handed the agent its own permissions.
+ *
+ * Judged RELATIVE to the workspace — a managed workspace itself lives under
+ * `~/.herta/workspaces/`, and its ordinary files must stay writable — both
+ * as spelled and through symlinks (the deepest existing ancestor realpath-ed,
+ * sync and bounded by depth), so a link planted outside `.herta` that points
+ * into it is caught. A path outside the workspace is not this guard's: those
+ * already ask as leaving it. What no argv guard can see — a workspace script
+ * run by an interpreter — needs an OS sandbox (docs/handoff/
+ * 2026-09-30-sandbox-study.md). Exported for both command classifiers.
+ */
+export function hertaStateWriteDenial(
+  workspaceRoot: string,
+  absolute: string,
+): string | null {
+  const resolved = realpathSyncViaExistingAncestor(absolute);
+  // The root through its own links too (a subst drive, a symlinked checkout,
+  // an 8.3 temp spelling), so a resolved target is judged against the
+  // resolved root.
+  const rootResolved = realpathSyncViaExistingAncestor(workspaceRoot);
+  if (
+    relativeTouchesHerta(workspaceRoot, absolute) ||
+    relativeTouchesHerta(workspaceRoot, resolved) ||
+    relativeTouchesHerta(rootResolved, resolved)
+  ) {
+    return `writes into .herta — the harness's own state (its permission rules and trust choice, memory, logs); no command may change it`;
+  }
+  return null;
+}
+
+/** True when shell text names `.herta` as a path component — for a body the
+ *  argv hands to another shell (`bash -c "…"`, `cmd /c …`), whose redirects
+ *  and operands no argv parse reaches. Case-folded everywhere: a body is
+ *  text, and the fail-closed direction is the right one for it. */
+export function mentionsHertaState(text: string): boolean {
+  return /(^|[\s'"=:/\\>|;&(`])\.herta(?=$|[\s'"/\\;&|)`])/i.test(text);
 }
 
 export interface ResolveSafePathOpts {

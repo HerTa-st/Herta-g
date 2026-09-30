@@ -73,6 +73,89 @@ describe("classifyShellCommand — bare-repo shape guard (ADR 0049 §6)", () => 
   });
 });
 
+describe("classifyShellCommand — the harness's own state (.herta) is not command-writable (2026-09-30)", () => {
+  // `.herta/permissions.json` holds the project's command allow rules AND the
+  // workspace's trust choice. The editors could never write under `.herta`
+  // (resolveSafePath); a shell could, and a redirect / tee / cp / rm is a
+  // class the trust tier answers with no card — so one line in a trusted
+  // workspace (every managed one, by default) granted rules or trust that
+  // outlive the session. Block tier, like the bare-repo shape guard.
+  const planted = `'{"version":1,"rules":[],"trust":"workspace"}'`;
+  it.each([
+    `echo ${planted} > .herta/permissions.json`,
+    `echo x >> .herta/memory/project.jsonl`,
+    "cat > .herta/permissions.json <<'EOF'\n{}\nEOF",
+    "cd .herta && echo x > permissions.json",
+    `printf x | tee .herta/permissions.json`,
+    "cp evil.json .herta/permissions.json",
+    "cp -t .herta evil.json",
+    "mv .herta/memory/project.jsonl gone.jsonl",
+    "rm .herta/permissions.json",
+    "rm -r .herta",
+    "mkdir -p .herta/rules",
+    "touch .herta/permissions.json",
+    "ln -s .herta/permissions.json p.json",
+    "sed -i 's/ask/workspace/' .herta/permissions.json",
+    "sort -o .herta/permissions.json in.txt",
+    "uniq in.txt .herta/permissions.json",
+    "find .herta -name '*.json' -delete",
+    "dd if=evil.json of=.herta/permissions.json",
+    `bash -c "echo x > .herta/permissions.json"`,
+    `sh -c 'cp evil.json .HERTA/permissions.json'`,
+    `echo x > ${wsShell}/.herta/permissions.json`,
+  ])("blocks %s", (cmd) => {
+    expect(kind(cmd)).toBe("block");
+  });
+
+  it("leaves the honest shapes alone — no .herta target, or only mentioned in a sed script", () => {
+    expect(ask("echo x > out.txt").code).toBe("command_ask_write");
+    expect(ask("cp a.json b.json").code).toBe("command_ask_fs");
+    expect(ask("sed -i 's/.herta/.config/' README.md").code).toBe(
+      "command_ask_write",
+    );
+    expect(ask("rm notes.txt").code).toBe("command_ask_delete");
+  });
+
+  it("judges the path inside the workspace: a managed workspace under ~/.herta/workspaces writes normally", () => {
+    const managed =
+      process.platform === "win32"
+        ? "C:\\Users\\u\\.herta\\workspaces\\abc"
+        : "/home/u/.herta/workspaces/abc";
+    const local = { workspaceRoot: managed, paths };
+    expect(classifyShellCommand("echo x > out.txt", local).kind).toBe("ask");
+    expect(classifyShellCommand("mkdir -p src", local).kind).toBe("ask");
+    expect(classifyShellCommand("echo x > .herta/p.json", local).kind).toBe(
+      "block",
+    );
+  });
+
+  it("follows a link planted outside .herta that points into it", async () => {
+    const { mkdtemp, mkdir, rm, symlink } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = await mkdtemp(join(tmpdir(), "herta-state-"));
+    try {
+      await mkdir(join(root, ".herta"));
+      // A directory junction needs no privilege on Windows; a dir symlink
+      // elsewhere.
+      await symlink(
+        join(root, ".herta"),
+        join(root, "lnk"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      const local = { workspaceRoot: root, paths };
+      expect(
+        classifyShellCommand("echo x > lnk/permissions.json", local).kind,
+      ).toBe("block");
+      expect(
+        classifyShellCommand("cp a lnk/permissions.json", local).kind,
+      ).toBe("block");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("classifyShellCommand — block tier (no override)", () => {
   it("blocks catastrophic commands anywhere in the line", () => {
     expect(kind("rm -rf /")).toBe("block");

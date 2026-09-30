@@ -16,6 +16,7 @@ import { allowedEnvKeys, findDisallowedEnvKey } from "./env-guard.js";
 import { writeRunLog } from "./logger.js";
 import { checkReaderArgvPaths } from "./reader-guard.js";
 import { redactSecrets } from "./redactor.js";
+import { runCommandWriteGuard } from "./rule.js";
 import { runCommand } from "./runner.js";
 import { runCommandInputSchema, runCommandJsonSchema } from "./schema.js";
 import { resolveWindowsShim } from "./shim-wrapper.js";
@@ -86,7 +87,9 @@ export function runCommandTool(): HertaTool {
       // Classify the model's ORIGINAL argv — the permission tier is decided
       // before any harness-side shim wrapping (audit 2026-07-10 finding 3:
       // the model never gets to escalate by phrasing its own cmd wrapper).
-      const verdict = classifyCommand(argv);
+      const verdict = classifyCommand(argv, {
+        writeGuard: runCommandWriteGuard(ctx.workspaceRoot, safe.resolved),
+      });
       if (verdict.kind === "block") {
         return errResult("command_blocked", verdict.reason);
       }

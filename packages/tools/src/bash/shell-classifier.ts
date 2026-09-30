@@ -2,7 +2,11 @@ import { relative, resolve } from "node:path";
 import { isPathInside, type RiskLevel } from "@herta/core";
 import { isCredentialPath } from "../credential-denylist.js";
 import { detectInProgressState, resolveGitDir } from "../git/repo-probe.js";
-import { gitDirShapeWriteDenial } from "../path-safety.js";
+import {
+  gitDirShapeWriteDenial,
+  hertaStateWriteDenial,
+  mentionsHertaState,
+} from "../path-safety.js";
 import {
   classifyCommand,
   classifyShellBody,
@@ -838,6 +842,18 @@ function classifySegment(
           },
         };
       }
+      // The harness's own state (2026-09-30): same reasoning, same tier — bash
+      // performs the write, so the guard lives here or nowhere.
+      const stateDenial = hertaTargetDenial(r.target, opts);
+      if (stateDenial !== null) {
+        return {
+          verdict: {
+            kind: "block",
+            code: "command_blocked",
+            reason: stateDenial,
+          },
+        };
+      }
       // Its own class when the target leaves the workspace (ADR 0064 L1):
       // the trust tier covers writes INSIDE, and `> $HOME/.bashrc` must
       // not ride `>` being "a write".
@@ -1221,9 +1237,15 @@ function classifySegment(
 
   // Everything else: the argv classifier, with in-workspace absolute paths
   // rewritten relative so `cat /e/repo/src/x` classifies as `cat src/x`.
-  const argv = words.map((w, i) =>
-    i === 0 ? w : relativizeInsideWorkspace(w, opts),
-  );
+  // The rewrite is relative to the WORKSPACE ROOT, not the cwd, so the write
+  // guard below maps an operand back to the word as typed before resolving.
+  const typed = new Map<string, string>();
+  const argv = words.map((w, i) => {
+    if (i === 0) return w;
+    const rel = relativizeInsideWorkspace(w, opts);
+    if (rel !== w) typed.set(rel, w);
+    return rel;
+  });
   // `shell: true` — this argv is about to be EXPANDED by bash, so the
   // inversion's unresolved-token rules apply here and only here. `unresolved`
   // is computed from the RAW segment because quoting decides it and the words
@@ -1236,6 +1258,19 @@ function classifySegment(
     repoInProgress: () => {
       const gitDir = resolveGitDir(opts.cwd ?? opts.workspaceRoot);
       return gitDir === null ? null : detectInProgressState(gitDir);
+    },
+    // The harness's own state is not command-writable (2026-09-30).
+    writeGuard: {
+      path: (operand) => hertaTargetDenial(typed.get(operand) ?? operand, opts),
+      // A body handed to another shell: its text naming `.herta`, or run from
+      // a cwd inside it, where every relative path lands there.
+      body: (body) =>
+        mentionsHertaState(body)
+          ? "hands another shell a command that names .herta — the harness's own state; no command may change it"
+          : hertaStateWriteDenial(
+              opts.workspaceRoot,
+              opts.cwd ?? opts.workspaceRoot,
+            ),
     },
   });
   if (v.kind === "block") return { verdict: v };
@@ -1569,6 +1604,21 @@ export function resolveWorkspacePath(
   if (native === null || !isPathInside(opts.workspaceRoot, native)) return null;
   const rel = relativePath(opts.workspaceRoot, native);
   return { native, relative: rel === "" ? "." : rel };
+}
+
+/** Denial when writing the path a shell token names would change the
+ *  harness's own state (`hertaStateWriteDenial`), else null. Resolved like a
+ *  redirect target — shell or native spelling, relative to the shell cwd.
+ *  Unknowable tokens (variables, `~`) and paths outside the workspace stay
+ *  null: they already ask as leaving it. */
+function hertaTargetDenial(
+  token: string,
+  opts: ShellClassifyOpts,
+): string | null {
+  const at = resolveWorkspacePath(token, opts);
+  return at === null
+    ? null
+    : hertaStateWriteDenial(opts.workspaceRoot, at.native);
 }
 
 /** `/e/repo/src/x` (or `E:\repo\src\x`) → `src/x` when inside the workspace;

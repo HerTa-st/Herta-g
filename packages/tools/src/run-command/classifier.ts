@@ -1766,9 +1766,192 @@ export interface ClassifyCommandOpts {
    *  nothing. Feeds the `concludes_in_progress_operation` consequence note;
    *  absent → the note is simply never attached. */
   repoInProgress?: () => RepoInProgressState | null;
+  /** The caller's judgment of what a WRITE would touch (2026-09-30): the
+   *  classifier names the operands a command writes, only the caller can
+   *  resolve them (its workspace, its cwd, its links). A denial from either
+   *  side turns the verdict into a block. Absent → no such check. */
+  writeGuard?: WriteGuard;
+}
+
+/** See `ClassifyCommandOpts.writeGuard`. Both return a denial reason, or null
+ *  to let the verdict stand. */
+export interface WriteGuard {
+  /** One operand the command WRITES, as it appears in the argv. */
+  path(operand: string): string | null;
+  /** A shell body the argv hands to another shell (`bash -c "…"`,
+   *  `cmd /c …`): its redirects and operands are text no argv parse reaches. */
+  body(body: string): string | null;
 }
 
 export function classifyCommand(
+  argv: readonly string[],
+  opts?: ClassifyCommandOpts,
+): Verdict {
+  const verdict = classifyCommandTiers(argv, opts);
+  const guard = opts?.writeGuard;
+  if (guard === undefined || verdict.kind === "block") return verdict;
+  // The harness's own state is not command-writable (2026-09-30): whatever
+  // tier the command earned, a write into it is refused outright — the same
+  // hard line the editors draw, since a card for it would be one click from
+  // the agent granting itself rules or trust.
+  for (const operand of writtenOperands(argv)) {
+    const denial = guard.path(operand);
+    if (denial !== null) {
+      return { kind: "block", code: "command_blocked", reason: denial };
+    }
+  }
+  const reentry = extractShellReentry(argv);
+  if (reentry?.kind === "body") {
+    const denial = guard.body(reentry.body);
+    if (denial !== null) {
+      return { kind: "block", code: "command_blocked", reason: denial };
+    }
+  }
+  return verdict;
+}
+
+/** Verbs whose every non-flag operand is a path they create, change, move or
+ *  remove. `cp`/`install` sources are only read, but a copy OUT of `.herta`
+ *  has no honest use a reader tool does not serve, and naming the destination
+ *  alone would miss `-t DIR` spellings. */
+const PATH_WRITING_VERBS: ReadonlySet<string> = new Set([
+  "rm",
+  "rmdir",
+  "unlink",
+  "shred",
+  "mkdir",
+  "touch",
+  "cp",
+  "mv",
+  "ln",
+  "rename",
+  "install",
+  "truncate",
+  "chmod",
+  "chown",
+  "chgrp",
+  "tee",
+  "del",
+  "erase",
+  "rd",
+  "remove-item",
+  "ri",
+]);
+
+/**
+ * The operands a command WRITES, as written in its argv — for the caller's
+ * write guard (2026-09-30). Precise per program rather than every operand, so
+ * a `.herta` that is only TEXT — `sed -i 's/.herta/x/' README.md` — is not
+ * mistaken for a target:
+ *   - the path-writing verbs above: every non-flag operand, `--opt=value`
+ *     values included;
+ *   - `sed` in place: the files after the script;
+ *   - `sort -o FILE` / `--output[=]FILE`; `uniq IN OUT`: OUT;
+ *   - `find` with an action predicate: its start points, and the file a
+ *     `-fprint*` / `-fls` writes;
+ *   - `dd of=FILE`.
+ */
+export function writtenOperands(argv: readonly string[]): string[] {
+  const id = interpreterName(argv[0] ?? "");
+  const args = argv.slice(1);
+  const nonFlag = (a: string): boolean => !(a.startsWith("-") && a.length > 1);
+  if (PATH_WRITING_VERBS.has(id)) {
+    const out: string[] = [];
+    for (const a of args) {
+      if (a === "--") continue;
+      if (a.startsWith("--") && a.includes("=")) {
+        out.push(a.slice(a.indexOf("=") + 1));
+        continue;
+      }
+      if (nonFlag(a)) out.push(a);
+    }
+    return out;
+  }
+  if (id === "sed") {
+    const inPlace = args.some(
+      (a) =>
+        a === "--in-place" ||
+        a.startsWith("--in-place=") ||
+        /^-[a-zA-Z]*i/.test(a),
+    );
+    if (!inPlace) return [];
+    let scriptGiven = false;
+    const files: string[] = [];
+    for (let i = 0; i < args.length; i += 1) {
+      const a = args[i] as string;
+      if (a === "-e" || a === "--expression" || a === "-f" || a === "--file") {
+        scriptGiven = true;
+        i += 1;
+        continue;
+      }
+      if (a.startsWith("--expression=") || a.startsWith("--file=")) {
+        scriptGiven = true;
+        continue;
+      }
+      if (a === "--") {
+        files.push(...args.slice(i + 1));
+        break;
+      }
+      if (!nonFlag(a)) continue;
+      if (!scriptGiven) {
+        scriptGiven = true; // the first operand is the script
+        continue;
+      }
+      files.push(a);
+    }
+    return files;
+  }
+  if (id === "sort") {
+    for (let i = 0; i < args.length; i += 1) {
+      const a = args[i] as string;
+      if (a === "--output" || a === "-o") return [args[i + 1] ?? ""];
+      if (a.startsWith("--output=")) return [a.slice("--output=".length)];
+      // Lazy: in `-uoFILE` the FIRST `o` opens the value.
+      const bundled = /^-[a-zA-Z]*?o(.*)$/.exec(a);
+      if (bundled !== null && !a.startsWith("--")) {
+        return [
+          bundled[1] !== "" ? (bundled[1] as string) : (args[i + 1] ?? ""),
+        ];
+      }
+    }
+    return [];
+  }
+  if (id === "uniq") {
+    const operands = args.filter(nonFlag);
+    return operands.length >= 2 ? [operands[1] as string] : [];
+  }
+  if (id === "find") {
+    if (!args.some((a) => FIND_ACTION_PREDICATES.has(a))) return [];
+    const out: string[] = [];
+    let i = 0;
+    for (; i < args.length; i += 1) {
+      const a = args[i] as string;
+      if (a.startsWith("-") || a === "(" || a === "!" || a === ")") break;
+      out.push(a);
+    }
+    for (; i < args.length; i += 1) {
+      const a = args[i] as string;
+      if (
+        a === "-fprint" ||
+        a === "-fprint0" ||
+        a === "-fprintf" ||
+        a === "-fls"
+      ) {
+        const file = args[i + 1];
+        if (file !== undefined) out.push(file);
+      }
+    }
+    return out;
+  }
+  if (id === "dd") {
+    return args
+      .filter((a) => a.startsWith("of="))
+      .map((a) => a.slice("of=".length));
+  }
+  return [];
+}
+
+function classifyCommandTiers(
   argv: readonly string[],
   opts?: ClassifyCommandOpts,
 ): Verdict {

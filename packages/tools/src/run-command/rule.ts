@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from "node:path";
 import type {
   PermissionRule,
   RulePermissionEngine,
@@ -7,10 +8,40 @@ import type {
 } from "@herta/core";
 import { detectInProgressState, resolveGitDir } from "../git/repo-probe.js";
 import { formatInputIssues } from "../input-issues.js";
-import { resolveSafePath } from "../path-safety.js";
-import { classifyCommand } from "./classifier.js";
+import {
+  hertaStateWriteDenial,
+  mentionsHertaState,
+  resolveSafePath,
+} from "../path-safety.js";
+import { classifyCommand, type WriteGuard } from "./classifier.js";
 import { checkReaderArgvPaths } from "./reader-guard.js";
 import { runCommandInputSchema } from "./schema.js";
+
+/**
+ * run_command's write guard (2026-09-30): the harness's own state (`.herta`)
+ * is not command-writable. Operands resolve against the command's effective
+ * cwd — which resolveSafePath already refuses inside `.herta`. The argv is
+ * spawned without a shell, so a body only exists behind an explicit
+ * `sh -c` / `cmd /c`, judged by its text.
+ */
+export function runCommandWriteGuard(
+  workspaceRoot: string,
+  cwd: string,
+): WriteGuard {
+  return {
+    path: (operand) =>
+      operand === ""
+        ? null
+        : hertaStateWriteDenial(
+            workspaceRoot,
+            isAbsolute(operand) ? resolve(operand) : resolve(cwd, operand),
+          ),
+    body: (body) =>
+      mentionsHertaState(body)
+        ? "hands a shell a command that names .herta — the harness's own state; no command may change it"
+        : null,
+  };
+}
 
 export function makeRunCommandRule(): PermissionRule {
   return async (
@@ -39,6 +70,7 @@ export function makeRunCommandRule(): PermissionRule {
         const gitDir = resolveGitDir(safe.resolved);
         return gitDir === null ? null : detectInProgressState(gitDir);
       },
+      writeGuard: runCommandWriteGuard(ctx.workspaceRoot, safe.resolved),
     });
     if (verdict.kind === "block") {
       return {

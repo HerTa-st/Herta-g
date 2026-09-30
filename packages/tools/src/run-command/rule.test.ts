@@ -135,6 +135,34 @@ describe("run_command permission rule", () => {
     expect(decision.code).toBe("command_blocked");
   });
 
+  it("refuses a write into .herta — the harness's own state — at any tier (2026-09-30)", async () => {
+    ws = await mkTmpWorkspace({});
+    const engine = new RulePermissionEngine({ ask: new FakeAskResolver() });
+    registerRunCommandRule(engine);
+    for (const argv of [
+      ["cp", "evil.json", ".herta/permissions.json"],
+      ["tee", ".herta/permissions.json"],
+      ["rm", ".herta/permissions.json"],
+      ["mkdir", "-p", "src/../.herta/rules"],
+      ["sh", "-c", "echo x > .herta/permissions.json"],
+      ["cp", "evil.json", join(ws.root, ".herta", "permissions.json")],
+    ]) {
+      const decision = await engine.check(
+        { id: "1", tool: "run_command", input: { argv } },
+        ctxFor(ws.root),
+      );
+      expect(decision.kind, argv.join(" ")).toBe("deny");
+      if (decision.kind !== "deny") throw new Error();
+      expect(decision.code).toBe("command_blocked");
+    }
+    // The honest neighbours still just ask.
+    const honest = await engine.check(
+      { id: "1", tool: "run_command", input: { argv: ["cp", "a", "b"] } },
+      ctxFor(ws.root),
+    );
+    expect(honest.kind).toBe("ask");
+  });
+
   it("asks for destructive with risk=workspace_destructive", async () => {
     ws = await mkTmpWorkspace({});
     const engine = new RulePermissionEngine({ ask: new FakeAskResolver() });
