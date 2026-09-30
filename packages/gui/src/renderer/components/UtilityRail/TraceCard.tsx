@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import { useListTransitions } from "../../hooks/useListTransitions.js";
 import { useReducedMotion } from "../../hooks/useReducedMotion.js";
 import { useT } from "../../i18n/LocaleProvider.js";
@@ -15,6 +15,13 @@ import {
   cardRowMotion,
   rowPhaseClass,
 } from "./card-motion.js";
+import {
+  createTicker,
+  TICKER_PACED,
+  type Ticker,
+  type TickerFrame,
+  type TickerOptions,
+} from "./ticker-pacer.js";
 import { useTraceCard } from "./useTraceCard.js";
 
 type T = ReturnType<typeof useT>;
@@ -168,9 +175,10 @@ export function TraceCard(): JSX.Element | null {
 
 /**
  * The node in flight: its phase and current step, and — while a live view
- * belongs to it — the ticker: the newest line the step is producing. The
- * line flows as it arrives; each new line rises into place, so the text
- * reads as a stream rather than a flickering label.
+ * belongs to it — the ticker: what the step is producing, paced for the eye
+ * (ticker-pacer.ts). Each new line rises into place and holds long enough to
+ * be read; a line still being written waits until it is whole; when the step
+ * ends the ticker settles on what it did, not on its last `}`.
  */
 function InFlight(props: {
   readonly segment: TraceSegment;
@@ -185,7 +193,10 @@ function InFlight(props: {
     step === undefined
       ? ""
       : `${verbText(step.verb, t)} ${step.arg.length > 0 ? step.arg : "…"}`;
-  const ticker = live !== null ? tickerLine(live) : null;
+  const ticker = useTickerFrame(live, TICKER_PACED);
+  // The step is over once its ticker has settled — a fly-by still playing
+  // keeps its cursor.
+  const settled = ticker !== null ? ticker.settled : live?.done === true;
   return (
     <>
       <div className="trace-node__line">
@@ -213,9 +224,9 @@ function InFlight(props: {
       </div>
       {live !== null && (
         <div
-          className={`trace-ticker${live.done ? " is-done" : ""}${
+          className={`trace-ticker${settled ? " is-done" : ""}${
             live.ok === false ? " is-fail" : ""
-          }`}
+          }${ticker?.growing === true ? " is-growing" : ""}`}
           data-testid="trace-ticker"
         >
           {ticker === null ? (
@@ -226,7 +237,7 @@ function InFlight(props: {
             <span
               // A new line rises into place; the same line growing does not
               // remount, so its characters simply flow in.
-              key={ticker.index}
+              key={ticker.key}
               className={`trace-ticker__line${
                 ticker.sign === "+"
                   ? " is-add"
@@ -235,7 +246,7 @@ function InFlight(props: {
                     : ""
               }`}
             >
-              {ticker.text}
+              <span className="trace-ticker__text">{ticker.text}</span>
             </span>
           )}
           <span className="trace-ticker__cursor" aria-hidden="true" />
@@ -246,32 +257,32 @@ function InFlight(props: {
 }
 
 /**
- * The ticker's line: the newest non-blank line of the view's tail. In a
- * diff the sign is lifted off into a class (the add / remove tint); `index`
- * counts the whole text's lines, so it changes exactly when a new line
- * starts.
+ * The ticker's frame for a live view: one pacer per call (a new call starts
+ * fresh), asked again on every snapshot and whenever it said something is
+ * due (a hold ends, a line turns whole, the fly-by moves on).
  */
-export function tickerLine(view: LiveToolView): {
-  readonly text: string;
-  readonly sign: "+" | "-" | null;
-  readonly index: number;
-} | null {
-  const lines = view.tail.split("\n");
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const raw = lines[i] ?? "";
-    const body = view.mode === "diff" ? raw.slice(1) : raw;
-    if (body.trim().length === 0) continue;
-    const sign =
-      view.mode === "diff" && (raw.startsWith("+") || raw.startsWith("-"))
-        ? (raw[0] as "+" | "-")
-        : null;
-    return {
-      text: body.trimEnd(),
-      sign,
-      index: view.lines - (lines.length - 1 - i),
-    };
+function useTickerFrame(
+  live: LiveToolView | null,
+  opts: TickerOptions,
+): TickerFrame | null {
+  const ticker = useRef<Ticker | null>(null);
+  const [, wake] = useReducer((n: number) => n + 1, 0);
+  let frame: TickerFrame | null = null;
+  let wakeAt: number | null = null;
+  if (live !== null) {
+    if (ticker.current === null || ticker.current.id !== live.id) {
+      ticker.current = createTicker(live.id, opts);
+    }
+    const next = ticker.current.next(live, Date.now());
+    frame = next.frame;
+    wakeAt = next.wakeAt;
   }
-  return null;
+  useEffect(() => {
+    if (wakeAt === null) return;
+    const timer = setTimeout(wake, Math.max(0, wakeAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [wakeAt]);
+  return frame;
 }
 
 const EMPTY: readonly TraceSegment[] = [];

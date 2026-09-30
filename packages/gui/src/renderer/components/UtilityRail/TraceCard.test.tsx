@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LiveToolSnapshot, LiveToolView } from "../../ipc/bridge-types.js";
 import { renderWithSession } from "../../testing/renderWithSession.js";
 import { CARD_HOLD_MS, CARD_SLIDE_MS } from "./card-motion.js";
-import { TraceCard, tickerLine } from "./TraceCard.js";
+import { TraceCard } from "./TraceCard.js";
 import { pendingSteps, stepOf } from "./useTraceCard.js";
 
 afterEach(() => {
@@ -89,6 +89,13 @@ const lines = () =>
     }`;
   });
 const ticker = () => document.querySelector('[data-testid="trace-ticker"]');
+const tickerText = () =>
+  ticker()?.querySelector(".trace-ticker__line")?.textContent;
+/** Let the paced ticker catch up (ticker-pacer.ts: a hold is 320 ms). */
+const settle = (ms = 400) =>
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
 
 describe("TraceCard — the timeline (ADR 0073)", () => {
   it("is absent for a session with no dispatch ops", () => {
@@ -199,7 +206,8 @@ describe("TraceCard — the timeline (ADR 0073)", () => {
 });
 
 describe("TraceCard — the ticker (ADR 0073)", () => {
-  it("flows the file's newest line as the model writes it — before the step's op row exists", () => {
+  it("flows the file's whole lines as the model writes it — before the step's op row exists; a line still being written waits", () => {
+    vi.useFakeTimers();
     const h = renderWithSession(<TraceCard />);
     h.startBackend();
     push(h, user(), op("Reading", "src/a.ts"));
@@ -219,13 +227,16 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
       "Explore Read a.ts",
       "Edit* Writing src/new.ts [2 lines]",
     ]);
-    expect(ticker()?.querySelector(".trace-ticker__line")?.textContent).toBe(
-      "export const b",
-    );
+    // `export const b` is still being written: the whole line before it
+    // shows, and the half one only once it has held still.
+    expect(tickerText()).toBe("export const a = 1;");
     expect(ticker()?.querySelector(".trace-ticker__cursor")).not.toBeNull();
+    settle();
+    expect(tickerText()).toBe("export const b");
   });
 
-  it("an edit's newest line carries its sign as a tint, not a character", () => {
+  it("an edit's lines carry their sign as a tint, not a character", () => {
+    vi.useFakeTimers();
     const h = renderWithSession(<TraceCard />);
     h.startBackend();
     push(h, user(), op("Writing", "src/a.ts"));
@@ -239,14 +250,19 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
         lines: 2,
       }),
     ]);
-    const line = ticker()?.querySelector(".trace-ticker__line");
-    expect(line?.textContent).toBe("const a = 2;");
-    expect(line?.className).toContain("is-add");
+    const first = ticker()?.querySelector(".trace-ticker__line");
+    expect(first?.textContent).toBe("const a = 1;");
+    expect(first?.className).toContain("is-del");
+    settle();
+    const next = ticker()?.querySelector(".trace-ticker__line");
+    expect(next?.textContent).toBe("const a = 2;");
+    expect(next?.className).toContain("is-add");
     // Its op row is in the record: no pending duplicate.
     expect(lines()).toEqual(["Edit* Writing src/a.ts [2 lines]"]);
   });
 
   it("a command's output flows under its step; before any, the ticker says so", () => {
+    vi.useFakeTimers();
     const h = renderWithSession(<TraceCard />);
     h.startBackend();
     push(h, user(), op("Running", "npm test"));
@@ -264,14 +280,57 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
     live(h, [
       view({ ...running, tail: "PASS a.test.ts\nFAIL b.test.ts", lines: 2 }),
     ]);
-    expect(ticker()?.querySelector(".trace-ticker__line")?.textContent).toBe(
-      "FAIL b.test.ts",
-    );
-    // Finished: the last line stays, the cursor goes.
+    expect(tickerText()).toBe("PASS a.test.ts");
+    settle();
+    expect(tickerText()).toBe("FAIL b.test.ts");
+    // Finished: it settles on the output's last word, and the cursor goes.
     live(h, [
       view({ ...running, done: true, ok: true, tail: "PASS a\nok", lines: 2 }),
     ]);
+    settle();
+    expect(tickerText()).toBe("ok");
     expect(ticker()?.className).toContain("is-done");
+  });
+
+  it("a file written in one breath does not end on its last `}`: it plays through, then settles on what it declares (owner 2026-09-30)", () => {
+    vi.useFakeTimers();
+    const h = renderWithSession(<TraceCard />);
+    h.startBackend();
+    push(h, user(), op("Reading", "src/a.ts"));
+    const file = [
+      "// Fibonacci, iteratively.",
+      "export function fib(n) {",
+      "  let a = 0, b = 1;",
+      "  for (let i = 0; i < n; i++) {",
+      "    [a, b] = [b, a + b];",
+      "  }",
+      "  return a;",
+      "}",
+    ].join("\n");
+    // The whole file lands in the snapshot that also says the call is done
+    // (dispatched as the run's second op; its row has not landed yet).
+    live(h, [
+      view({
+        path: "src/fib.js",
+        started: true,
+        ordinal: 1,
+        done: true,
+        ok: true,
+        tail: file,
+        lines: 8,
+      }),
+    ]);
+    const seen = new Set<string>();
+    for (let i = 0; i < 12; i += 1) {
+      const text = tickerText();
+      if (text !== undefined) seen.add(text);
+      settle(100);
+    }
+    expect(tickerText()).toBe("export function fib(n) {");
+    expect(ticker()?.className).toContain("is-done");
+    // It read as a stream on the way — and never showed a bare brace.
+    expect(seen.size).toBeGreaterThanOrEqual(3);
+    expect([...seen].some((s) => s.trim() === "}")).toBe(false);
   });
 
   it("a read has no ticker: its node names the step, and that is all", () => {
@@ -363,6 +422,7 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
   });
 
   it("a file written behind a running command waits below it: the command is in flight, its output under it (lab 2026-09-30)", () => {
+    vi.useFakeTimers();
     const h = renderWithSession(<TraceCard />);
     h.startBackend();
     push(h, user(), op("Running", "pwd && ls"));
@@ -392,9 +452,8 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
       "Edit Writing fib.js",
     ]);
     expect(nodes()[1]?.className).toContain("is-queued");
-    expect(ticker()?.querySelector(".trace-ticker__line")?.textContent).toBe(
-      "fib.js",
-    );
+    settle();
+    expect(tickerText()).toBe("fib.js");
     // The command finished and nothing else runs: the file is next.
     act(() => {
       h.mock.emitLive({
@@ -409,6 +468,7 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
   });
 
   it("a second dispatch chained in the same turn opens on its first call while the record still ends at the previous marker (review 2026-09-30)", () => {
+    vi.useFakeTimers();
     const h = renderWithSession(<TraceCard />);
     h.startBackend();
     push(h, user(), op("Reading", "a.ts"));
@@ -423,10 +483,10 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
     h.startBackend();
     live(h, [view({ id: "c2", path: "b.ts", tail: "x", lines: 1 })], 0);
     expect(lines()).toEqual(["Edit* Writing b.ts [1 line]"]);
-    // The ticker under it flows what the file holds so far.
-    expect(ticker()?.querySelector(".trace-ticker__line")?.textContent).toBe(
-      "x",
-    );
+    // The ticker under it flows what the file holds so far — its one line
+    // once it has held still.
+    settle();
+    expect(tickerText()).toBe("x");
   });
 
   it("the record catching up with its marker settles the whole run in that very commit — no step long done goes back in flight on the way (lab 2026-09-30)", () => {
@@ -505,20 +565,6 @@ describe("TraceCard — the ticker (ADR 0073)", () => {
     h.switchSession("other");
     expect(ticker()).toBeNull();
     expect(card()).toBeNull();
-  });
-});
-
-describe("tickerLine", () => {
-  it("is the newest non-blank line, the sign lifted off in a diff, indexed by its place in the whole text", () => {
-    expect(tickerLine(view({ tail: "a\nb\n  ", lines: 3 }))).toEqual({
-      text: "b",
-      sign: null,
-      index: 2,
-    });
-    expect(
-      tickerLine(view({ mode: "diff", tail: "-x\n+y", lines: 2 })),
-    ).toEqual({ text: "y", sign: "+", index: 2 });
-    expect(tickerLine(view({ tail: "", lines: 0 }))).toBeNull();
   });
 });
 

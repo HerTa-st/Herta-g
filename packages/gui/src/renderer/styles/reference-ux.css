@@ -4612,6 +4612,20 @@ button.session-item__badge--dismiss {
     transform: none;
   }
 }
+/* A command still being written (ticker-pacer, 2026-09-30): its newest
+   characters are the news, so the line shows its END — the start spills off
+   the left edge, which fades instead of the right. */
+.trace-ticker.is-growing {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 24%);
+  mask-image: linear-gradient(90deg, transparent, #000 24%);
+}
+.trace-ticker.is-growing .trace-ticker__line {
+  display: flex;
+  justify-content: flex-end;
+}
+.trace-ticker__text {
+  flex: none;
+}
 /* An edit's lines carry the diff stat's own greens and reds. */
 .trace-ticker__line.is-add {
   color: #3f7d50;
