@@ -1,4 +1,4 @@
-import { unlink } from "node:fs/promises";
+import { open, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   DispatchJournal,
@@ -370,6 +370,15 @@ function leftBehind(entries: readonly DispatchJournalEntry[]): LeftBehind[] {
  * A rewind that withdrew the turn a run belongs to deletes the run's
  * journal (ADR 0071 §1.1), so it is never sealed or continued — unless its
  * processes still wait for the reaper, which needs it.
+ *
+ * A rewind that withdrew only a 继续 turn (review 2026-09-30) cuts the
+ * journal back to the segment before it: the continuation's `resume` and
+ * everything after it go, so the run reads as it did before the 继续 — its
+ * last `end` is the interrupted one again, and the offer returns. Keeping
+ * the whole journal left the withdrawn segment's `end` in place, so the
+ * offer never came back, and its messages would have been replayed by the
+ * next 继续. The same exception holds: a withdrawn segment whose processes
+ * still wait for the reaper is kept whole.
  */
 export async function dropWithdrawnJournal(
   journalPath: string,
@@ -378,14 +387,43 @@ export async function dropWithdrawnJournal(
   const entries = await readDispatchJournal(journalPath);
   const start = entries?.[0];
   if (entries === null || start?.kind !== "start") return;
-  if (start.recordLength === undefined || start.recordLength <= recordLength) {
-    return;
-  }
+  if (start.recordLength === undefined) return;
   if (DispatchJournal.isLive(journalPath)) return;
   const listed = (await readJournalIndex(dirname(journalPath))).includes(
     basename(journalPath),
   );
-  if (listed && leftBehind(entries).length > 0) return;
-  await unlink(journalPath).catch(() => undefined);
-  if (listed) await markJournalOpen(journalPath, false);
+  if (start.recordLength > recordLength) {
+    if (listed && leftBehind(entries).length > 0) return;
+    await unlink(journalPath).catch(() => undefined);
+    if (listed) await markJournalOpen(journalPath, false);
+    return;
+  }
+  const cut = entries.findIndex(
+    (e) =>
+      e.kind === "resume" &&
+      e.recordLength !== undefined &&
+      e.recordLength > recordLength,
+  );
+  if (cut === -1) return;
+  if (listed && leftBehind(entries.slice(cut)).length > 0) return;
+  await rewriteJournal(journalPath, entries.slice(0, cut)).catch(
+    () => undefined,
+  );
+}
+
+/** The journal's file replaced by these entries: written beside it, synced,
+ *  renamed over — a cut is never seen half done. */
+async function rewriteJournal(
+  journalPath: string,
+  entries: readonly DispatchJournalEntry[],
+): Promise<void> {
+  const tmp = `${journalPath}.rewind`;
+  await writeFile(tmp, `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`);
+  const handle = await open(tmp, "r+");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await rename(tmp, journalPath);
 }

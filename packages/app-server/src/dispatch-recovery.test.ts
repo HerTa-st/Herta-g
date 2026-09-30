@@ -19,6 +19,7 @@ import {
   readDispatchJournal,
   readJournalIndex,
   readSessionFile,
+  resumableRun,
   type TerminalRecordBlock,
   V2RecordPersister,
 } from "@herta/core";
@@ -749,5 +750,68 @@ describe("a rewind drops a withdrawn run's journal (ADR 0071 §1.1)", () => {
     await markJournalOpen(s.journalPath, true);
     await dropWithdrawnJournal(s.journalPath, 2);
     expect(existsSync(s.journalPath)).toBe(true);
+  });
+
+  // Review 2026-09-30: keeping the whole journal after a 继续 turn was
+  // withdrawn left the continuation's `end` as the run's last, so the offer
+  // never returned and a later 继续 would have replayed the withdrawn
+  // segment's messages.
+  const continued = (ws: string): DispatchJournalEntry[] => [
+    ...editThenTest(ws),
+    { kind: "end", status: "interrupted", cause: "app-exit" },
+    // The 继续 submitted its user block as the sixth block, so its segment
+    // starts at length 6, as the dispatch's did at 3.
+    { kind: "resume", at: "2026-09-28T10:05:00.000Z", recordLength: 6 },
+    {
+      kind: "message",
+      message: {
+        role: "assistant",
+        text: "done",
+        ts: "2026-09-28T10:05:01.000Z",
+        toolCalls: [],
+      },
+    },
+    { kind: "end", status: "completed" },
+  ];
+
+  it("a rewind of a 继续 turn cuts the journal back to the segment before it, so the offer returns", async () => {
+    const s = crashed(continued);
+    // The continuation's own turn withdrawn: the record is back at the
+    // 中断 marker, five blocks.
+    await dropWithdrawnJournal(s.journalPath, 5);
+    const entries = (await readDispatchJournal(s.journalPath)) ?? [];
+    expect(entries.at(-1)).toEqual({
+      kind: "end",
+      status: "interrupted",
+      cause: "app-exit",
+    });
+    expect(entries.some((e) => e.kind === "resume")).toBe(false);
+    expect(resumableRun(entries)?.recordLength).toBe(3);
+    // A rewind that leaves the continuation in place cuts nothing.
+    await dropWithdrawnJournal(s.journalPath, 6);
+    expect((await readDispatchJournal(s.journalPath))?.length).toBe(
+      entries.length,
+    );
+    // And one past the dispatch itself still deletes the journal.
+    await dropWithdrawnJournal(s.journalPath, 2);
+    expect(existsSync(s.journalPath)).toBe(false);
+  });
+
+  it("keeps a withdrawn 继续 segment whole while its processes wait for the reaper", async () => {
+    const s = crashed((ws) => [
+      ...continued(ws).slice(0, -1),
+      {
+        kind: "spawn",
+        callId: "c3",
+        pid: 11,
+        startedAt: 1,
+        command: "npm run dev",
+        role: "background",
+      },
+    ]);
+    await markJournalOpen(s.journalPath, true);
+    const before = (await readDispatchJournal(s.journalPath))?.length;
+    await dropWithdrawnJournal(s.journalPath, 5);
+    expect((await readDispatchJournal(s.journalPath))?.length).toBe(before);
   });
 });
