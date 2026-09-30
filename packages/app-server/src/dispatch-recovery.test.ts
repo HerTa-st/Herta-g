@@ -50,6 +50,10 @@ function probe(
     fails?: boolean;
     /** MSYS's table: [msys pid, pgid, winpid]. */
     msys?: Array<[number, number, number]>;
+    /** Whose rules the table follows. A table that only makes sense under
+     *  one platform's rules must say so — the parent-id walk's tests passed
+     *  on Windows and failed on the Linux CI (2026-09-30). */
+    platform?: NodeJS.Platform;
   } = {},
 ): ProcessProbe & { killed: number[] } {
   const killed: number[] = [];
@@ -77,6 +81,7 @@ function probe(
     },
     alive: (pid) => running[pid] !== undefined,
     self: () => ({ pid: 1, startedAt: 0 }),
+    ...(opts.platform !== undefined ? { platform: opts.platform } : {}),
   };
 }
 
@@ -534,11 +539,14 @@ describe("the launch reaper (ADR 0071 §1.6)", () => {
       },
     ]);
     await markJournalOpen(s.journalPath, true);
-    const p = probe({
-      21: [10_050, 11, 11], // the real shell; its launcher (11) is gone
-      31: [60_000, 21, 11], // the command the shell was running
-      41: [2_000, 11, 11], // older than the run's process: not its child
-    });
+    const p = probe(
+      {
+        21: [10_050, 11, 11], // the real shell; its launcher (11) is gone
+        31: [60_000, 21, 11], // the command the shell was running
+        41: [2_000, 11, 11], // older than the run's process: not its child
+      },
+      { platform: "win32" },
+    );
     const summary = await reapOrphanedDispatches(
       dispatchJournalDir(s.transcriptDir),
       p,
@@ -562,16 +570,51 @@ describe("the launch reaper (ADR 0071 §1.6)", () => {
       { kind: "exit", pid: 12, at: 40_000 },
     ]);
     await markJournalOpen(s.journalPath, true);
-    const p = probe({
-      21: [10_050, 11, 11], // the real shell, started while the app lived
-      31: [900_000, 21, 21], // its command: the shell runs, so it is ours
-      22: [400_000, 11, 11], // under the dead pid 11, long after: a stranger's
-    });
+    const p = probe(
+      {
+        21: [10_050, 11, 11], // the real shell, started while the app lived
+        31: [900_000, 21, 21], // its command: the shell runs, so it is ours
+        22: [400_000, 11, 11], // under the dead pid 11, long after: a stranger's
+      },
+      { platform: "win32" },
+    );
     const summary = await reapOrphanedDispatches(
       dispatchJournalDir(s.transcriptDir),
       p,
     );
     expect(p.killed.sort()).toEqual([21, 31]);
+    expect(summary.fates).toEqual([{ pid: 11, fate: "ended" }]);
+  });
+
+  it("on POSIX, a gone leader's group is ours only for members that started while the app lived (CI 2026-09-30)", async () => {
+    // The kernel reuses pid 11 only once group 11 is empty; a later leader
+    // that took it and exited leaves a group 11 of its own. The Linux CI
+    // found the reaper killing that stranger.
+    const s = crashed((ws) => [
+      start(ws, { at: new Date(9_000).toISOString() }),
+      {
+        kind: "spawn",
+        callId: "c1",
+        pid: 11,
+        startedAt: 10_000,
+        command: "bash (persistent shell)",
+        role: "shell",
+      },
+      { kind: "exit", pid: 12, at: 40_000 },
+    ]);
+    await markJournalOpen(s.journalPath, true);
+    const p = probe(
+      {
+        21: [10_050, 1, 11], // the run's command, orphaned in group 11
+        22: [400_000, 1, 11], // group 11 again, long after: a stranger's
+      },
+      { platform: "linux" },
+    );
+    const summary = await reapOrphanedDispatches(
+      dispatchJournalDir(s.transcriptDir),
+      p,
+    );
+    expect(p.killed).toEqual([21]);
     expect(summary.fates).toEqual([{ pid: 11, fate: "ended" }]);
   });
 
@@ -634,6 +677,7 @@ describe("the launch reaper (ADR 0071 §1.6)", () => {
           [33, 26, 700],
           [40, 40, 900],
         ],
+        platform: "win32",
       },
     );
     const summary = await reapOrphanedDispatches(

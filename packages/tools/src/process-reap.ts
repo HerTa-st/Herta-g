@@ -146,7 +146,11 @@ async function posixProcesses(): Promise<ProcessRow[]> {
  * - POSIX: the members of its process group (the run's commands are group
  *   leaders, and an orphan keeps its group) that started after it — unless
  *   the pid now names a later process, which the kernel only allows once
- *   the group is empty.
+ *   the group is empty. A leader that is GONE takes the same `notAfter`
+ *   bound: the kernel hands its pid out again once the group empties, and a
+ *   later leader that took it, formed its own group and exited leaves
+ *   members that look exactly like ours (CI 2026-09-30 — the morning's bound
+ *   had reached only the Windows walk).
  */
 export function processTree(
   rows: readonly ProcessRow[],
@@ -159,6 +163,10 @@ export function processTree(
   const rootRuns =
     holder !== undefined && sameProcessStart(holder.startedAt, root.startedAt);
   const reused = holder !== undefined && !rootRuns;
+  const notAfter =
+    opts.notAfter === undefined
+      ? Number.POSITIVE_INFINITY
+      : opts.notAfter + SAME_PROCESS_WINDOW_MS;
 
   if (platform !== "win32") {
     if (reused) return [];
@@ -166,7 +174,8 @@ export function processTree(
       .filter(
         (r) =>
           r.pgid === root.pid &&
-          r.startedAt + SAME_PROCESS_WINDOW_MS >= root.startedAt,
+          r.startedAt + SAME_PROCESS_WINDOW_MS >= root.startedAt &&
+          (rootRuns || r.startedAt <= notAfter),
       )
       .map((r) => r.pid);
     if (rootRuns && !found.includes(root.pid)) found.unshift(root.pid);
@@ -182,10 +191,6 @@ export function processTree(
   }
   const found: number[] = rootRuns ? [root.pid] : [];
   const seen = new Set<number>(found);
-  const notAfter =
-    opts.notAfter === undefined
-      ? Number.POSITIVE_INFINITY
-      : opts.notAfter + SAME_PROCESS_WINDOW_MS;
   const walk = (pid: number, startedAt: number): void => {
     const now = byPid.get(pid);
     const runs =

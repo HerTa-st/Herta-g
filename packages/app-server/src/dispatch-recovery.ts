@@ -51,6 +51,10 @@ export interface ProcessProbe {
   alive(pid: number): boolean;
   /** This process, as a journal names its host. */
   self(): JournalHost;
+  /** Whose rules the table follows — parent ids (Windows) or process groups
+   *  (POSIX). The machine's own when absent; a test's table names its rules,
+   *  or it passes on one platform by chance (CI 2026-09-30). */
+  readonly platform?: NodeJS.Platform;
 }
 
 export const systemProcessProbe: ProcessProbe = {
@@ -338,7 +342,8 @@ async function reachable(
   notAfter?: number,
 ): Promise<number[]> {
   const opts = notAfter === undefined ? {} : { notAfter };
-  const found = new Set(processTree(table, t, undefined, opts));
+  const platform = probe.platform ?? process.platform;
+  const found = new Set(processTree(table, t, platform, opts));
   if (t.msys !== undefined) {
     let msys: readonly MsysRow[] = [];
     try {
@@ -366,8 +371,7 @@ async function reachable(
       ) {
         continue;
       }
-      for (const pid of processTree(table, row, undefined, opts))
-        found.add(pid);
+      for (const pid of processTree(table, row, platform, opts)) found.add(pid);
     }
   }
   return [...found];

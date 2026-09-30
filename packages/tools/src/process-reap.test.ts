@@ -97,5 +97,30 @@ describe("processTree (ADR 0071 §1.6)", () => {
     it("never a member older than the run's process", () => {
       expect(tree([row(21, 2_000, 1, 11)])).toEqual([]);
     });
+
+    it("a gone leader's group is ours only for members that started while the run's app lived (CI 2026-09-30)", () => {
+      // The kernel gives pid 11 out again only once group 11 is empty — but
+      // a later leader that got it, formed its own group 11 and exited leaves
+      // members that look exactly like ours. The bound the parent-id walk got
+      // in the morning's review had not reached this path; the Linux CI
+      // caught it.
+      const rows = [row(21, 10_050, 1, 11), row(22, 900_100, 1, 11)];
+      expect(processTree(rows, ROOT, "linux", { notAfter: 60_000 })).toEqual([
+        21,
+      ]);
+      // The same window as the walk: a member stamped just past it is ours.
+      expect(processTree(rows, ROOT, "linux", { notAfter: 895_500 })).toEqual([
+        21, 22,
+      ]);
+      // A leader still running as itself: its group is its, bound or not.
+      expect(
+        processTree(
+          [row(11, 10_000), row(22, 900_100, 1, 11)],
+          ROOT,
+          "darwin",
+          { notAfter: 60_000 },
+        ),
+      ).toEqual([11, 22]);
+    });
   });
 });
