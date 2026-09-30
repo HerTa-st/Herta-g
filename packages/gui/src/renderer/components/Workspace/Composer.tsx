@@ -601,6 +601,27 @@ export function Composer(): JSX.Element {
     });
   };
 
+  // A document's row appears only when main has read it — and, for a PDF,
+  // transcribed its pictures (2026-09-30): seconds with nothing on screen,
+  // which read as a dead drop target, and a user who drops again ingests the
+  // whole document twice. The notice says the file is being read for exactly
+  // that span, and a batch dropped meanwhile is refused rather than queued.
+  // Remembered like `turnNotice`, so the answer clears this notice and never a
+  // newer one.
+  const readingNotice = useRef<string | null>(null);
+  const reading = useRef(false);
+  const showReadingNotice = (text: string): void => {
+    readingNotice.current = text;
+    sessionStore.setComposerNotice(text);
+  };
+  const clearReadingNotice = (): void => {
+    const shown = readingNotice.current;
+    readingNotice.current = null;
+    if (shown !== null && sessionStore.getSnapshot().composerNotice === shown) {
+      sessionStore.clearComposerNotice();
+    }
+  };
+
   const ingestDocuments = (
     paths: readonly string[],
     notImages: readonly string[],
@@ -611,9 +632,16 @@ export function Composer(): JSX.Element {
     const names = new Set(notImages);
     const docs = paths.filter((p) => names.has(p.split(/[\\/]/).at(-1) ?? p));
     if (docs.length === 0) return;
+    if (reading.current) {
+      showReadingNotice(t("composer.attach.stillReading"));
+      return;
+    }
+    reading.current = true;
+    showReadingNotice(t("composer.attach.reading"));
     void bridge
       .attachFiles(sessionId, docs)
       .then((r) => {
+        clearReadingNotice();
         // Refusals are SHOWN. `attachFiles` is idle-only, and a drop that
         // silently did nothing mid-turn would read as a broken drop target
         // (the same no-op-silently failure the M6 audit found on setWorkspace).
@@ -631,7 +659,13 @@ export function Composer(): JSX.Element {
       })
       // A rejected IPC call (handler threw) must land in the same notice, not
       // as an unhandled rejection with a drop that looked like it worked.
-      .catch(() => sessionStore.setComposerNotice(t("composer.attach.failed")));
+      .catch(() => {
+        clearReadingNotice();
+        sessionStore.setComposerNotice(t("composer.attach.failed"));
+      })
+      .finally(() => {
+        reading.current = false;
+      });
   };
 
   const onPickAttachments = (): void => {

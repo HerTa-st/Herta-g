@@ -1390,6 +1390,70 @@ describe("Composer — attachments (ADR 0033)", () => {
     expect(screen.getByText(/Ten files at most/i)).toBeInTheDocument();
   });
 
+  it("says the file is being read until main answers, and refuses a second drop meanwhile (2026-09-30)", async () => {
+    // A PDF's pictures are transcribed before its row appears — seconds with
+    // nothing on screen read as a dead drop target, and the dropped-again
+    // document was ingested twice.
+    let answer: (r: { ok: boolean; message?: string }) => void = () => {};
+    const mock = createMockHertaBridge({
+      attachFilesResult: new Promise((resolve) => {
+        answer = resolve;
+      }),
+    });
+    const { container, store } = renderAttached(mock);
+    const form = container.querySelector(".composer") as HTMLElement;
+    await act(async () => {
+      fireEvent.drop(form, fileDrop([{ name: "handout.pdf" }]));
+    });
+    expect(store().getSnapshot().composerNotice).toBe(
+      "Reading the file — pictures in a PDF take a few seconds",
+    );
+
+    await act(async () => {
+      fireEvent.drop(form, fileDrop([{ name: "handout.pdf" }]));
+    });
+    expect(mock.calls.attachFiles).toHaveLength(1);
+    expect(store().getSnapshot().composerNotice).toBe(
+      "Still reading the previous file",
+    );
+
+    await act(async () => {
+      answer({ ok: true });
+    });
+    expect(store().getSnapshot().composerNotice).toBeNull();
+
+    // Free again: the next drop goes through.
+    await act(async () => {
+      fireEvent.drop(form, fileDrop([{ name: "notes.md" }]));
+    });
+    expect(mock.calls.attachFiles).toHaveLength(2);
+  });
+
+  it("the reading notice gives way to a refusal, and never clears a newer notice", async () => {
+    let answer: (r: { ok: boolean; message?: string }) => void = () => {};
+    const mock = createMockHertaBridge({
+      attachFilesResult: new Promise((resolve) => {
+        answer = resolve;
+      }),
+    });
+    const { container, store } = renderAttached(mock);
+    const form = container.querySelector(".composer") as HTMLElement;
+    await act(async () => {
+      fireEvent.drop(form, fileDrop([{ name: "handout.pdf" }]));
+    });
+    // Something else takes the notice lane while the file is read…
+    act(() => {
+      store().setComposerNotice("Files 板砖 edited stay edited");
+    });
+    await act(async () => {
+      answer({ ok: true });
+    });
+    // …and the answer leaves it alone.
+    expect(store().getSnapshot().composerNotice).toBe(
+      "Files 板砖 edited stay edited",
+    );
+  });
+
   // ── Staged images (ADR 0048 §4) ─────────────────────────────────────────
 
   it("a dropped PICTURE stages instead of entering the record", async () => {

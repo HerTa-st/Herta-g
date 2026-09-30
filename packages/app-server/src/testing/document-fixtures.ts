@@ -26,11 +26,63 @@ export interface PdfBookmark {
   readonly items?: readonly PdfBookmark[];
 }
 
+/**
+ * A picture for `makePdf`'s `pictures` option (2026-09-30): drawn into `at`
+ * ([x, y, width, height] in points, y from the page bottom), `width`×`height`
+ * pixels of one of the three layouts pdfjs decodes to — 1-bit DeviceGray
+ * (rows byte-aligned, a set bit is white), 8-bit DeviceRGB, or RGB with an
+ * 8-bit `/SMask` alpha plane. `data` is the raw samples (RGBA interleaved for
+ * `rgba`); left out, a fixed pattern is generated: the left half red / the
+ * right half blue (half-transparent for `rgba`), or for `gray1` rows
+ * alternating 0xF0 0x0F.
+ */
+export interface PdfPictureFixture {
+  readonly at: readonly [number, number, number, number];
+  readonly width: number;
+  readonly height: number;
+  readonly kind: "gray1" | "rgb" | "rgba";
+  readonly data?: Uint8Array;
+}
+
+/** The samples `PdfPictureFixture` generates when it is given none. */
+export function pictureSamples(
+  kind: PdfPictureFixture["kind"],
+  width: number,
+  height: number,
+): Uint8Array {
+  if (kind === "gray1") {
+    const stride = Math.ceil(width / 8);
+    const out = new Uint8Array(stride * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let b = 0; b < stride; b += 1) {
+        out[y * stride + b] = (y + b) % 2 === 0 ? 0xf0 : 0x0f;
+      }
+    }
+    return out;
+  }
+  const channels = kind === "rgb" ? 3 : 4;
+  const out = new Uint8Array(width * height * channels);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const left = x < width / 2;
+      const px = [left ? 255 : 0, 0, left ? 0 : 255, left ? 255 : 128];
+      out.set(px.slice(0, channels), (y * width + x) * channels);
+    }
+  }
+  return out;
+}
+
 export function makePdf(
   pages: ReadonlyArray<readonly string[]>,
   opts: {
     readonly encrypt?: boolean;
     readonly bookmarks?: readonly PdfBookmark[];
+    /** Points between successive text lines (default 14) — room to draw a
+     *  picture between two lines. */
+    readonly lineGap?: number;
+    /** Per page, the pictures it draws after its text (the order a Word
+     *  export writes them in). */
+    readonly pictures?: ReadonlyArray<readonly PdfPictureFixture[]>;
   } = {},
 ): Buffer {
   const objs: string[] = [];
@@ -38,16 +90,58 @@ export function makePdf(
     objs.push(body);
     return objs.length; // 1-based object number
   };
+  const binaryStream = (dict: string, bytes: Uint8Array): string =>
+    `<< ${dict} /Length ${bytes.length} >>\nstream\n${Buffer.from(bytes).toString("latin1")}\nendstream`;
+  const addPicture = (pic: PdfPictureFixture): number => {
+    const data = pic.data ?? pictureSamples(pic.kind, pic.width, pic.height);
+    const size = `/Type /XObject /Subtype /Image /Width ${pic.width} /Height ${pic.height}`;
+    if (pic.kind === "gray1") {
+      return add(
+        binaryStream(
+          `${size} /ColorSpace /DeviceGray /BitsPerComponent 1`,
+          data,
+        ),
+      );
+    }
+    if (pic.kind === "rgb") {
+      return add(
+        binaryStream(
+          `${size} /ColorSpace /DeviceRGB /BitsPerComponent 8`,
+          data,
+        ),
+      );
+    }
+    const n = pic.width * pic.height;
+    const rgb = new Uint8Array(n * 3);
+    const alpha = new Uint8Array(n);
+    for (let i = 0; i < n; i += 1) {
+      rgb.set(data.subarray(i * 4, i * 4 + 3), i * 3);
+      alpha[i] = data[i * 4 + 3] ?? 255;
+    }
+    const smask = add(
+      binaryStream(
+        `${size} /ColorSpace /DeviceGray /BitsPerComponent 8`,
+        alpha,
+      ),
+    );
+    return add(
+      binaryStream(
+        `${size} /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask ${smask} 0 R`,
+        rgb,
+      ),
+    );
+  };
   const catalog = add("");
   const pagesObj = add("");
   const font = add(
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
   );
+  const gap = opts.lineGap ?? 14;
   const kids: string[] = [];
-  for (const lines of pages) {
+  pages.forEach((lines, pageIndex) => {
     const ops = ["BT", "/F1 12 Tf", "72 720 Td"];
     lines.forEach((line, i) => {
-      if (i > 0) ops.push("0 -14 Td");
+      if (i > 0) ops.push(`0 -${gap} Td`);
       const esc = line
         .replace(/\\/g, "\\\\")
         .replace(/\(/g, "\\(")
@@ -55,15 +149,26 @@ export function makePdf(
       ops.push(`(${esc}) Tj`);
     });
     ops.push("ET");
-    const stream = lines.length === 0 ? "" : ops.join("\n");
+    const xobjects: string[] = [];
+    const draws: string[] = [];
+    (opts.pictures?.[pageIndex] ?? []).forEach((pic, k) => {
+      xobjects.push(`/Im${k + 1} ${addPicture(pic)} 0 R`);
+      const [x, y, w, h] = pic.at;
+      draws.push(`q ${w} 0 0 ${h} ${x} ${y} cm /Im${k + 1} Do Q`);
+    });
+    const stream = [lines.length === 0 ? "" : ops.join("\n"), ...draws]
+      .filter((part) => part.length > 0)
+      .join("\n");
     const contents = add(
       `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`,
     );
+    const xobjectRes =
+      xobjects.length > 0 ? ` /XObject << ${xobjects.join(" ")} >>` : "";
     const page = add(
-      `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 612 792] /Contents ${contents} 0 R /Resources << /Font << /F1 ${font} 0 R >> >> >>`,
+      `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 612 792] /Contents ${contents} 0 R /Resources << /Font << /F1 ${font} 0 R >>${xobjectRes} >> >>`,
     );
     kids.push(`${page} 0 R`);
-  }
+  });
   // Outline tree (2026-08-23): a doubly linked sibling list per level, the
   // spec's shape. Named dests collect into a flat `/Dests` dictionary on the
   // catalog (the pre-1.2 form pdfjs resolves through getDestination).

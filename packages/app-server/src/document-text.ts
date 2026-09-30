@@ -1,6 +1,14 @@
 import { extname } from "node:path";
 import { type PageMarkerLang, pageMarkerLine } from "@herta/core";
 import { strFromU8, unzipSync } from "fflate";
+import {
+  type BaselinedLine,
+  collectPagePictures,
+  type PdfPicture,
+  pictureScanOpen,
+  slotPictures,
+  startPictureScan,
+} from "./pdf-pictures.js";
 
 /**
  * Text extraction for the two document formats people actually hand over
@@ -56,6 +64,9 @@ export type ExtractedDocument =
       readonly pages?: number;
       /** Present only when the document carries one (see OutlineEntry). */
       readonly outline?: readonly OutlineEntry[];
+      /** PDF only, when `pictures` was asked for and the document draws any:
+       *  the pictures, each standing in `text` as its `pictureToken` line. */
+      readonly pictures?: readonly PdfPicture[];
     }
   | {
       readonly ok: false;
@@ -147,6 +158,10 @@ export interface ExtractOptions {
   /** Language of the page-marker lines a PDF's text is opened with (the
    *  session's interaction language, ADR 0016). Default zh. */
   readonly lang?: PageMarkerLang;
+  /** PDF only: also collect the pictures the pages draw (see
+   *  `pdf-pictures.ts`) and mark each one's place in the text. Off by default
+   *  — a caller that asks must also put something where each token stands. */
+  readonly pictures?: boolean;
 }
 
 export async function extractDocumentText(
@@ -282,6 +297,8 @@ async function extractPdfText(
     const pageLine: number[] = [];
     let nextLine = 1;
     let body = 0;
+    const pictures: PdfPicture[] = [];
+    const scan = opts.pictures === true ? startPictureScan() : undefined;
     for (let p = 1; p <= pages; p += 1) {
       // Back to the event loop between pages. pdfjs runs here on its
       // in-process "fake worker", whose message port dispatches through
@@ -294,8 +311,28 @@ async function extractPdfText(
       const page = await doc.getPage(p);
       try {
         const content = await page.getTextContent();
-        const pageText = linesOfTextContent(content.items);
+        const lines = textLinesOf(content.items);
+        let pageText = lines.map((l) => l.text).join("\n");
         body += pageText.trim().length;
+        // Pictures are searched for only once the document has shown text:
+        // a scan (pictures and no text layer at all) stays `empty` below, and
+        // decoding its page images first would only delay that answer.
+        if (scan !== undefined && body > 0 && pictureScanOpen(scan, p)) {
+          const found = await collectPagePictures(page, pdfjs, scan);
+          if (found.length > 0) {
+            const numbered = found.map((picture, k) => ({
+              id: pictures.length + k + 1,
+              page: p,
+              index: k + 1,
+              png: picture.png,
+              bottom: picture.bottom,
+            }));
+            for (const { id, page: onPage, index, png } of numbered) {
+              pictures.push({ id, page: onPage, index, png });
+            }
+            pageText = slotPictures(lines, numbered).join("\n");
+          }
+        }
         pageLine[p] = nextLine;
         const chunk = `${pageMarkerLine(p, lang)}\n${pageText}`;
         out.push(chunk);
@@ -307,7 +344,8 @@ async function extractPdfText(
     }
     // "Empty" is judged on the document's OWN text: a scan carries no text
     // and the markers alone must not turn it into a stored file of headings
-    // over nothing (ADR 0038 §4's scanned-PDF rule).
+    // over nothing (ADR 0038 §4's scanned-PDF rule). Pictures do not lift it
+    // (2026-09-30): reading whole scanned pages is OCR, a feature of its own.
     if (body === 0) return { ok: false, reason: "empty", pages };
     const text = out.join("\n\n");
     const outline = await pdfOutline(doc, pageLine);
@@ -316,6 +354,7 @@ async function extractPdfText(
       text,
       pages,
       ...(outline.length > 0 ? { outline } : {}),
+      ...(pictures.length > 0 ? { pictures } : {}),
     };
   } catch (err) {
     // pdfjs raises a distinct exception for a password-protected file; the
@@ -413,23 +452,39 @@ function cleanOutlineTitle(raw: unknown): string {
 /** pdfjs hands back a flat item list per page; `hasEOL` marks where the
  *  layout engine saw a line end, and it emits explicit whitespace items for
  *  gaps, so joining `str`s and breaking on `hasEOL` reproduces reading order
- *  well enough for a text file. */
-function linesOfTextContent(items: ReadonlyArray<unknown>): string {
-  const lines: string[] = [];
+ *  well enough for a text file. Each line also keeps the baseline of its first
+ *  visible item (the y of the item's transform) — what places a picture
+ *  between lines (`slotPictures`); a whitespace-only line has none. */
+function textLinesOf(items: ReadonlyArray<unknown>): BaselinedLine[] {
+  const lines: BaselinedLine[] = [];
   let line = "";
+  let baseline: number | undefined;
   for (const item of items) {
     // The list mixes TextItem with marked-content markers (no `str`).
     if (typeof item !== "object" || item === null || !("str" in item)) continue;
-    const { str, hasEOL } = item as { str: unknown; hasEOL?: unknown };
+    const { str, hasEOL, transform } = item as {
+      str: unknown;
+      hasEOL?: unknown;
+      transform?: unknown;
+    };
     if (typeof str !== "string") continue;
+    if (
+      baseline === undefined &&
+      str.trim() !== "" &&
+      Array.isArray(transform)
+    ) {
+      const y: unknown = transform[5];
+      if (typeof y === "number") baseline = y;
+    }
     line += str;
     if (hasEOL === true) {
-      lines.push(line);
+      lines.push({ text: line, baseline });
       line = "";
+      baseline = undefined;
     }
   }
-  if (line.length > 0) lines.push(line);
-  return lines.join("\n");
+  if (line.length > 0) lines.push({ text: line, baseline });
+  return lines;
 }
 
 function isNamedError(err: unknown, name: string): boolean {
