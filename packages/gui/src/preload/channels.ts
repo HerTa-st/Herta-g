@@ -59,8 +59,6 @@ export const CMD = {
   setAutoUpdate: "settings:setAutoUpdate",
   getTheme: "settings:getTheme",
   setTheme: "settings:setTheme",
-  getDeviceScene: "settings:getDeviceScene",
-  setDeviceScene: "settings:setDeviceScene",
   getPdfPictureTranscripts: "settings:getPdfPictureTranscripts",
   setPdfPictureTranscripts: "settings:setPdfPictureTranscripts",
   getRealtimeVoice: "settings:getRealtimeVoice",

@@ -142,12 +142,10 @@ export interface MockHertaBridgeOpts {
   };
   /** Seed for getTheme (Settings → Window appearance). Default "light". */
   readonly themeResult?: ThemePref;
-  /** Seed for getDeviceScene (Settings → 差分协处理器 → 3D device, ADR
-   *  0057). UNDEFINED (the default) omits the surface entirely — the row
-   *  hides and the rail card stays flat, like the website demo's bridge. */
+  /** Seed for getDeviceScene (whether the host draws the 3D device card,
+   *  ADR 0057). UNDEFINED (the default) omits the surface entirely — the rail
+   *  card stays flat, like the website demo's bridge; true is the desktop. */
   readonly deviceSceneResult?: boolean;
-  /** When true, setDeviceScene rejects (simulates a failed settings write). */
-  readonly failSetDeviceScene?: boolean;
   /** Seed for getPdfPictureTranscripts (2026-10-01). UNDEFINED (the default)
    *  omits the surface — the row hides, like the website demo's bridge. */
   readonly pdfPictureTranscriptsResult?: boolean;
@@ -265,7 +263,6 @@ export interface MockHertaBridge {
     readSessionForExport: string[];
     saveSessionExport: Array<[string, string]>;
     setTheme: ThemePref[];
-    setDeviceScene: boolean[];
     setPdfPictureTranscripts: boolean[];
     getInteractionLanguage: number;
     setInteractionLanguage: InteractionLanguageChoice[];
@@ -389,7 +386,6 @@ export function createMockHertaBridge(
     readSessionForExport: [],
     saveSessionExport: [],
     setTheme: [],
-    setDeviceScene: [],
     setPdfPictureTranscripts: [],
     getInteractionLanguage: 0,
     setInteractionLanguage: [],
@@ -881,15 +877,7 @@ export function createMockHertaBridge(
         }
       : {}),
     ...(opts.deviceSceneResult !== undefined
-      ? {
-          getDeviceScene: async () => opts.deviceSceneResult === true,
-          setDeviceScene: async (enabled: boolean) => {
-            calls.setDeviceScene.push(enabled);
-            if (opts.failSetDeviceScene === true) {
-              throw new Error("write failed");
-            }
-          },
-        }
+      ? { getDeviceScene: async () => opts.deviceSceneResult === true }
       : {}),
     getInteractionLanguage: async () => {
       calls.getInteractionLanguage += 1;

@@ -114,17 +114,14 @@ describe("app-global-settings", () => {
     const dir = tmp();
     await writeGlobalSettings(dir, { theme: "dark" });
     expect(await readGlobalSettings(dir)).toEqual({ theme: "dark" });
-    // The 3D device card toggle (ADR 0057): a boolean round-trips, anything
-    // else resets the file like the other validated fields.
-    await writeGlobalSettings(dir, { theme: "dark", deviceScene: false });
-    expect(await readGlobalSettings(dir)).toEqual({
-      theme: "dark",
-      deviceScene: false,
-    });
-    await writeGlobalSettings(dir, {
-      deviceScene: "yes",
-    } as unknown as Parameters<typeof writeGlobalSettings>[1]);
-    expect(await readGlobalSettings(dir)).toEqual({});
+    // The retired 3D device toggle (ADR 0057 §2.7, amended 2026-10-01): a
+    // file that still carries it — in any shape — keeps every other setting.
+    writeFileSync(
+      join(dir, "settings.json"),
+      '{"theme":"dark","deviceScene":"yes"}',
+      "utf-8",
+    );
+    expect(await readGlobalSettings(dir)).toMatchObject({ theme: "dark" });
     await writeGlobalSettings(dir, { theme: "system" });
     expect(await readGlobalSettings(dir)).toEqual({ theme: "system" });
     writeFileSync(join(dir, "settings.json"), '{"theme":"neon"}', "utf-8");

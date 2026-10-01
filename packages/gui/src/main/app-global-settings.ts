@@ -57,10 +57,6 @@ export interface GlobalSettings {
    *  ABSENT = follow the UI locale (`resolveInteractionLang`); an explicit
    *  "zh"/"en" persists. EN sessions have no opening voice in v1. */
   readonly interactionLanguage?: InteractionLang;
-  /** The 3D device card (ADR 0057). ABSENT = the shipped default
-   *  (`DEVICE_SCENE_DEFAULT`); the Settings → 差分协处理器 toggle writes an
-   *  explicit boolean. Live-applied in the renderer; no restart. */
-  readonly deviceScene?: boolean;
   /**
    * Herta's synthesized real-time voice (ADR 0042): she SPEAKS her replies,
    * and the text types in step with the audio. Default TRUE, and LIVE — the
@@ -126,7 +122,6 @@ export async function readGlobalSettings(
       theme,
       windowState,
       interactionLanguage,
-      deviceScene,
       realtimeVoice,
       voiceEngine,
       minimaxVoice,
@@ -140,7 +135,6 @@ export async function readGlobalSettings(
       theme?: unknown;
       windowState?: unknown;
       interactionLanguage?: unknown;
-      deviceScene?: unknown;
       realtimeVoice?: unknown;
       voiceEngine?: unknown;
       minimaxVoice?: unknown;
@@ -160,9 +154,9 @@ export async function readGlobalSettings(
     if (keepAwake !== undefined && typeof keepAwake !== "boolean") {
       return {};
     }
-    if (deviceScene !== undefined && typeof deviceScene !== "boolean") {
-      return {};
-    }
+    // `deviceScene` (the 3D device toggle, ADR 0057 §2.7) is no longer a
+    // setting (2026-10-01): a file that still carries it is read as if it did
+    // not, and the value is never consulted.
     if (
       voiceEngine !== undefined &&
       voiceEngine !== "local" &&

@@ -269,9 +269,6 @@ export const en = {
     "No bash on this machine: pick Minimal and it still runs Standard. Install Git for Windows, then restart.",
   "banzhuan.contract.standard": "Standard",
   "banzhuan.contract.minimal": "Minimal",
-  "banzhuan.scene": "3D device",
-  "banzhuan.sceneDesc":
-    "On: a lit object. Off: a flat picture, easier on the GPU.",
   "banzhuan.pdfPictures": "Transcribe PDF pictures",
   "banzhuan.pdfPicturesDesc":
     "When a PDF is attached, a model transcribes its pictures into text, at most 40 calls per document. When off, the pictures are still stored, and it can still look at them. Applies immediately.",

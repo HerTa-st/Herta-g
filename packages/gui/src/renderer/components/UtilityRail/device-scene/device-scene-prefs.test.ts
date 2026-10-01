@@ -4,7 +4,6 @@ import {
   deviceScenePref,
   loadDeviceScenePref,
   resetDeviceScenePrefForTest,
-  setDeviceScenePrefLocal,
   subscribeDeviceScenePref,
 } from "./device-scene-prefs.js";
 
@@ -43,16 +42,17 @@ describe("device-scene-prefs (ADR 0057)", () => {
     expect(deviceScenePref()).toBeNull();
   });
 
-  it("notifies subscribers on change only", () => {
+  it("notifies subscribers once, when the answer lands — and not after they leave", async () => {
     const seen: boolean[] = [];
     const unsub = subscribeDeviceScenePref(() =>
       seen.push(deviceScenePref() === true),
     );
-    setDeviceScenePrefLocal(true);
-    setDeviceScenePrefLocal(true);
-    setDeviceScenePrefLocal(false);
+    const bridge = {
+      getDeviceScene: async () => true,
+    } as unknown as HertaBridge;
+    await loadDeviceScenePref(bridge);
+    await loadDeviceScenePref(bridge);
     unsub();
-    setDeviceScenePrefLocal(true);
-    expect(seen).toEqual([true, false]);
+    expect(seen).toEqual([true]);
   });
 });

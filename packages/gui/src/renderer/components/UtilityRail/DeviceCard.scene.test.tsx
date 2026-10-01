@@ -241,8 +241,8 @@ describe("DeviceCard — what shows while the 3D scene builds (ADR 0057 §2.13)"
     expect(sceneAttr(container)).toBeNull();
   });
 
-  it("a bridge without the surface, or the setting off, is flat from the start / as soon as known", async () => {
-    const off = createMockHertaBridge(); // no setDeviceScene surface
+  it("a bridge without the surface, or a host that answers no, is flat from the start / as soon as known", async () => {
+    const off = createMockHertaBridge(); // no getDeviceScene surface
     const first = renderWithLocale(
       <HertaBridgeProvider bridge={off.bridge}>
         <DeviceCard />

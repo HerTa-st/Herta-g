@@ -97,8 +97,9 @@ export function DeviceCard(): JSX.Element {
   const { onMouseDown, transform, shadowStyle, liftPx } = useDragToLift({
     onSuccessfulLift: () => void bridge.maybePlayEasterEgg(),
   });
-  // The 3D device (ADR 0057). The setting lives in main; a bridge without
-  // the surface (fakes, the website demo) keeps the card on its flat
+  // The 3D device (ADR 0057). Always wanted on the desktop where the GPU
+  // allows it (§2.7 amended 2026-10-01: no setting); a bridge without the
+  // surface (fakes, the website demo) keeps the card on its flat
   // renders. The scene mounts only while wanted; the flat stack stays in
   // the DOM underneath throughout and is what the card shows on any
   // fallback.
@@ -126,7 +127,10 @@ export function DeviceCard(): JSX.Element {
       cancelled = true;
     };
   }, [bridge]);
-  const sceneSupported = bridge.setDeviceScene !== undefined;
+  // The desktop draws the scene; fakes and the website demo omit the
+  // surface and keep the flat art. No setting since 2026-10-01 (ADR 0057
+  // §2.7 amended): the GPU path below decides the rest.
+  const sceneSupported = bridge.getDeviceScene !== undefined;
   // The GPU path, asked at mount (2026-09-10) rather than when the scene
   // mounts: a machine with no path — a remote desktop, a VM, a software
   // rasterizer — used to show the frosted picture for the idle gate's

@@ -763,12 +763,11 @@ export interface HertaBridge {
   /** Persist the appearance preference; the renderer's theme controller
    *  applies it live (no restart). */
   setTheme?(theme: ThemePref): Promise<void>;
-  /** Read whether the 3D device card is on (ADR 0057; Settings →
-   *  差分协处理器). OPTIONAL — fakes and the website demo omit it, and the
-   *  card then stays on its flat renders with the row hidden. */
+  /** Whether this host draws the 3D device card (ADR 0057) — the desktop
+   *  answers true; the GPU probe decides the rest. No setting since
+   *  2026-10-01 (§2.7 amended). OPTIONAL — fakes and the website demo omit
+   *  it, and the card then stays on its flat renders. */
   getDeviceScene?(): Promise<boolean>;
-  /** Persist the 3D device card toggle; the card applies it live. */
-  setDeviceScene?(enabled: boolean): Promise<void>;
   /** Read whether an attached PDF's pictures are transcribed (2026-10-01;
    *  Settings → 差分协处理器). Default on. OPTIONAL — fakes and the website
    *  demo omit it, and the row hides. */

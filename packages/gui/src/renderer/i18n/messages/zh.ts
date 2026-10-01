@@ -247,8 +247,6 @@ export const zh = {
   "banzhuan.contract.minimal": "极简",
   // 3D device card (ADR 0057). Same register as the rows above: what it is,
   // the one trade-off, apply semantics.
-  "banzhuan.scene": "立体板砖",
-  "banzhuan.sceneDesc": "开：一块打了光的实物；关：平面图，省显卡。",
   "banzhuan.pdfPictures": "转写 PDF 图片",
   "banzhuan.pdfPicturesDesc":
     "附加 PDF 时，调用模型将图片信息转写为文本，每份文档至多 40 次。关闭后图片照常保存，它仍能查看原图。立即生效。",

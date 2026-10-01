@@ -2,14 +2,15 @@ import { useSyncExternalStore } from "react";
 import type { HertaBridge } from "../../../ipc/bridge-types.js";
 
 /**
- * The 3D device card preference (ADR 0057), mirrored in the renderer so the
- * card and the Settings toggle share one live value (the voice-prefs
- * pattern, but persisted through the bridge rather than localStorage: the
- * value belongs to the user's settings.json like the theme does).
+ * Whether this host draws the 3D device card (ADR 0057), read once per
+ * renderer lifetime. The desktop answers true; whether THIS machine's GPU can
+ * is the card's own probe. It was a Settings toggle until 2026-10-01 (§2.7
+ * amended: the owner made the lit device the only choice, with the flat art
+ * wherever the GPU does not allow it).
  *
  *   null   — unknown yet, or the bridge has no surface for it (fakes, the
- *            website demo): the card keeps its flat renders, the row hides.
- *   bool   — the persisted choice.
+ *            website demo): the card keeps its flat renders.
+ *   bool   — the host's answer.
  */
 export type DeviceScenePref = boolean | null;
 
@@ -53,11 +54,6 @@ export function loadDeviceScenePref(bridge: HertaBridge): Promise<void> {
     .then((v) => set(v === true))
     .catch(() => set(null));
   return loading;
-}
-
-/** Apply a user pick locally (optimistic); the caller persists it. */
-export function setDeviceScenePrefLocal(next: boolean): void {
-  set(next);
 }
 
 /** React binding. */

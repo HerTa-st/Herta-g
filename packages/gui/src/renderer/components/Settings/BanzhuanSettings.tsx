@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { DEVICE_SCENE_DEFAULT } from "../../../shared/device-scene.js";
 import { useHertaBridge } from "../../context/HertaBridgeContext.js";
 import { useDemoDeviceCycle } from "../../hooks/useDemoDeviceCycle.js";
 import type { BanzhuanDeviceState } from "../../hooks/useDeviceState.js";
@@ -10,11 +9,6 @@ import type {
   BackendThinking,
 } from "../../ipc/bridge-types.js";
 import { BanzhuanDemoCard } from "../UtilityRail/BanzhuanDemoCard.js";
-import {
-  loadDeviceScenePref,
-  setDeviceScenePrefLocal,
-  useDeviceScenePref,
-} from "../UtilityRail/device-scene/device-scene-prefs.js";
 import { Select } from "./Select.js";
 import { SettingRow } from "./SettingRow.js";
 import { useRememberedSetting } from "./settings-snapshot.js";
@@ -191,30 +185,10 @@ export function BanzhuanSettings(): JSX.Element {
     });
   };
 
-  // 3D device row (ADR 0057). Shares the live pref module with the rail
-  // card, so a flip here re-renders the card at once; hides when the bridge
-  // has no surface (fakes / the website demo). Optimistic + latest-wins like
-  // the rows above. The demo card below stays on the flat renders on
-  // purpose — one GPU scene per app, in the rail.
-  const scenePref = useDeviceScenePref();
-  const sceneSupported = bridge.setDeviceScene !== undefined;
-  const [sceneFailed, setSceneFailed] = useState(false);
-  const sceneSeqRef = useRef(0);
-  useEffect(() => {
-    void loadDeviceScenePref(bridge);
-  }, [bridge]);
-  const onScene = (next: boolean): void => {
-    const prev = scenePref ?? DEVICE_SCENE_DEFAULT;
-    sceneSeqRef.current += 1;
-    const seq = sceneSeqRef.current;
-    setDeviceScenePrefLocal(next);
-    setSceneFailed(false);
-    void bridge.setDeviceScene?.(next).catch(() => {
-      if (seq !== sceneSeqRef.current) return;
-      setDeviceScenePrefLocal(prev);
-      setSceneFailed(true);
-    });
-  };
+  // There is no 3D device row (owner 2026-10-01, ADR 0057 §2.7 amended):
+  // the rail card draws the lit device wherever the GPU allows and the flat
+  // art everywhere else, with nothing to choose. The demo card below stays
+  // on the flat renders on purpose — one GPU scene per app, in the rail.
 
   // PDF picture transcription (2026-10-01). Live (main applies it to the next
   // attach), per user, default on; the first frame shows the last-known value
@@ -338,19 +312,6 @@ export function BanzhuanSettings(): JSX.Element {
             }
           />
         )}
-        {sceneSupported && (
-          <SettingRow
-            title={t("banzhuan.scene")}
-            description={t("banzhuan.sceneDesc")}
-            control={
-              <Toggle
-                checked={scenePref ?? DEVICE_SCENE_DEFAULT}
-                ariaLabel={t("banzhuan.scene")}
-                onChange={onScene}
-              />
-            }
-          />
-        )}
         {pdfSupported && (
           <SettingRow
             title={t("banzhuan.pdfPictures")}
@@ -365,15 +326,12 @@ export function BanzhuanSettings(): JSX.Element {
           />
         )}
       </div>
-      {((thinkingSupported && (failed || contractFailed)) ||
-        sceneFailed ||
-        pdfFailed) && (
+      {((thinkingSupported && (failed || contractFailed)) || pdfFailed) && (
         <p className="settings-note">{t("common.couldntSave")}</p>
       )}
       {thinkingSupported &&
         !failed &&
         !contractFailed &&
-        !sceneFailed &&
         !pdfFailed &&
         loadFailed && (
           <p className="settings-note">{t("settings.loadFailed")}</p>

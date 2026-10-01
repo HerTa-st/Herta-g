@@ -7,10 +7,7 @@ import {
   createMockHertaBridge,
   type MockHertaBridge,
 } from "../../ipc/mock-bridge.js";
-import {
-  deviceScenePref,
-  resetDeviceScenePrefForTest,
-} from "../UtilityRail/device-scene/device-scene-prefs.js";
+import { resetDeviceScenePrefForTest } from "../UtilityRail/device-scene/device-scene-prefs.js";
 import { BanzhuanSettings } from "./BanzhuanSettings.js";
 
 const captionName = (c: HTMLElement): string | null =>
@@ -210,49 +207,21 @@ describe("BanzhuanSettings", () => {
     });
   });
 
-  describe("3D device row (ADR 0057)", () => {
+  describe("the 3D device (ADR 0057)", () => {
     afterEach(() => resetDeviceScenePrefForTest());
 
-    it("hides the row when the bridge lacks the surface (fakes / website demo)", () => {
-      renderPane(createMockHertaBridge());
+    it("has no row — the lit device is always on where the GPU allows it (owner 2026-10-01, §2.7 amended)", () => {
+      // Even on the desktop's bridge, which draws the scene.
+      const { container } = renderPane(
+        createMockHertaBridge({ deviceSceneResult: true }),
+      );
       expect(screen.queryByLabelText("3D device")).toBeNull();
+      expect(container.textContent).not.toContain("3D device");
     });
 
-    it("loads the persisted value, and a flip persists via the bridge and the shared pref", async () => {
-      const mock = createMockHertaBridge({ deviceSceneResult: false });
-      renderPane(mock);
-      const toggle = await screen.findByLabelText("3D device");
-      await waitFor(() =>
-        expect(toggle.getAttribute("aria-checked")).toBe("false"),
-      );
-      fireEvent.click(toggle);
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-      expect(deviceScenePref()).toBe(true);
-      await waitFor(() => expect(mock.calls.setDeviceScene).toEqual([true]));
-    });
-
-    it("a failed write snaps back and surfaces the error", async () => {
-      const mock = createMockHertaBridge({
-        deviceSceneResult: true,
-        failSetDeviceScene: true,
-      });
-      const { queryByText } = renderPane(mock);
-      const toggle = await screen.findByLabelText("3D device");
-      await waitFor(() =>
-        expect(toggle.getAttribute("aria-checked")).toBe("true"),
-      );
-      fireEvent.click(toggle);
-      await waitFor(() =>
-        expect(queryByText("Could not save — try again.")).toBeTruthy(),
-      );
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-      expect(deviceScenePref()).toBe(true);
-    });
-
-    it("the demo card below stays on the flat renders — one GPU scene per app", async () => {
+    it("the demo card below stays on the flat renders — one GPU scene per app", () => {
       const mock = createMockHertaBridge({ deviceSceneResult: true });
       const { container } = renderPane(mock);
-      await screen.findByLabelText("3D device");
       expect(
         container.querySelector(".settings-bz-card .device-scene-canvas"),
       ).toBeNull();

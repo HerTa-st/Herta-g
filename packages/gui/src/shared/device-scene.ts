@@ -1,7 +1,6 @@
 /**
- * The 3D device card's asset scheme and defaults (ADR 0057), shared by main
- * (the protocol handler + the settings default) and the renderer (the URLs
- * three.js loads from + the optimistic Settings state).
+ * The 3D device card's asset scheme (ADR 0057), shared by main (the
+ * protocol handler) and the renderer (the URLs three.js loads from).
  *
  * `herta-asset://device-scene/<file>` serves the compact baked asset set
  * (GLB meshes, KTX2 atlases, scalar PNGs, the Basis transcoder) from the
@@ -20,8 +19,3 @@ export const DEVICE_SCENE_HOST = "device-scene";
 export function deviceSceneAssetUrl(file: string): string {
   return `${DEVICE_SCENE_SCHEME}://${DEVICE_SCENE_HOST}/${file}`;
 }
-
-/** Settings → 差分协处理器 → 3D device: the shipped default when the user
- *  has never touched the toggle. The card falls back to the flat renders
- *  whenever the machine has no usable GPU path, so ON costs nothing there. */
-export const DEVICE_SCENE_DEFAULT = true;

@@ -105,8 +105,9 @@ const bridge: HertaBridge = {
   setAutoUpdate: (enabled) => ipcRenderer.invoke(CMD.setAutoUpdate, enabled),
   getTheme: () => ipcRenderer.invoke(CMD.getTheme),
   setTheme: (theme) => ipcRenderer.invoke(CMD.setTheme, theme),
-  getDeviceScene: () => ipcRenderer.invoke(CMD.getDeviceScene),
-  setDeviceScene: (enabled) => ipcRenderer.invoke(CMD.setDeviceScene, enabled),
+  // The desktop draws the 3D device card (ADR 0057); whether THIS machine's
+  // GPU can is the renderer's probe. No setting since 2026-10-01.
+  getDeviceScene: () => Promise.resolve(true),
   getPdfPictureTranscripts: () =>
     ipcRenderer.invoke(CMD.getPdfPictureTranscripts),
   setPdfPictureTranscripts: (enabled) =>

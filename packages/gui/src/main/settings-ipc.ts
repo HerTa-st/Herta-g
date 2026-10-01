@@ -3,7 +3,7 @@
  * `settings:*` handler the desktop's session service registers — Dream,
  * the coprocessor's effort and contract, the DeepSeek model rows and key,
  * the UI and interaction languages, close-to-tray, automatic updates, the
- * appearance, the 3D device card, the real-time voice with its engine,
+ * appearance, the PDF-picture switch, the real-time voice with its engine,
  * the MiniMax keys and clone, the model download. They were a 370-line
  * block inside the service's 1 200-line handler closure; the service still
  * registers them at construction (synchronously, before any bootstrap —
@@ -23,7 +23,6 @@ import type {
   MiniMaxRefusalState,
   RealtimeVoiceState,
 } from "../renderer/ipc/bridge-types.js";
-import { DEVICE_SCENE_DEFAULT } from "../shared/device-scene.js";
 import type { VoiceEngine } from "./app-global-settings.js";
 import {
   defaultCloseToTray,
@@ -341,18 +340,6 @@ export function registerSettingsHandlers(deps: SettingsIpcDeps): void {
       theme,
     }));
     hooks.onThemeChanged?.(theme);
-  });
-  // Settings → 差分协处理器 → 3D device card (ADR 0057). The renderer
-  // applies it live; main only persists. Absent = the shipped default.
-  handle(CMD.getDeviceScene, async () => {
-    const s = await readGlobalSettings(app.getPath("userData"));
-    return s.deviceScene ?? DEVICE_SCENE_DEFAULT;
-  });
-  handle(CMD.setDeviceScene, async (_e, enabled: boolean) => {
-    await updateGlobalSettings(app.getPath("userData"), (s) => ({
-      ...s,
-      deviceScene: enabled === true,
-    }));
   });
   // Settings → 差分协处理器 → PDF picture transcription (2026-10-01). Per user
   // and LIVE: persisted here, mirrored to the running host, which every
