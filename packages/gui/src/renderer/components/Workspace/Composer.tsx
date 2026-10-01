@@ -65,6 +65,9 @@ function caretIsFree(form: HTMLElement | null): boolean {
 /** How long the rewind notice's slide-out runs before it unmounts. Must match
  *  the `.composer-notice.is-exiting` animation duration in reference-ux.css. */
 const NOTICE_EXIT_MS = 240;
+/** How long a document read runs before the composer says it is reading
+ *  (review on #6): long enough that a text file never flashes the notice. */
+const READING_NOTICE_DELAY_MS = 500;
 
 /** How long the workspace's file list is reused before `@` lists it again
  *  (ADR 0072 §2) — a file 板砖 just created shows up on the next mention. */
@@ -201,6 +204,48 @@ export function Composer(): JSX.Element {
     sessionStore.setComposerNotice(text);
   }, [sessionStore, t]);
 
+  // A document's row appears only when main has read it — and, for a PDF,
+  // transcribed its pictures (2026-09-30): seconds with nothing on screen,
+  // which read as a dead drop target, and a user who drops again ingests the
+  // whole document twice. While a read is in flight a second batch is refused
+  // rather than queued, and the SEND waits: `attachFiles` is idle-only, so a
+  // turn started meanwhile makes main refuse the whole attach once it has read
+  // it, transcripts already paid for (review on #6). The notice speaks only
+  // once the read is slow enough to need it — a .md file lands in
+  // milliseconds and must not flash anything — and it is remembered like
+  // `turnNotice`, so the answer clears this notice and never a newer one.
+  const reading = useRef(false);
+  const [readingDoc, setReadingDoc] = useState(false);
+  const readingNotice = useRef<string | null>(null);
+  const readingTimer = useRef<number | null>(null);
+  const stopReadingTimer = (): void => {
+    if (readingTimer.current !== null) {
+      window.clearTimeout(readingTimer.current);
+      readingTimer.current = null;
+    }
+  };
+  const showReadingNotice = (text: string): void => {
+    stopReadingTimer();
+    readingNotice.current = text;
+    sessionStore.setComposerNotice(text);
+  };
+  const clearReadingNotice = (): void => {
+    stopReadingTimer();
+    const shown = readingNotice.current;
+    readingNotice.current = null;
+    if (shown !== null && sessionStore.getSnapshot().composerNotice === shown) {
+      sessionStore.clearComposerNotice();
+    }
+  };
+  // The pending notice timer must not fire into an unmounted composer.
+  useEffect(
+    () => () => {
+      if (readingTimer.current !== null)
+        window.clearTimeout(readingTimer.current);
+    },
+    [],
+  );
+
   // Staged pictures (ADR 0048 §4). Refusals go through the same notice lane
   // every other composer refusal uses.
   const onStageRefusal = useCallback(
@@ -249,6 +294,12 @@ export function Composer(): JSX.Element {
       if (images.staged.length > 0) {
         sessionStore.setComposerNotice(t("composer.attach.needText"));
       }
+      return;
+    }
+    if (reading.current) {
+      // See `reading`: a turn started now would cost the attach in flight.
+      // The words stay in the field for when the read is done.
+      showReadingNotice(t("composer.attach.waitToSend"));
       return;
     }
     // EN surface alias: translate a typed "@brick" (any case) back to the wire
@@ -601,27 +652,6 @@ export function Composer(): JSX.Element {
     });
   };
 
-  // A document's row appears only when main has read it — and, for a PDF,
-  // transcribed its pictures (2026-09-30): seconds with nothing on screen,
-  // which read as a dead drop target, and a user who drops again ingests the
-  // whole document twice. The notice says the file is being read for exactly
-  // that span, and a batch dropped meanwhile is refused rather than queued.
-  // Remembered like `turnNotice`, so the answer clears this notice and never a
-  // newer one.
-  const readingNotice = useRef<string | null>(null);
-  const reading = useRef(false);
-  const showReadingNotice = (text: string): void => {
-    readingNotice.current = text;
-    sessionStore.setComposerNotice(text);
-  };
-  const clearReadingNotice = (): void => {
-    const shown = readingNotice.current;
-    readingNotice.current = null;
-    if (shown !== null && sessionStore.getSnapshot().composerNotice === shown) {
-      sessionStore.clearComposerNotice();
-    }
-  };
-
   const ingestDocuments = (
     paths: readonly string[],
     notImages: readonly string[],
@@ -637,7 +667,16 @@ export function Composer(): JSX.Element {
       return;
     }
     reading.current = true;
-    showReadingNotice(t("composer.attach.reading"));
+    setReadingDoc(true);
+    const readingText = t(
+      docs.some((p) => /\.pdf$/i.test(p))
+        ? "composer.attach.readingPdf"
+        : "composer.attach.reading",
+    );
+    readingTimer.current = window.setTimeout(() => {
+      readingTimer.current = null;
+      showReadingNotice(readingText);
+    }, READING_NOTICE_DELAY_MS);
     void bridge
       .attachFiles(sessionId, docs)
       .then((r) => {
@@ -665,6 +704,7 @@ export function Composer(): JSX.Element {
       })
       .finally(() => {
         reading.current = false;
+        setReadingDoc(false);
       });
   };
 
@@ -1198,7 +1238,7 @@ export function Composer(): JSX.Element {
           type={busy ? "button" : "submit"}
           className={`composer-send${busy ? " is-stop" : ""}`}
           aria-label={busy ? t("composer.stop") : t("composer.send")}
-          disabled={!busy && text.trim().length === 0}
+          disabled={!busy && (text.trim().length === 0 || readingDoc)}
           onClick={
             busy
               ? () => {

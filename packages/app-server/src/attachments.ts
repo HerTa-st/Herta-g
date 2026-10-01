@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import type { PageMarkerLang, SystemBlock } from "@herta/core";
 import { ensureHertaGitignore, pageMarkerShape } from "@herta/core";
@@ -640,6 +648,52 @@ async function ingestDocument(opts: {
   };
 }
 
+/** The stored name of a PDF's picture: beside the document's text, under the
+ *  document's own base name (`report-<hash>.pdf.p<page>-<n>.png`). The one
+ *  definition `storePictures` writes by and `storedPicturesOf` matches by. */
+function pictureStoredName(
+  baseName: string,
+  page: number,
+  index: number,
+): string {
+  return `${baseName}.p${page}-${index}.png`;
+}
+
+/**
+ * The pictures stored beside a PDF's text (2026-09-30), as workspace-relative
+ * paths: every file in the text's directory named
+ * `<text path minus .txt>.p<page>-<n>.png`. A document's take-back and the
+ * rewind's GC remove these with the text — they are the text's sidecars, and
+ * a picture left behind is one `view_image` can still open after the user
+ * withdrew the document.
+ *
+ * Derived from the TEXT's own harness-written path and matched by an exact
+ * pattern, so only names the ingest wrote can reach `rm`: the same trust shape
+ * as the digest and outline sidecars. Never throws — no directory, no
+ * pictures.
+ */
+export async function storedPicturesOf(
+  workspaceRoot: string,
+  textPath: string,
+): Promise<string[]> {
+  if (!textPath.endsWith(".txt")) return [];
+  const slash = textPath.lastIndexOf("/");
+  const dir = textPath.slice(0, slash);
+  const stem = textPath.slice(slash + 1, -".txt".length);
+  if (stem.length === 0) return [];
+  const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^${escaped}\\.p\\d+-\\d+\\.png$`);
+  try {
+    const names = await readdir(join(workspaceRoot, ...dir.split("/")));
+    return names
+      .filter((name) => pattern.test(name))
+      .sort()
+      .map((name) => `${dir}/${name}`);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Store a PDF's pictures beside its text and write each one's line where its
  * token stands (2026-09-30):
@@ -683,7 +737,11 @@ async function storePictures(
       const relPath = await storeBytes({
         workspaceRoot: opts.workspaceRoot,
         sessionId: opts.sessionId,
-        storedName: `${opts.baseName}.p${picture.page}-${picture.index}.png`,
+        storedName: pictureStoredName(
+          opts.baseName,
+          picture.page,
+          picture.index,
+        ),
         bytes: picture.png,
       });
       entry = { relPath, png: picture.png };

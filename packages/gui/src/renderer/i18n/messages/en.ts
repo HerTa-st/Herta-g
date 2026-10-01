@@ -348,10 +348,13 @@ export const en = {
   "composer.attach.tooMany": "Ten files at most",
   "composer.attach.failed": "Adding files failed",
   // While a document is read (2026-09-30) — a PDF's pictures are transcribed
-  // before its row appears, which can take a few seconds.
-  "composer.attach.reading":
-    "Reading the file — pictures in a PDF take a few seconds",
+  // before its row appears, which can take a few seconds. Shown only once a
+  // read has run half a second; the send waits for the read.
+  "composer.attach.reading": "Reading the file",
+  "composer.attach.readingPdf":
+    "Reading the PDF — its pictures take a few seconds",
   "composer.attach.stillReading": "Still reading the previous file",
+  "composer.attach.waitToSend": "Sending waits until the file is read",
   "composer.attach.denied": "Credential-shaped — refused",
   // The staged strip (ADR 0048): pictures waiting to be sent WITH a message.
   "composer.staged": "Images to send",

@@ -1131,8 +1131,8 @@ describe("document attachments — a PDF's pictures (2026-09-30)", () => {
     );
   });
 
-  it("the same picture drawn twice is stored and transcribed once, and both places cite it", async () => {
-    const caption = captioner(() => "mathbb{R}^3");
+  it("the same picture drawn twice is stored and transcribed once, and keeps one line — a repeat is chrome (review on #6)", async () => {
+    const caption = captioner(() => "\\mathbb{R}^3");
     const r = await ingestPdf(
       handout([formula(5, 610), formula(5, 670)]),
       caption,
@@ -1140,10 +1140,9 @@ describe("document attachments — a PDF's pictures (2026-09-30)", () => {
     expect(caption.calls).toHaveLength(1);
     const cited = storedText(r.relPath)
       .split("\n")
-      .filter((l) => l.startsWith("[图 "))
-      .map((l) => /· (\S+)\]/.exec(l)?.[1]);
-    expect(cited).toHaveLength(2);
-    expect(cited[0]).toBe(cited[1]);
+      .filter((l) => l.startsWith("[图 "));
+    expect(cited).toHaveLength(1);
+    expect(cited[0]).toMatch(/^\[图 1-1 · \S+\.png\] 自动转写：/);
     const pngs = readdirSync(join(ws, ".herta", "attachments", "s1")).filter(
       (f) => f.endsWith(".png"),
     );

@@ -318,7 +318,9 @@ async function extractPdfText(
         // a scan (pictures and no text layer at all) stays `empty` below, and
         // decoding its page images first would only delay that answer.
         if (scan !== undefined && body > 0 && pictureScanOpen(scan, p)) {
-          const found = await collectPagePictures(page, pdfjs, scan);
+          const found = await collectPagePictures(page, pdfjs, scan, {
+            pageHasText: pageText.trim().length > 0,
+          });
           if (found.length > 0) {
             const numbered = found.map((picture, k) => ({
               id: pictures.length + k + 1,

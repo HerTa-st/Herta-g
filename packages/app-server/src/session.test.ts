@@ -1900,6 +1900,84 @@ describe("Session — attachFiles (ADR 0033)", () => {
     await cleanup();
   });
 
+  /** A one-page PDF drawing two pictures between its lines (2026-09-30). */
+  async function pictureHandout(fill: number): Promise<Buffer> {
+    const { makePdf } = await import("./testing/document-fixtures.js");
+    const picture = (y: number, shade: number) => ({
+      at: [72, y, 120, 40] as const,
+      width: 12,
+      height: 10,
+      kind: "rgb" as const,
+      data: new Uint8Array(12 * 10 * 3).fill(shade),
+    });
+    return makePdf([["Question 1.", "(a)", "(b)"]], {
+      lineGap: 60,
+      pictures: [[picture(670, fill), picture(610, fill + 1)]],
+    });
+  }
+  const pngsBeside = (backendWs: string, rel: string): string[] =>
+    readdirSync(join(backendWs, ...rel.split("/").slice(0, -1))).filter((f) =>
+      f.endsWith(".png"),
+    );
+
+  it("removeAttachment takes a PDF's pictures with its text — nothing view_image could still open (2026-09-30)", async () => {
+    const { session, backendWs, srcDir, cleanup } = await mkAttachSession();
+    writeFileSync(join(srcDir, "handout.pdf"), await pictureHandout(10));
+    const a = await session.attachFiles([join(srcDir, "handout.pdf")]);
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const rel = a.files[0]?.path ?? "";
+    expect(pngsBeside(backendWs, rel)).toHaveLength(2);
+
+    expect(await session.removeAttachment(rel)).toEqual({
+      ok: true,
+      removed: 1,
+    });
+    // Text, original and both pictures: the directory is empty again.
+    expect(
+      readdirSync(join(backendWs, ...rel.split("/").slice(0, -1))),
+    ).toEqual([]);
+    await cleanup();
+  });
+
+  it("rewind takes a withdrawn PDF's pictures with its text (2026-09-30)", async () => {
+    const { session, backendWs, srcDir, cleanup } = await mkAttachSession();
+    await session.submitText("hi");
+    writeFileSync(join(srcDir, "handout.pdf"), await pictureHandout(20));
+    const a = await session.attachFiles([join(srcDir, "handout.pdf")]);
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const rel = a.files[0]?.path ?? "";
+    expect(pngsBeside(backendWs, rel)).toHaveLength(2);
+
+    const r = await session.rewindLastTurn();
+    expect(r.ok).toBe(true);
+    expect(existsSync(join(backendWs, ...rel.split("/")))).toBe(false);
+    expect(pngsBeside(backendWs, rel)).toEqual([]);
+    await cleanup();
+  });
+
+  it("rewind keeps a PDF's pictures while a surviving block still cites its text (2026-09-30)", async () => {
+    // The same document attached before the send and again after the reply:
+    // content-hashed names make both rows cite one text, and the rewind
+    // withdraws only the second. Pictures follow the text's fate, so they stay.
+    const { session, backendWs, srcDir, cleanup } = await mkAttachSession();
+    writeFileSync(join(srcDir, "handout.pdf"), await pictureHandout(30));
+    const first = await session.attachFiles([join(srcDir, "handout.pdf")]);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await session.submitText("看看这份讲义");
+    const again = await session.attachFiles([join(srcDir, "handout.pdf")]);
+    expect(again.ok).toBe(true);
+    const rel = first.files[0]?.path ?? "";
+
+    const r = await session.rewindLastTurn();
+    expect(r.ok).toBe(true);
+    expect(existsSync(join(backendWs, ...rel.split("/")))).toBe(true);
+    expect(pngsBeside(backendWs, rel)).toHaveLength(2);
+    await cleanup();
+  });
+
   it("rewind removes a scanned PDF's original — a block whose ONLY stored file is the source (2026-10-01)", async () => {
     // A scan keeps no text (ADR 0038 §4) but keeps its original for the
     // viewer, so its digest path is empty and the source is the one file on

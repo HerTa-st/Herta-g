@@ -438,14 +438,26 @@ describe("extractDocumentText — pdf pictures (2026-09-30)", () => {
     expect([...(png.rows[0]?.subarray(0, 3) ?? [])]).toEqual([255, 0, 0]);
   });
 
+  /** A distinct picture: identical pixels would be one picture drawn twice. */
+  const shaded = (
+    at: PdfPictureFixture["at"],
+    shade: number,
+  ): PdfPictureFixture => ({
+    ...underA,
+    at,
+    data: new Uint8Array(12 * 10 * 3).fill(shade),
+  });
+
   it("numbers pictures top to bottom per page, with ids running across the document", async () => {
-    const low: PdfPictureFixture = { ...underA, at: [72, 540, 120, 40] };
     const r = await extractDocumentText(
       "pdf",
       makePdf([questionPage, ["Page two"]], {
         lineGap: 60,
         // Drawn bottom-first: the order in the file is not the reading order.
-        pictures: [[low, underA], [{ ...underA, at: [72, 600, 120, 40] }]],
+        pictures: [
+          [shaded([72, 540, 120, 40], 1), shaded([72, 610, 120, 40], 2)],
+          [shaded([72, 600, 120, 40], 3)],
+        ],
       }),
       { pictures: true },
     );
@@ -537,5 +549,79 @@ describe("extractDocumentText — pdf pictures (2026-09-30)", () => {
     );
     if (!r.ok) throw new Error(r.reason);
     expect(r.pictures).toHaveLength(MAX_PDF_PICTURES);
+  });
+});
+
+describe("extractDocumentText — pictures that are not content (review on #6)", () => {
+  const questionPage = ["Question 1.", "(a)", "(b)"];
+  /** Covers the whole 612×792 page, like a scan's page image or a slide's
+   *  full-bleed background. */
+  const fullPage: PdfPictureFixture = {
+    at: [0, 0, 612, 792],
+    width: 16,
+    height: 20,
+    kind: "rgb",
+  };
+  const formula = (shade: number): PdfPictureFixture => ({
+    at: [72, 610, 120, 40],
+    width: 12,
+    height: 10,
+    kind: "rgb",
+    data: new Uint8Array(12 * 10 * 3).fill(shade),
+  });
+
+  it("a picture covering most of a page that has text is skipped — a scan under its OCR layer, a slide background", async () => {
+    const r = await extractDocumentText(
+      "pdf",
+      makePdf([questionPage], {
+        lineGap: 60,
+        pictures: [[fullPage, formula(1)]],
+      }),
+      { pictures: true },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    // Only the formula: the page image is left to the text it carries.
+    expect(r.pictures).toHaveLength(1);
+    expect(r.text).toBe(
+      `── 第 1 页 ──\nQuestion 1.\n(a)\n${pictureToken(1)}\n(b)`,
+    );
+  });
+
+  it("…but on a page WITHOUT text the same picture is the content, and is kept", async () => {
+    const r = await extractDocumentText(
+      "pdf",
+      makePdf([questionPage, []], {
+        lineGap: 60,
+        pictures: [[], [fullPage]],
+      }),
+      { pictures: true },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.pictures?.map(({ page }) => page)).toEqual([2]);
+    expect(r.text.endsWith(`── 第 2 页 ──\n${pictureToken(1)}`)).toBe(true);
+  });
+
+  it("a picture drawn again — a letterhead on every page — keeps its first line only and counts once toward the cap", async () => {
+    const logo: PdfPictureFixture = {
+      at: [400, 730, 60, 30],
+      width: 12,
+      height: 8,
+      kind: "rgb",
+      data: new Uint8Array(12 * 8 * 3).fill(77),
+    };
+    const pages = Array.from({ length: 5 }, () => questionPage);
+    const r = await extractDocumentText(
+      "pdf",
+      makePdf(pages, {
+        lineGap: 60,
+        pictures: pages.map((_, i) => [logo, formula(10 + i)]),
+      }),
+      { pictures: true },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    // One logo and five formulas: six distinct pictures, six lines.
+    expect(r.pictures).toHaveLength(6);
+    expect(r.pictures?.[0]).toMatchObject({ page: 1, index: 1 });
+    expect(r.text.match(/\u27E6picture:\d+\u27E7/g)).toHaveLength(6);
   });
 });

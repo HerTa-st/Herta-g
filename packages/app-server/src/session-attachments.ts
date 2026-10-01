@@ -8,6 +8,7 @@ import {
   type ImageCaptioner,
   ingestAttachment,
   MAX_ATTACHMENTS_PER_ACTION,
+  storedPicturesOf,
 } from "./attachments.js";
 import {
   MAX_STAGED_IMAGES,
@@ -275,9 +276,17 @@ export class SessionAttachments {
     // withdrawn document must not leave its chapter titles behind.
     const sidecar = under(stored.outline?.path);
     // …and the digest sidecar (ADR 0043), if 板砖 ever built one: same
-    // directory, same prefix, derived from the text's own path.
+    // directory, same prefix, derived from the text's own path. A PDF's
+    // pictures (2026-09-30) are sidecars of the text the same way — left
+    // behind, `view_image` could still open them after the take-back.
     const toRemove = [
-      ...(relPath === null ? [] : [relPath, digestSidecarFor(relPath)]),
+      ...(relPath === null
+        ? []
+        : [
+            relPath,
+            digestSidecarFor(relPath),
+            ...(await storedPicturesOf(this.deps.wsHolder.current, relPath)),
+          ]),
       ...(source === null ? [] : [source]),
       ...(sidecar === null ? [] : [sidecar]),
     ];
@@ -352,12 +361,12 @@ export class SessionAttachments {
    * attachment prefix — nothing renderer-supplied reaches unlink. A path a
    * SURVIVING block still cites is kept: content-hashed names make
    * re-attaching the same document idempotent, so two blocks can share one
-   * stored file. Sidecars (outline, ADR 0043 digest) go with their text,
-   * and the original's copy (ADR 0038 amendment, `source`) goes too — the
-   * same set the ✕ takes (2026-10-01: the GC used to leave the original
-   * behind, and skipped a scanned PDF's block outright because its only
-   * stored file IS the source). The original is kept by the same rule as the
-   * text: while a surviving block cites it.
+   * stored file. Sidecars (outline, ADR 0043 digest, a PDF's pictures) go
+   * with their text, and the original's copy (ADR 0038 amendment, `source`)
+   * goes too — the same set the ✕ takes (2026-10-01: the GC used to leave the
+   * original behind, and skipped a scanned PDF's block outright because its
+   * only stored file IS the source). The original is kept by the same rule as
+   * the text: while a surviving block cites it.
    *
    * PICTURES are the exception (owner 2026-08-27): a withdrawn image block
    * RESTAGES into the composer strip instead of being deleted — the copy is
@@ -410,7 +419,13 @@ export class SessionAttachments {
         }
         // Strip full, or not restageable after all — the GC takes it.
       }
-      toRemove.push(text, digestSidecarFor(text));
+      // A PDF's pictures go with its text and only with it, so a re-attached
+      // document a surviving block still cites keeps them too (2026-09-30).
+      toRemove.push(
+        text,
+        digestSidecarFor(text),
+        ...(await storedPicturesOf(this.deps.wsHolder.current, text)),
+      );
       const outline = d.outline?.path;
       if (outline?.startsWith(prefix) === true) {
         toRemove.push(outline);
