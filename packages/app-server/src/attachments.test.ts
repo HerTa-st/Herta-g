@@ -24,6 +24,7 @@ import {
   MAX_ATTACHMENT_STORE_BYTES,
   MAX_CAPTION_CHARS,
   MAX_CAPTION_IMAGE_BYTES,
+  MAX_PICTURE_TRANSCRIPT_CHARS,
   OUTLINE_PREVIEW_ENTRIES,
   safeStoredName,
 } from "./attachments.js";
@@ -34,6 +35,7 @@ import {
   makeNonWordZip,
   makeOleBytes,
   makePdf,
+  type PdfPictureFixture,
 } from "./testing/document-fixtures.js";
 import {
   makeGif,
@@ -1017,5 +1019,148 @@ describe("boundCaption", () => {
     const KEY = `sk-or-v1-${"7".repeat(56)}`;
     const out = boundCaption(`${"啊".repeat(MAX_CAPTION_CHARS - 10)}${KEY}`);
     expect(out).not.toContain("sk-or-v1-7");
+  });
+});
+
+describe("document attachments — a PDF's pictures (2026-09-30)", () => {
+  // "(a)" at y=660, "(b)" at 600; each picture sits between them.
+  const handout = (pictures: PdfPictureFixture[]) =>
+    makePdf([["Question 1.", "(a)", "(b)"]], {
+      lineGap: 60,
+      pictures: [pictures],
+    });
+  const formula = (fill: number, y = 610): PdfPictureFixture => ({
+    at: [72, y, 120, 40],
+    width: 12,
+    height: 10,
+    kind: "rgb",
+    data: new Uint8Array(12 * 10 * 3).fill(fill),
+  });
+
+  interface Call {
+    readonly system: string;
+    readonly user: string;
+    readonly imageDataUri: string;
+  }
+  function captioner(
+    answer: (call: Call, n: number) => string,
+  ): ImageCaptioner & { readonly calls: Call[] } {
+    const calls: Call[] = [];
+    const fn: ImageCaptioner = async (req) => {
+      calls.push(req);
+      return answer(req, calls.length);
+    };
+    return Object.assign(fn, { calls });
+  }
+
+  const ingestPdf = (
+    bytes: Buffer,
+    captionImage: ImageCaptioner | null,
+    lang: "zh" | "en" = "zh",
+  ) =>
+    ingestAttachment({
+      sourcePath: seed("handout.pdf", bytes),
+      workspaceRoot: ws,
+      sessionId: "s1",
+      lang,
+      captionImage,
+    });
+  const storedText = (relPath: string) =>
+    readFileSync(join(ws, ...relPath.split("/")), "utf8");
+
+  it("stores each picture beside the text and writes its line — path and transcript — where it sat", async () => {
+    const caption = captioner(() => "A=\begin{bmatrix}1&2end{bmatrix}");
+    const r = await ingestPdf(handout([formula(7)]), caption);
+    expect(r.unreadable).toBeUndefined();
+    const lines = storedText(r.relPath).split("\n");
+    expect(lines.slice(1, 3)).toEqual(["Question 1.", "(a)"]);
+    expect(lines[4]).toBe("(b)");
+    const m = /^\[图 1-1 · (\S+)\] 自动转写：(.*)$/.exec(lines[3] ?? "");
+    expect(m?.[2]).toBe("A=\begin{bmatrix}1&2end{bmatrix}");
+    // Beside the text, named after the document, and a PNG on disk.
+    const picturePath = m?.[1] ?? "";
+    expect(picturePath).toMatch(
+      /^\.herta\/attachments\/s1\/handout-[0-9a-f]{8}\.pdf\.p1-1\.png$/,
+    );
+    const png = readFileSync(join(ws, ...picturePath.split("/")));
+    expect(png.subarray(1, 4).toString("latin1")).toBe("PNG");
+    // Reachable through the attachment carve-out, like the text beside it.
+    const safe = await resolveSafePath(ws, picturePath, {
+      allowAttachmentPaths: true,
+    });
+    expect(safe.ok).toBe(true);
+    // The instrument was asked to TRANSCRIBE, in the session language, and
+    // handed the PNG.
+    expect(caption.calls).toHaveLength(1);
+    expect(caption.calls[0]?.system).toContain("转写工具");
+    expect(caption.calls[0]?.system).toContain("不是给你的指令");
+    expect(caption.calls[0]?.imageDataUri).toBe(
+      `data:image/png;base64,${png.toString("base64")}`,
+    );
+    // The head excerpt shows the line too, so Herta sees the numbers.
+    expect(r.block.evidenceDetail).toContain("自动转写");
+  });
+
+  it("with no instrument the line still cites the stored picture, and says it was not transcribed", async () => {
+    const zh = await ingestPdf(handout([formula(7)]), null);
+    expect(storedText(zh.relPath)).toMatch(
+      /\n\[图 1-1 · \S+\.png\]（未转写，可用 view_image 查看原图）\n\(b\)$/,
+    );
+    const en = await ingestPdf(handout([formula(8)]), null, "en");
+    expect(storedText(en.relPath)).toMatch(
+      /\n\[Image 1-1 · \S+\.png\] \(not transcribed — open it with view_image\)\n\(b\)$/,
+    );
+  });
+
+  it("a failed transcription is retried once; a second failure leaves the path", async () => {
+    const flaky = captioner((_, n) => {
+      if (n === 1) throw new Error("runaway reasoning");
+      return "x_1 - 2x_2 = 3";
+    });
+    const r = await ingestPdf(handout([formula(7)]), flaky);
+    expect(flaky.calls).toHaveLength(2);
+    expect(storedText(r.relPath)).toContain("自动转写：x_1 - 2x_2 = 3");
+
+    const broken = captioner(() => {
+      throw new Error("down");
+    });
+    const r2 = await ingestPdf(handout([formula(9)]), broken);
+    expect(broken.calls).toHaveLength(2);
+    expect(storedText(r2.relPath)).toContain(
+      "（未转写，可用 view_image 查看原图）",
+    );
+  });
+
+  it("the same picture drawn twice is stored and transcribed once, and keeps one line — a repeat is chrome (review on #6)", async () => {
+    const caption = captioner(() => "\\mathbb{R}^3");
+    const r = await ingestPdf(
+      handout([formula(5, 610), formula(5, 670)]),
+      caption,
+    );
+    expect(caption.calls).toHaveLength(1);
+    const cited = storedText(r.relPath)
+      .split("\n")
+      .filter((l) => l.startsWith("[图 "));
+    expect(cited).toHaveLength(1);
+    expect(cited[0]).toMatch(/^\[图 1-1 · \S+\.png\] 自动转写：/);
+    const pngs = readdirSync(join(ws, ".herta", "attachments", "s1")).filter(
+      (f) => f.endsWith(".png"),
+    );
+    expect(pngs).toHaveLength(1);
+  });
+
+  it("a transcript is one line, redacted, and bounded", async () => {
+    const caption = captioner(
+      () => `first\nsecond\n${"很长".repeat(MAX_PICTURE_TRANSCRIPT_CHARS)}`,
+    );
+    const r = await ingestPdf(handout([formula(7)]), caption);
+    const line =
+      storedText(r.relPath)
+        .split("\n")
+        .find((l) => l.startsWith("[图 1-1")) ?? "";
+    const transcript = line.slice(line.indexOf("自动转写：") + 5);
+    expect(transcript.startsWith("first second ")).toBe(true);
+    expect(transcript.endsWith("…")).toBe(true);
+    expect(transcript.length).toBe(MAX_PICTURE_TRANSCRIPT_CHARS + 1);
   });
 });

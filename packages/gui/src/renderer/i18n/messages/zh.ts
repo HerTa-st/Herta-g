@@ -327,6 +327,13 @@ export const zh = {
   "composer.attach.busy": "当前回合尚未结束，无法添加文件",
   "composer.attach.tooMany": "最多十个文件",
   "composer.attach.failed": "文件加载失败",
+  // While a document is read (2026-09-30) — a PDF's pictures are transcribed
+  // before its row appears, which can take a few seconds. Shown only once a
+  // read has run half a second; the send waits for the read.
+  "composer.attach.reading": "正在读取文件",
+  "composer.attach.readingPdf": "正在读取 PDF，里面的图片需要几秒",
+  "composer.attach.stillReading": "上一个文件还在读取",
+  "composer.attach.waitToSend": "文件读完才能发送",
   "composer.attach.denied": "涉及密钥或凭据，上传失败",
   // The staged strip (ADR 0048): pictures waiting to be sent WITH a message.
   "composer.staged": "待发送的图片",

@@ -80,8 +80,12 @@ export interface MockHertaBridgeOpts {
   readonly setWorkspaceResult?: { ok: boolean; message?: string };
   /** Seed for the attachment picker (ADR 0033). Null = cancelled. */
   readonly pickAttachmentsResult?: readonly string[] | null;
-  /** Lets a test drive the refusal paths (turn in progress, too many). */
-  readonly attachFilesResult?: { ok: boolean; message?: string };
+  /** Lets a test drive the refusal paths (turn in progress, too many) — or,
+   *  as a promise, hold the ingest open to see what the composer shows while
+   *  a document is being read. */
+  readonly attachFilesResult?:
+    | { ok: boolean; message?: string }
+    | Promise<{ ok: boolean; message?: string }>;
   readonly removeAttachmentResult?: { ok: boolean; message?: string };
   /** Seed for stageImages (ADR 0048 §4). Default: every input stages, with a
    *  synthetic id/path — enough for the composer strip to render. */
@@ -664,7 +668,7 @@ export function createMockHertaBridge(
     },
     attachFiles: async (sid, paths) => {
       calls.attachFiles.push([sid, paths]);
-      return opts.attachFilesResult ?? { ok: true };
+      return (await opts.attachFilesResult) ?? { ok: true };
     },
     removeAttachment: async (sid, path) => {
       calls.removeAttachment.push([sid, path]);

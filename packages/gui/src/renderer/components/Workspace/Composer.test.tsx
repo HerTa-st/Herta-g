@@ -1390,6 +1390,162 @@ describe("Composer — attachments (ADR 0033)", () => {
     expect(screen.getByText(/Ten files at most/i)).toBeInTheDocument();
   });
 
+  /** A bridge whose `attachFiles` stays open until the test answers it. */
+  function heldAttach(): {
+    mock: ReturnType<typeof createMockHertaBridge>;
+    answer: (r: { ok: boolean; message?: string }) => void;
+  } {
+    let answer: (r: { ok: boolean; message?: string }) => void = () => {};
+    const mock = createMockHertaBridge({
+      attachFilesResult: new Promise((resolve) => {
+        answer = resolve;
+      }),
+    });
+    return { mock, answer: (r) => answer(r) };
+  }
+
+  it("a PDF being read says so after half a second, refuses a second drop, and the notice goes when main answers (2026-09-30)", async () => {
+    // A PDF's pictures are transcribed before its row appears — seconds with
+    // nothing on screen read as a dead drop target, and the dropped-again
+    // document was ingested twice.
+    vi.useFakeTimers();
+    try {
+      const { mock, answer } = heldAttach();
+      const { container, store } = renderAttached(mock);
+      const form = container.querySelector(".composer") as HTMLElement;
+      await act(async () => {
+        fireEvent.drop(form, fileDrop([{ name: "handout.pdf" }]));
+      });
+      // Not yet: a read that lands within half a second says nothing.
+      expect(store().getSnapshot().composerNotice).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(store().getSnapshot().composerNotice).toBe(
+        "Reading the PDF — its pictures take a few seconds",
+      );
+
+      await act(async () => {
+        fireEvent.drop(form, fileDrop([{ name: "handout.pdf" }]));
+      });
+      expect(mock.calls.attachFiles).toHaveLength(1);
+      expect(store().getSnapshot().composerNotice).toBe(
+        "Still reading the previous file",
+      );
+
+      await act(async () => {
+        answer({ ok: true });
+      });
+      expect(store().getSnapshot().composerNotice).toBeNull();
+
+      // Free again: the next drop goes through.
+      await act(async () => {
+        fireEvent.drop(form, fileDrop([{ name: "notes.md" }]));
+      });
+      expect(mock.calls.attachFiles).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a text file that reads quickly never flashes the notice — and a slow one does not mention PDF pictures", async () => {
+    vi.useFakeTimers();
+    try {
+      const quick = createMockHertaBridge();
+      const fast = renderAttached(quick);
+      await act(async () => {
+        fireEvent.drop(
+          fast.container.querySelector(".composer") as HTMLElement,
+          fileDrop([{ name: "notes.md" }]),
+        );
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(fast.store().getSnapshot().composerNotice).toBeNull();
+      fast.unmount();
+
+      const { mock, answer } = heldAttach();
+      const slow = renderAttached(mock);
+      await act(async () => {
+        fireEvent.drop(
+          slow.container.querySelector(".composer") as HTMLElement,
+          fileDrop([{ name: "big.md" }]),
+        );
+      });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(slow.store().getSnapshot().composerNotice).toBe(
+        "Reading the file",
+      );
+      await act(async () => {
+        answer({ ok: true });
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the send waits while a file is read: the button is disabled, Enter says why, and the words stay (review on #6)", async () => {
+    // attachFiles is idle-only: a turn started mid-read would make main refuse
+    // the whole attach at the end, transcripts already paid for.
+    const { mock, answer } = heldAttach();
+    const { container, store } = renderAttached(mock);
+    const form = container.querySelector(".composer") as HTMLFormElement;
+    await act(async () => {
+      fireEvent.drop(form, fileDrop([{ name: "handout.pdf" }]));
+    });
+    const input = screen.getByPlaceholderText(
+      "Message Herta…",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "solve question 3" } });
+    expect(screen.getByLabelText("Send message")).toBeDisabled();
+
+    fireEvent.submit(form);
+    expect(mock.calls.submitText).toHaveLength(0);
+    expect(input.value).toBe("solve question 3");
+    expect(store().getSnapshot().composerNotice).toBe(
+      "Sending waits until the file is read",
+    );
+
+    await act(async () => {
+      answer({ ok: true });
+    });
+    expect(store().getSnapshot().composerNotice).toBeNull();
+    expect(screen.getByLabelText("Send message")).not.toBeDisabled();
+    fireEvent.submit(form);
+    expect(mock.calls.submitText).toEqual(["solve question 3"]);
+  });
+
+  it("the reading notice never clears a newer notice", async () => {
+    vi.useFakeTimers();
+    try {
+      const { mock, answer } = heldAttach();
+      const { container, store } = renderAttached(mock);
+      const form = container.querySelector(".composer") as HTMLElement;
+      await act(async () => {
+        fireEvent.drop(form, fileDrop([{ name: "handout.pdf" }]));
+      });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      // Something else takes the notice lane while the file is read…
+      act(() => {
+        store().setComposerNotice("Files 板砖 edited stay edited");
+      });
+      await act(async () => {
+        answer({ ok: true });
+      });
+      // …and the answer leaves it alone.
+      expect(store().getSnapshot().composerNotice).toBe(
+        "Files 板砖 edited stay edited",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // ── Staged images (ADR 0048 §4) ─────────────────────────────────────────
 
   it("a dropped PICTURE stages instead of entering the record", async () => {
