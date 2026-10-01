@@ -25,6 +25,7 @@ import type {
 } from "@herta/app-server";
 import type { WorkspaceTrust } from "@herta/core";
 import type {
+  AttachProgressEvent,
   AttentionSettings,
   BackendConfig,
   DeepSeekKeyStatus,
@@ -311,6 +312,8 @@ export interface MockHertaBridge {
   emitResume(e: ResumeEvent): void;
   /** The live views of the call in flight (ADR 0073). */
   emitLive(e: LiveToolSnapshot): void;
+  /** Drive the pending attach row's progress (2026-10-01). */
+  emitAttachProgress(e: AttachProgressEvent): void;
 }
 
 const DEFAULT_SNAPSHOT: SessionSnapshot = {
@@ -340,6 +343,7 @@ export function createMockHertaBridge(
   const repoCbs = new Set<(e: RepoEvent) => void>();
   const resumeCbs = new Set<(e: ResumeEvent) => void>();
   const liveCbs = new Set<(e: LiveToolSnapshot) => void>();
+  const attachProgressCbs = new Set<(e: AttachProgressEvent) => void>();
   const voiceCbs = new Set<(e: VoiceCueEvent) => void>();
   const updateCbs = new Set<(e: UpdateState) => void>();
   const navBlockedCbs = new Set<(e: NavBlockedEvent) => void>();
@@ -1005,6 +1009,7 @@ export function createMockHertaBridge(
     onWorkspace: (cb) => sub(workspaceCbs, cb),
     onRepo: (cb) => sub(repoCbs, cb),
     onLive: (cb) => sub(liveCbs, cb),
+    onAttachProgress: (cb) => sub(attachProgressCbs, cb),
     refreshRepo: async () => {
       calls.refreshRepo += 1;
     },
@@ -1058,6 +1063,9 @@ export function createMockHertaBridge(
     },
     emitLive: (e) => {
       for (const cb of liveCbs) cb(e);
+    },
+    emitAttachProgress: (e) => {
+      for (const cb of attachProgressCbs) cb(e);
     },
     emitVoice: (e) => {
       for (const cb of voiceCbs) cb(e);

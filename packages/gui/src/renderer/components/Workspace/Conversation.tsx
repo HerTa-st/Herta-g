@@ -1,4 +1,4 @@
-import { Fragment, memo, useRef } from "react";
+import { Fragment, memo, useEffect, useRef } from "react";
 import { useHertaBridge } from "../../context/HertaBridgeContext.js";
 import { useActiveSession } from "../../hooks/useActiveSession.js";
 import { useReducedMotion } from "../../hooks/useReducedMotion.js";
@@ -8,6 +8,10 @@ import { GalaxyTravelRow } from "./GalaxyTravelRow.js";
 import { activityHasTerminalMarker } from "./group-record.js";
 import { MorphClone } from "./MorphClone.js";
 import { PendingActivity } from "./PendingActivity.js";
+import {
+  reportAttachProgress,
+  usePendingAttachRecord,
+} from "./pending-attach.js";
 import { RecapCompactRow } from "./RecapCompactRow.js";
 import { StreamingReply } from "./StreamingReply.js";
 import { SupervisorHoldRow } from "./SupervisorHoldRow.js";
@@ -169,11 +173,18 @@ export const Conversation = memo(function Conversation(): JSX.Element {
     pendingJump,
     sessionId,
   });
+  // The attach in flight's placeholder rows (pending-attach.ts): the rows
+  // render it, and the pinned follow treats its arrival like any new row.
+  const shownRecord = usePendingAttachRecord(sessionId, record, recordStart);
+  useEffect(() => {
+    if (bridge.onAttachProgress === undefined) return undefined;
+    return bridge.onAttachProgress(reportAttachProgress);
+  }, [bridge]);
   useTurnFollow({
     scroll,
     isFlightArmed: outgoing.isFlightArmed,
     reduced,
-    record,
+    record: shownRecord,
     pendingUser,
     status,
     showInFlight: inFlight.showInFlight,
@@ -198,7 +209,9 @@ export const Conversation = memo(function Conversation(): JSX.Element {
     t,
   });
   const { items, rows } = useConversationRows({
-    record,
+    // The attach in flight shows as placeholder rows after the record's last
+    // block — where its real blocks will land (pending-attach.ts).
+    record: shownRecord,
     recordStart,
     lang,
     status,

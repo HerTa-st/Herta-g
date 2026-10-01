@@ -1682,6 +1682,69 @@ button,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The pending row of an attach in flight (2026-10-01, the owner's pick
+   "Hairline" from the live gallery): the count at the right of the file
+   name, and a 2px line under it filling as main reads the pages and
+   transcribes the pictures. The name gives way first, like the ✕ row. */
+.activity-step__headline:has(.activity-step__progress-label)
+  .activity-step__body {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.activity-step__progress-label {
+  flex: none;
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--muted-4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.activity-step__progress {
+  height: 2px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: var(--ink-a06);
+  overflow: hidden;
+}
+.activity-step__progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--banzhuan-led) 78%, transparent);
+  transition: width 240ms var(--ease-out-soft);
+}
+/* The real row that replaced a placeholder: the full line fades AND folds,
+   so the row settles at its final height instead of losing 5px later. */
+.activity-step__progress.is-finishing {
+  animation: attach-progress-finish 300ms ease forwards;
+}
+@keyframes attach-progress-finish {
+  from {
+    opacity: 1;
+    height: 2px;
+    margin-top: 3px;
+  }
+  to {
+    opacity: 0;
+    height: 0;
+    margin-top: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-step__progress-fill {
+    transition: none;
+  }
+  .activity-step__progress.is-finishing {
+    animation: none;
+    height: 0;
+    margin-top: 0;
+    opacity: 0;
+  }
+}
 /* Attach (ADR 0033). A quiet ghost button, not a second primary: attaching is
    an occasional act beside an every-message one, and two filled circles either
    side of the input would read as a choice between them. Positioned for the

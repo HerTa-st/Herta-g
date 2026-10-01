@@ -17,6 +17,7 @@ import {
 } from "./staged-images.js";
 import type {
   AttachedFile,
+  AttachProgress,
   AttachResult,
   RemoveAttachmentResult,
   StageImagesResult,
@@ -167,7 +168,10 @@ export class SessionAttachments {
    * Idle-only, same guard and rationale as setWorkspace (audit 2026-07-10,
    * finding 13): `appendSystemBlock` is only safe between turns.
    */
-  async attachFiles(paths: readonly string[]): Promise<AttachResult> {
+  async attachFiles(
+    paths: readonly string[],
+    onProgress?: (progress: AttachProgress) => void,
+  ): Promise<AttachResult> {
     if (this.deps.turnInFlight()) {
       return { ok: false, reason: "turn_in_progress" };
     }
@@ -191,7 +195,18 @@ export class SessionAttachments {
     const ingested = [];
     // Read once per attach: one batch, one answer.
     const transcribePdfPictures = this.deps.transcribePdfPictures?.() ?? true;
-    for (const sourcePath of paths) {
+    // The pending row's progress (2026-10-01). A listener is display only:
+    // whatever it throws must never cost the ingest.
+    const report = (progress: AttachProgress): void => {
+      try {
+        onProgress?.(progress);
+      } catch {
+        // A display hook failing is not an attach failing.
+      }
+    };
+    for (const [index, sourcePath] of paths.entries()) {
+      // This file is being read now (the files after it are still waiting).
+      report({ index, stage: "pages", done: 0, total: 0 });
       ingested.push({
         sourcePath,
         result: await ingestAttachment({
@@ -201,8 +216,10 @@ export class SessionAttachments {
           lang: this.deps.lang,
           captionImage: this.deps.captionImage,
           transcribePdfPictures,
+          onProgress: (p) => report({ index, ...p }),
         }),
       });
+      report({ index, stage: "done", done: 0, total: 0 });
     }
 
     if (this.deps.turnInFlight()) {

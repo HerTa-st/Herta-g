@@ -1,6 +1,7 @@
 import type {
   ApprovalOverlayState,
   ApprovalResult,
+  AttachProgress,
   BranchList,
   CommitDescription,
   ContinueInterruptedResult,
@@ -33,6 +34,11 @@ import type {
 } from "@herta/app-server";
 import type { WorkspaceTrust } from "@herta/core";
 import type { LiveToolSnapshot } from "../../shared/live-tool-feed.js";
+
+/** One file's progress in an attach in flight, from main (2026-10-01). */
+export interface AttachProgressEvent extends AttachProgress {
+  readonly sessionId: string;
+}
 
 export type {
   LiveToolSnapshot,
@@ -871,6 +877,10 @@ export interface HertaBridge {
    *  fakes and the website demo omit it, and the trace card then shows the
    *  record's rows alone. */
   onLive?(cb: (e: LiveToolSnapshot) => void): () => void;
+  /** How far an attach in flight has got, per file (2026-10-01) — the
+   *  pending row's hairline. OPTIONAL: fakes and the website demo omit it,
+   *  and a pending row then shows its files without counts. */
+  onAttachProgress?(cb: (e: AttachProgressEvent) => void): () => void;
   /** Ask the active session to probe its repository again; the answer
    *  arrives through `onRepo`. The card asks on window focus. */
   refreshRepo?(): Promise<void>;

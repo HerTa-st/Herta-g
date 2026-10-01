@@ -90,6 +90,7 @@ import { SteerChannel } from "./steer-channel.js";
 import type {
   ApprovalResult,
   AppServerConfig,
+  AttachProgress,
   AttachResult,
   ContinueInterruptedResult,
   OverlayEvent,
@@ -1393,8 +1394,11 @@ export class SessionImpl implements Session {
 
   /** Ingest documents the 开拓者 handed over (ADR 0033) — see
    *  SessionAttachments.attachFiles. */
-  async attachFiles(paths: readonly string[]): Promise<AttachResult> {
-    const result = await this.attachments.attachFiles(paths);
+  async attachFiles(
+    paths: readonly string[],
+    onProgress?: (progress: AttachProgress) => void,
+  ): Promise<AttachResult> {
+    const result = await this.attachments.attachFiles(paths, onProgress);
     // The first readable document mounts `digest_document` for the next
     // brief (ADR 0067); later ones find it already there.
     if (result.ok && result.files.some((f) => f.unreadable === undefined)) {

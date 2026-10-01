@@ -21,6 +21,7 @@ import { stopAllVoice } from "../../voice/play-voice.js";
 import { Tooltip } from "../Tooltip/Tooltip.js";
 import { AuraVisual } from "../UtilityRail/AuraVisual.js";
 import { useLightbox } from "./ImageLightbox.js";
+import { endPendingAttach, startPendingAttach } from "./pending-attach.js";
 import { SendArrowIcon } from "./SendArrowIcon.js";
 import { useStagedImages } from "./useStagedImages.js";
 import { useWorkspaceRefs } from "./WorkspaceRefs.js";
@@ -65,9 +66,6 @@ function caretIsFree(form: HTMLElement | null): boolean {
 /** How long the rewind notice's slide-out runs before it unmounts. Must match
  *  the `.composer-notice.is-exiting` animation duration in reference-ux.css. */
 const NOTICE_EXIT_MS = 240;
-/** How long a document read runs before the composer says it is reading
- *  (review on #6): long enough that a text file never flashes the notice. */
-const READING_NOTICE_DELAY_MS = 500;
 
 /** How long the workspace's file list is reused before `@` lists it again
  *  (ADR 0072 §2) — a file 板砖 just created shows up on the next mention. */
@@ -204,47 +202,30 @@ export function Composer(): JSX.Element {
     sessionStore.setComposerNotice(text);
   }, [sessionStore, t]);
 
-  // A document's row appears only when main has read it — and, for a PDF,
-  // transcribed its pictures (2026-09-30): seconds with nothing on screen,
-  // which read as a dead drop target, and a user who drops again ingests the
-  // whole document twice. While a read is in flight a second batch is refused
-  // rather than queued, and the SEND waits: `attachFiles` is idle-only, so a
-  // turn started meanwhile makes main refuse the whole attach once it has read
-  // it, transcripts already paid for (review on #6). The notice speaks only
-  // once the read is slow enough to need it — a .md file lands in
-  // milliseconds and must not flash anything — and it is remembered like
-  // `turnNotice`, so the answer clears this notice and never a newer one.
+  // A document's record block arrives only when main has read it — and, for
+  // a PDF, transcribed its pictures (2026-09-30): seconds. The read in flight
+  // shows as the files' own rows with a hairline (2026-10-01, the owner's
+  // pick; pending-attach.ts), which replaced a "reading the file" notice here.
+  // While a read is in flight a second batch is refused rather than queued,
+  // and the SEND waits: `attachFiles` is idle-only, so a turn started
+  // meanwhile makes main refuse the whole attach once it has read it,
+  // transcripts already paid for (review on #6). The refusal notices are
+  // remembered like `turnNotice`, so the answer clears its own notice and
+  // never a newer one.
   const reading = useRef(false);
   const [readingDoc, setReadingDoc] = useState(false);
   const readingNotice = useRef<string | null>(null);
-  const readingTimer = useRef<number | null>(null);
-  const stopReadingTimer = (): void => {
-    if (readingTimer.current !== null) {
-      window.clearTimeout(readingTimer.current);
-      readingTimer.current = null;
-    }
-  };
   const showReadingNotice = (text: string): void => {
-    stopReadingTimer();
     readingNotice.current = text;
     sessionStore.setComposerNotice(text);
   };
   const clearReadingNotice = (): void => {
-    stopReadingTimer();
     const shown = readingNotice.current;
     readingNotice.current = null;
     if (shown !== null && sessionStore.getSnapshot().composerNotice === shown) {
       sessionStore.clearComposerNotice();
     }
   };
-  // The pending notice timer must not fire into an unmounted composer.
-  useEffect(
-    () => () => {
-      if (readingTimer.current !== null)
-        window.clearTimeout(readingTimer.current);
-    },
-    [],
-  );
 
   // Staged pictures (ADR 0048 §4). Refusals go through the same notice lane
   // every other composer refusal uses.
@@ -668,18 +649,18 @@ export function Composer(): JSX.Element {
     }
     reading.current = true;
     setReadingDoc(true);
-    const readingText = t(
-      docs.some((p) => /\.pdf$/i.test(p))
-        ? "composer.attach.readingPdf"
-        : "composer.attach.reading",
-    );
-    readingTimer.current = window.setTimeout(() => {
-      readingTimer.current = null;
-      showReadingNotice(readingText);
-    }, READING_NOTICE_DELAY_MS);
+    // The read shows as the files' own rows, with a hairline (2026-10-01,
+    // pending-attach.ts) — placed where the record blocks will land.
+    const snap = sessionStore.getSnapshot();
+    const pendingId = startPendingAttach({
+      sessionId,
+      names: docs.map((p) => p.split(/[\\/]/).at(-1) ?? p),
+      baseAbs: snap.recordStart + snap.record.length,
+    });
     void bridge
       .attachFiles(sessionId, docs)
       .then((r) => {
+        endPendingAttach(pendingId, r.ok);
         clearReadingNotice();
         // Refusals are SHOWN. `attachFiles` is idle-only, and a drop that
         // silently did nothing mid-turn would read as a broken drop target
@@ -699,6 +680,7 @@ export function Composer(): JSX.Element {
       // A rejected IPC call (handler threw) must land in the same notice, not
       // as an unhandled rejection with a drop that looked like it worked.
       .catch(() => {
+        endPendingAttach(pendingId, false);
         clearReadingNotice();
         sessionStore.setComposerNotice(t("composer.attach.failed"));
       })

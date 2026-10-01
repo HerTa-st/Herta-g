@@ -283,6 +283,21 @@ export interface AttachedFile {
   readonly unreadable?: string;
 }
 
+/**
+ * How far one file of an attach has got (2026-10-01): what the pending row's
+ * progress line shows while main reads. `index` is the file's place in the
+ * batch. Per file, in order: `pages` (the text and the picture search, page
+ * by page; `total` 0 = not paged, a Word file), `transcripts` (a PDF's
+ * pictures, counted as each call finishes), then `done`. Display only —
+ * nothing decides anything on it.
+ */
+export interface AttachProgress {
+  readonly index: number;
+  readonly stage: "pages" | "transcripts" | "done";
+  readonly done: number;
+  readonly total: number;
+}
+
 /** Result of `attachFiles`. Idle-only for the same reason as setWorkspace —
  *  it rides the same out-of-turn append. `too_many` guards the per-action cap
  *  rather than silently ingesting a prefix. */
@@ -730,7 +745,11 @@ export interface Session {
    *  session's attachment directory and append one → 系统 block per file.
    *  Idle-only, like setWorkspace — it rides the same out-of-turn append.
    *  Optional: only the GUI SessionImpl implements it. */
-  attachFiles?(paths: readonly string[]): Promise<AttachResult>;
+  attachFiles?(
+    paths: readonly string[],
+    /** How far each file has got, while it is read (2026-10-01). */
+    onProgress?: (progress: AttachProgress) => void,
+  ): Promise<AttachResult>;
   /** Take back an attached document: delete the stored file and mark every
    *  block citing it removed. Idle-only, like attachFiles. */
   removeAttachment?(path: string): Promise<RemoveAttachmentResult>;

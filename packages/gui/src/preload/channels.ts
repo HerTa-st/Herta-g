@@ -103,6 +103,7 @@ export const EVT = {
   repo: "session:repo",
   resume: "session:resume",
   live: "session:live",
+  attachProgress: "session:attachProgress",
   windowMaximized: "window:maximized",
   windowFullScreen: "window:fullScreen",
   openSettings: "app:openSettings",

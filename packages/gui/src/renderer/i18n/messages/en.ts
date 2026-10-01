@@ -274,7 +274,7 @@ export const en = {
     "On: a lit object. Off: a flat picture, easier on the GPU.",
   "banzhuan.pdfPictures": "Transcribe PDF pictures",
   "banzhuan.pdfPicturesDesc":
-    "When a PDF is attached, its pictures, such as formulas and tables, are transcribed into text by the vision model. One call per picture, at most 40 per document. When off, the pictures are still stored, and it can still look at them. Applies immediately.",
+    "When a PDF is attached, a model transcribes its pictures into text, at most 40 calls per document. When off, the pictures are still stored, and it can still look at them. Applies immediately.",
   "approval.title": "Permission request",
   "approval.allow": "Allow",
   "approval.alwaysAllow": "Allow for this task",
@@ -350,12 +350,8 @@ export const en = {
     "The current turn is still in progress — files cannot be added",
   "composer.attach.tooMany": "Ten files at most",
   "composer.attach.failed": "Adding files failed",
-  // While a document is read (2026-09-30) — a PDF's pictures are transcribed
-  // before its row appears, which can take a few seconds. Shown only once a
-  // read has run half a second; the send waits for the read.
-  "composer.attach.reading": "Reading the file",
-  "composer.attach.readingPdf":
-    "Reading the PDF — its pictures take a few seconds",
+  // While a document is read (2026-09-30): the read itself shows as the
+  // file's row with a hairline (2026-10-01); these answer the user's acts.
   "composer.attach.stillReading": "Still reading the previous file",
   "composer.attach.waitToSend": "Sending waits until the file is read",
   "composer.attach.denied": "Credential-shaped — refused",
@@ -477,6 +473,12 @@ export const en = {
   "activity.attachment.pages": "pages",
   "activity.attachment.extracted": "text extracted",
   "activity.attachment.outline": "outline · {n} entries",
+  // The pending row of an attach in flight (2026-10-01).
+  "activity.attachment.progress.waiting": "waiting",
+  "activity.attachment.progress.reading": "reading",
+  "activity.attachment.progress.page": "page {done} of {total}",
+  "activity.attachment.progress.pictures":
+    "transcribing pictures {done} of {total}",
   "activity.attachment.remove": "Remove this attachment",
   "activity.attachment.removeFailed": "Removing the attachment failed",
   "activity.attachment.removeInUse":

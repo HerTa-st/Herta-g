@@ -8,6 +8,12 @@ import {
 } from "react";
 import type { TFn } from "../../i18n/LocaleProvider.js";
 import { Tooltip } from "../Tooltip/Tooltip.js";
+import {
+  AttachProgressBar,
+  AttachProgressFinish,
+  AttachProgressLabel,
+} from "./AttachProgressLine.js";
+import type { AttachProgressFrame } from "./attach-progress.js";
 import { CollapsibleBody } from "./CollapsibleBody.js";
 import { useUnpinConversation } from "./ConversationPin.js";
 import { DiffBody } from "./DiffBody.js";
@@ -110,6 +116,15 @@ export interface ActivityStepProps {
   /** Click targets inside the DETAIL pane (the done-marker's
    *  `↳ 改动文件:` list). Same contract as `links`. */
   readonly detailLinks?: readonly FileLinkTarget[];
+  /** A PLACEHOLDER row of an attach in flight (2026-10-01): which file of
+   *  the batch it stands for, and how its count reads (session language). */
+  readonly progress?: {
+    readonly index: number;
+    readonly label: (frame: AttachProgressFrame | undefined) => string;
+  };
+  /** The real row that just took a placeholder's place: its hairline fades
+   *  and folds away instead of vanishing. */
+  readonly progressFinishing?: boolean;
 }
 
 export interface FileLinkTarget {
@@ -341,6 +356,12 @@ export const ActivityStep = memo(function ActivityStep(
                   }
                 : {})}
             />
+            {props.progress !== undefined && (
+              <AttachProgressLabel
+                index={props.progress.index}
+                label={props.progress.label}
+              />
+            )}
             {props.onRemove !== undefined && (
               // The app's styled pill, not the native `title` (owner
               // 2026-08-10 — the same OS-beige-box mismatch the paperclip had),
@@ -379,6 +400,12 @@ export const ActivityStep = memo(function ActivityStep(
               </Tooltip>
             )}
           </div>
+        )}
+        {props.progress !== undefined && (
+          <AttachProgressBar index={props.progress.index} />
+        )}
+        {props.progress === undefined && props.progressFinishing === true && (
+          <AttachProgressFinish />
         )}
         {patch !== undefined && (
           <div

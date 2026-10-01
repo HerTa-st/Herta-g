@@ -60,6 +60,7 @@ import {
   normalizeModelChoice,
   readAppSettings,
 } from "./app-settings.js";
+import { createAttachProgressRelay } from "./attach-progress-relay.js";
 import {
   type AttentionPrefs,
   DEFAULT_ATTENTION_PREFS,
@@ -961,7 +962,17 @@ export function createSessionService(
         if (s.attachFiles === undefined) {
           return { ok: false as const, message: "attachments unavailable" };
         }
-        const r = await s.attachFiles(paths);
+        // The pending row's hairline (2026-10-01): each file's pages and
+        // transcripts as they go, throttled per file, the last always sent.
+        const relay = createAttachProgressRelay((p) =>
+          send(EVT.attachProgress, { sessionId, ...p }),
+        );
+        let r: Awaited<ReturnType<typeof s.attachFiles>>;
+        try {
+          r = await s.attachFiles(paths, relay.push);
+        } finally {
+          relay.flush();
+        }
         if (r.ok) return { ok: true as const };
         // Each refusal gets its own words: "a turn is in progress" is a
         // retry-in-a-moment, "too many files" is a do-something-different.

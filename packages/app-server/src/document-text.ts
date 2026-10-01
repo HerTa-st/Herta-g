@@ -163,6 +163,10 @@ export interface ExtractOptions {
    *  `pdf-pictures.ts`) and mark each one's place in the text. Off by default
    *  — a caller that asks must also put something where each token stands. */
   readonly pictures?: boolean;
+  /** PDF only: called with 0 once the document is open and with each page
+   *  number as that page is done — the pending row's progress (2026-10-01).
+   *  Display only; whatever it throws is swallowed. */
+  readonly onPage?: (done: number, total: number) => void;
 }
 
 export async function extractDocumentText(
@@ -307,6 +311,16 @@ async function extractPdfText(
     let body = 0;
     const pictures: PdfPicture[] = [];
     const scan = opts.pictures === true ? startPictureScan() : undefined;
+    // The pending row's progress (2026-10-01): display only, so a listener
+    // that throws costs nothing here.
+    const onPage = (done: number): void => {
+      try {
+        opts.onPage?.(done, pages);
+      } catch {
+        // A display hook failing is not an extraction failing.
+      }
+    };
+    onPage(0);
     for (let p = 1; p <= pages; p += 1) {
       // Back to the event loop between pages. pdfjs runs here on its
       // in-process "fake worker", whose message port dispatches through
@@ -352,6 +366,7 @@ async function extractPdfText(
       } finally {
         page.cleanup();
       }
+      onPage(p);
     }
     // "Empty" is judged on the document's OWN text: a scan carries no text
     // and the markers alone must not turn it into a stored file of headings

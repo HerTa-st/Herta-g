@@ -275,6 +275,14 @@ export function boundCaption(raw: string): string {
     : oneLine;
 }
 
+/** A document's progress while it is read (2026-10-01): its pages, then its
+ *  pictures' transcripts. `total` 0 = not paged (a Word file). */
+export interface DocumentProgress {
+  readonly stage: "pages" | "transcripts";
+  readonly done: number;
+  readonly total: number;
+}
+
 export interface IngestedAttachment {
   /** The record block to append. Already sanitized. */
   readonly block: SystemBlock;
@@ -539,6 +547,7 @@ async function ingestDocument(opts: {
   /** Transcribes a PDF's pictures (see `storePictures`). Null stores them
    *  untranscribed. */
   readonly caption: ImageCaptioner | null;
+  readonly onProgress?: (progress: DocumentProgress) => void;
 }): Promise<IngestedAttachment> {
   const { format, displayName } = opts;
   const baseName = safeStoredName(displayName, opts.bytes);
@@ -548,9 +557,16 @@ async function ingestDocument(opts: {
     storedName: baseName,
     bytes: opts.bytes,
   });
+  const onProgress = opts.onProgress;
   const extracted = await extractDocumentText(format, opts.bytes, {
     lang: opts.lang,
     pictures: format === "pdf",
+    ...(onProgress !== undefined
+      ? {
+          onPage: (done: number, total: number) =>
+            onProgress({ stage: "pages", done, total }),
+        }
+      : {}),
   });
   if (!extracted.ok) {
     const doc = {
@@ -579,6 +595,12 @@ async function ingestDocument(opts: {
           sessionId: opts.sessionId,
           lang: opts.lang,
           caption: opts.caption,
+          ...(onProgress !== undefined
+            ? {
+                onTranscript: (done: number, total: number) =>
+                  onProgress({ stage: "transcripts", done, total }),
+              }
+            : {}),
         })
       : extracted.text;
   const doc = {
@@ -720,6 +742,9 @@ async function storePictures(
     readonly sessionId: string;
     readonly lang: PageMarkerLang;
     readonly caption: ImageCaptioner | null;
+    /** Each finished transcript, counted (success or not): the pending
+     *  row's progress (2026-10-01). */
+    readonly onTranscript?: (done: number, total: number) => void;
   },
 ): Promise<string> {
   interface Stored {
@@ -758,36 +783,52 @@ async function storePictures(
     const queue = written
       .filter((entry) => entry.png.length <= MAX_CAPTION_IMAGE_BYTES)
       .slice(0, MAX_PICTURE_TRANSCRIPTS);
+    const transcribe = async (entry: Stored): Promise<void> => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (entry.transcript !== undefined || budget.aborted) break;
+        try {
+          const raw = await caption(
+            {
+              system: prompt.system,
+              user: prompt.user,
+              imageDataUri: `data:image/png;base64,${entry.png.toString("base64")}`,
+            },
+            AbortSignal.any([
+              budget,
+              AbortSignal.timeout(PICTURE_TRANSCRIPT_TIMEOUT_MS),
+            ]),
+          );
+          const oneLine = redactSecrets(raw).replace(/\s+/g, " ").trim();
+          if (oneLine !== "") {
+            entry.transcript =
+              oneLine.length > MAX_PICTURE_TRANSCRIPT_CHARS
+                ? `${oneLine.slice(0, MAX_PICTURE_TRANSCRIPT_CHARS)}…`
+                : oneLine;
+          }
+        } catch {
+          // Timed out, refused, truncated: the next attempt, or no transcript.
+        }
+      }
+    };
     let next = 0;
+    let finished = 0;
+    // Display only: a listener that throws must not stop a lane.
+    const tick = (done: number): void => {
+      try {
+        opts.onTranscript?.(done, queue.length);
+      } catch {
+        // A display hook failing is not a transcription failing.
+      }
+    };
+    tick(0);
     const lane = async (): Promise<void> => {
       while (next < queue.length) {
         const entry = queue[next] as Stored;
         next += 1;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          if (entry.transcript !== undefined || budget.aborted) break;
-          try {
-            const raw = await caption(
-              {
-                system: prompt.system,
-                user: prompt.user,
-                imageDataUri: `data:image/png;base64,${entry.png.toString("base64")}`,
-              },
-              AbortSignal.any([
-                budget,
-                AbortSignal.timeout(PICTURE_TRANSCRIPT_TIMEOUT_MS),
-              ]),
-            );
-            const oneLine = redactSecrets(raw).replace(/\s+/g, " ").trim();
-            if (oneLine !== "") {
-              entry.transcript =
-                oneLine.length > MAX_PICTURE_TRANSCRIPT_CHARS
-                  ? `${oneLine.slice(0, MAX_PICTURE_TRANSCRIPT_CHARS)}…`
-                  : oneLine;
-            }
-          } catch {
-            // Timed out, refused, truncated: the next attempt, or no transcript.
-          }
-        }
+        // Counted however it ends — a transcript, a refusal, the budget.
+        await transcribe(entry);
+        finished += 1;
+        tick(finished);
       }
     };
     await Promise.all(
@@ -1116,6 +1157,9 @@ export async function ingestAttachment(opts: {
    *  this switch is the per-picture cost of a DOCUMENT, up to
    *  `MAX_PICTURE_TRANSCRIPTS` calls for one attach. */
   readonly transcribePdfPictures?: boolean;
+  /** How far a document has got (2026-10-01): its pages as they are read,
+   *  then its pictures' transcripts as each finishes. Display only. */
+  readonly onProgress?: (progress: DocumentProgress) => void;
 }): Promise<IngestedAttachment> {
   const displayName = opts.displayName ?? basename(opts.sourcePath);
 
@@ -1175,6 +1219,7 @@ export async function ingestAttachment(opts: {
         opts.transcribePdfPictures === false
           ? null
           : (opts.captionImage ?? null),
+      ...(opts.onProgress !== undefined ? { onProgress: opts.onProgress } : {}),
     });
   }
 

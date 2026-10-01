@@ -31,6 +31,55 @@ function handout(shade: number): Buffer {
   });
 }
 
+describe("SessionAttachments — progress while a batch is read (2026-10-01)", () => {
+  it("reports each file in order: its pages, its transcripts as each finishes, then done — and a throwing listener costs nothing", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "herta-attach-progress-"));
+    const src = mkdtempSync(join(tmpdir(), "herta-attach-progress-src-"));
+    dirs.push(ws, src);
+    const record: TerminalRecordBlock[] = [];
+    const attachments = new SessionAttachments({
+      sessionId: "s1",
+      lang: "zh",
+      wsHolder: { current: ws },
+      captionImage: async () => "\\mathbf{w}",
+      turnInFlight: () => false,
+      driver: {
+        getRecord: () => record as TerminalRecord,
+        appendSystemBlock: (b: TerminalRecordBlock) => {
+          record.push(b);
+        },
+        replaceBlockAt: (i: number, b: TerminalRecordBlock) => {
+          record[i] = b;
+        },
+      } as never,
+      onAppended: () => {},
+      onReplaced: () => {},
+    });
+    writeFileSync(join(src, "handout.pdf"), handout(30));
+    writeFileSync(join(src, "notes.md"), "# notes\n");
+    const seen: string[] = [];
+    const r = await attachments.attachFiles(
+      [join(src, "handout.pdf"), join(src, "notes.md")],
+      (p) => {
+        seen.push(`${p.index}:${p.stage}:${p.done}/${p.total}`);
+        throw new Error("a broken listener");
+      },
+    );
+    expect(r.ok).toBe(true);
+    expect(record).toHaveLength(2);
+    expect(seen).toEqual([
+      "0:pages:0/0", // the file is being read now
+      "0:pages:0/1", // the PDF opened: one page
+      "0:pages:1/1",
+      "0:transcripts:0/1",
+      "0:transcripts:1/1",
+      "0:done:0/0",
+      "1:pages:0/0", // the second file's turn
+      "1:done:0/0",
+    ]);
+  });
+});
+
 describe("SessionAttachments — the PDF-picture switch (2026-10-01)", () => {
   it("reads the user's switch at EACH attach: off sends nothing to the instrument, on transcribes", async () => {
     const ws = mkdtempSync(join(tmpdir(), "herta-attach-switch-"));

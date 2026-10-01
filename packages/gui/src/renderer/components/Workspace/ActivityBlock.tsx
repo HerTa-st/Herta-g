@@ -1,5 +1,6 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -18,6 +19,7 @@ import {
   type FileLinkTarget,
   textWithLinks,
 } from "./ActivityStep.js";
+import type { AttachProgressFrame } from "./attach-progress.js";
 import { useUnpinConversation } from "./ConversationPin.js";
 import { DiffStat, type DiffStatValue } from "./DiffStat.js";
 import { type DiffSummary, summarizeDiff } from "./diff-summary.js";
@@ -31,6 +33,7 @@ import {
   type SystemBlock,
 } from "./group-record.js";
 import { composeMarkerSummary } from "./marker-summary.js";
+import { isAttachHandoff, pendingAttachIndex } from "./pending-attach.js";
 import { SwapText } from "./SwapText.js";
 import {
   latestOpStep,
@@ -54,6 +57,10 @@ interface RowView {
   readonly removeLabel: string | undefined;
   readonly file: ActivityStepProps["file"];
   readonly links: ActivityStepProps["links"];
+  /** A placeholder of the attach in flight (2026-10-01). */
+  readonly progress: ActivityStepProps["progress"];
+  /** A real row that just replaced a placeholder. */
+  readonly progressFinishing: boolean;
 }
 
 export interface ActivityBlockProps {
@@ -149,6 +156,30 @@ export const ActivityBlock = memo(function ActivityBlock(
   const inFlightCount = props.inFlightCount ?? 1;
   const onRemoveAttachment = props.onRemoveAttachment;
   const t = useMemo(() => makeT(lang), [lang]);
+  // A placeholder row's count (2026-10-01), in the session's language like
+  // every string in the row. One function per language, so the rows' views
+  // stay identity-stable across frames.
+  const progressLabel = useCallback(
+    (f: AttachProgressFrame | undefined): string => {
+      if (f === undefined || f.stage === "done") return "";
+      if (f.stage === "waiting")
+        return t("activity.attachment.progress.waiting");
+      if (f.stage === "transcripts") {
+        return t("activity.attachment.progress.pictures", {
+          done: f.done,
+          total: f.total,
+        });
+      }
+      return f.total > 0
+        ? t("activity.attachment.progress.page", {
+            // The page being read, not the pages finished.
+            done: Math.min(f.done + 1, f.total),
+            total: f.total,
+          })
+        : t("activity.attachment.progress.reading");
+    },
+    [t],
+  );
   // Everything derived from the blocks, once per `blocks` identity
   // (2026-09-03): the live group re-renders at 1 Hz for its duration and on
   // every in-flight tool call, and every group re-renders at a turn
@@ -470,8 +501,24 @@ export const ActivityBlock = memo(function ActivityBlock(
                       : (b.digest.source as string),
                   )
                 : undefined;
+            // A placeholder of the attach in flight (2026-10-01) says only
+            // which file it is — its counts ride the hairline; the record
+            // block that replaces it states the rest.
+            const pendingIndex = pendingAttachIndex(b);
+            const pendingName =
+              pendingIndex !== undefined && b.digest?.kind === "attachment"
+                ? b.digest.name
+                : undefined;
             return {
-              body: stepDisplayBody(b, t),
+              body:
+                pendingName !== undefined
+                  ? `${t("activity.attachment.label")} ${middleTruncateName(pendingName)}`
+                  : stepDisplayBody(b, t),
+              progress:
+                pendingIndex !== undefined
+                  ? { index: pendingIndex, label: progressLabel }
+                  : undefined,
+              progressFinishing: isAttachHandoff(b),
               // Icon parses the CANONICAL body — the display body may be a
               // localized verb stepIcon can't recognize. Failure and
               // attachment rows key off the structured digest instead.
@@ -506,7 +553,7 @@ export const ActivityBlock = memo(function ActivityBlock(
               links,
             };
           }),
-    [rows, t, openFile, onRemoveAttachment, rowsMounted],
+    [rows, t, openFile, onRemoveAttachment, rowsMounted, progressLabel],
   );
 
   // Animated reveal of the history (bug 2). The panel is always mounted (when
@@ -723,6 +770,12 @@ export const ActivityBlock = memo(function ActivityBlock(
                     removeLabel={rv.removeLabel}
                     file={rv.file}
                     links={rv.links}
+                    {...(rv.progress !== undefined
+                      ? { progress: rv.progress }
+                      : {})}
+                    {...(rv.progressFinishing
+                      ? { progressFinishing: true }
+                      : {})}
                   />
                 );
               })}

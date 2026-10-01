@@ -251,7 +251,7 @@ export const zh = {
   "banzhuan.sceneDesc": "开：一块打了光的实物；关：平面图，省显卡。",
   "banzhuan.pdfPictures": "转写 PDF 图片",
   "banzhuan.pdfPicturesDesc":
-    "附加 PDF 时，把其中的公式、表格等图片交给视觉模型转写成文字。每张图片调用一次，每份文档至多 40 次。关闭后图片照常保存，它仍能查看原图。立即生效。",
+    "附加 PDF 时，调用模型将图片信息转写为文本，每份文档至多 40 次。关闭后图片照常保存，它仍能查看原图。立即生效。",
   "approval.title": "请求权限",
   "approval.allow": "同意",
   "approval.alwaysAllow": "任务内同意",
@@ -330,11 +330,8 @@ export const zh = {
   "composer.attach.busy": "当前回合尚未结束，无法添加文件",
   "composer.attach.tooMany": "最多十个文件",
   "composer.attach.failed": "文件加载失败",
-  // While a document is read (2026-09-30) — a PDF's pictures are transcribed
-  // before its row appears, which can take a few seconds. Shown only once a
-  // read has run half a second; the send waits for the read.
-  "composer.attach.reading": "正在读取文件",
-  "composer.attach.readingPdf": "正在读取 PDF，里面的图片需要几秒",
+  // While a document is read (2026-09-30): the read itself shows as the
+  // file's row with a hairline (2026-10-01); these answer the user's acts.
   "composer.attach.stillReading": "上一个文件还在读取",
   "composer.attach.waitToSend": "文件读完才能发送",
   "composer.attach.denied": "涉及密钥或凭据，上传失败",
@@ -458,6 +455,11 @@ export const zh = {
   "activity.attachment.extracted": "已提取文本",
   /** The document's own outline, stored beside the text (2026-08-23). */
   "activity.attachment.outline": "目录 {n} 条",
+  // The pending row of an attach in flight (2026-10-01).
+  "activity.attachment.progress.waiting": "等待中",
+  "activity.attachment.progress.reading": "读取中",
+  "activity.attachment.progress.page": "读取第 {done}/{total} 页",
+  "activity.attachment.progress.pictures": "转写图片 {done}/{total}",
   "activity.attachment.remove": "移除这个附件",
   "activity.attachment.removeFailed": "移除附件失败",
   "activity.attachment.removeInUse": "附件正被其他程序占用，关闭后再移除",
