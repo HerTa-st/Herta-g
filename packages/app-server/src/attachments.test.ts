@@ -1068,6 +1068,28 @@ describe("document attachments — a PDF's pictures (2026-09-30)", () => {
   const storedText = (relPath: string) =>
     readFileSync(join(ws, ...relPath.split("/")), "utf8");
 
+  it("with the user's switch off, pictures are stored and cited but never sent to the instrument (2026-10-01)", async () => {
+    const caption = captioner(() => "should not be asked");
+    const r = await ingestAttachment({
+      sourcePath: seed("handout.pdf", handout([formula(7), formula(9, 670)])),
+      workspaceRoot: ws,
+      sessionId: "s1",
+      lang: "zh",
+      captionImage: caption,
+      transcribePdfPictures: false,
+    });
+    expect(caption.calls).toHaveLength(0);
+    const cited = storedText(r.relPath)
+      .split("\n")
+      .filter((l) => l.startsWith("[图 "));
+    expect(cited).toHaveLength(2);
+    for (const line of cited) {
+      expect(line).toMatch(
+        /^\[图 1-\d · \S+\.png\]（未转写，可用 view_image 查看原图）$/,
+      );
+    }
+  });
+
   it("stores each picture beside the text and writes its line — path and transcript — where it sat", async () => {
     const caption = captioner(() => "A=\begin{bmatrix}1&2end{bmatrix}");
     const r = await ingestPdf(handout([formula(7)]), caption);
@@ -1131,7 +1153,11 @@ describe("document attachments — a PDF's pictures (2026-09-30)", () => {
     );
   });
 
-  it("the same picture drawn twice is stored and transcribed once, and keeps one line — a repeat is chrome (review on #6)", async () => {
+  it("the same picture used in two places is stored and transcribed once, and BOTH places cite it (2026-10-01)", async () => {
+    // Content used twice — a formula two questions both show — keeps a line
+    // at each place; only a repeat at the same place on another page is
+    // chrome (document-text.test.ts). The first cut of the dedupe dropped the
+    // second line here.
     const caption = captioner(() => "\\mathbb{R}^3");
     const r = await ingestPdf(
       handout([formula(5, 610), formula(5, 670)]),
@@ -1141,8 +1167,11 @@ describe("document attachments — a PDF's pictures (2026-09-30)", () => {
     const cited = storedText(r.relPath)
       .split("\n")
       .filter((l) => l.startsWith("[图 "));
-    expect(cited).toHaveLength(1);
-    expect(cited[0]).toMatch(/^\[图 1-1 · \S+\.png\] 自动转写：/);
+    expect(cited).toHaveLength(2);
+    const files = cited.map((l) => /· (\S+\.png)\]/.exec(l)?.[1]);
+    expect(files[0]).toBeDefined();
+    expect(files[1]).toBe(files[0]);
+    for (const line of cited) expect(line).toContain("自动转写：\\mathbb{R}^3");
     const pngs = readdirSync(join(ws, ".herta", "attachments", "s1")).filter(
       (f) => f.endsWith(".png"),
     );

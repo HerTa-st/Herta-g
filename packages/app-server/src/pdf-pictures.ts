@@ -56,6 +56,21 @@ export const PICTURE_SCAN_BUDGET_MS = 20_000;
  */
 export const FULL_PAGE_SHARE = 0.85;
 
+/**
+ * Images larger than this, in pixels, are never decoded for the picture search
+ * (2026-10-01): pdfjs is opened with it as `maxImageSize`, and its evaluator
+ * drops such an image from the operator list BEFORE decoding it. The full-page
+ * rule above runs only once pdfjs has decoded the image — and pdfjs decodes on
+ * the main process, inside `getOperatorList`: a 30-page OCR'd scan at 300 dpi
+ * still spent ~11 s there, in ~0.4 s freezes per page, to collect nothing
+ * (96 % of it pdfjs's JPEG decoder, profiled). A page scanned at 300 dpi is
+ * 8.4–8.7 megapixels; a formula, a table or a diagram in a handout is a small
+ * fraction of this. The trade-off is owned: a genuine picture above it is not
+ * kept (the owner's pick over a background thread, 2026-10-01). Text
+ * extraction never decodes images, so it is unaffected.
+ */
+export const MAX_PICTURE_DECODE_PIXELS = 4_000_000;
+
 /** Smaller than this in pixels on either side: a rule, a bullet, a spacer. */
 const MIN_PICTURE_SIDE_PX = 8;
 
@@ -95,20 +110,54 @@ export interface PdfPicture {
   readonly png: Buffer;
 }
 
+/** Where a picture was drawn: its page and its box in user space. */
+interface DrawnBox {
+  readonly page: number;
+  readonly left: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** A picture already collected: its PNG (a repeat reuses it — one file, one
+ *  transcript) and every place it was drawn. */
+interface SeenPicture {
+  readonly png: Buffer;
+  readonly boxes: DrawnBox[];
+}
+
 /** What one document's search spends from and remembers: the distinct
  *  pictures still allowed, the deadline, and the pixels already collected. */
 export interface PictureScan {
   remaining: number;
   readonly deadline: number;
-  readonly seen: Set<string>;
+  readonly seen: Map<string, SeenPicture>;
 }
 
 export function startPictureScan(now: number = Date.now()): PictureScan {
   return {
     remaining: MAX_PDF_PICTURES,
     deadline: now + PICTURE_SCAN_BUDGET_MS,
-    seen: new Set(),
+    seen: new Map(),
   };
+}
+
+/** How far apart, in points, two draws of the same picture may be and still
+ *  be "the same place" — a letterhead is placed by the same template on every
+ *  page, to well within this. */
+const SAME_PLACE_PT = 1;
+
+/** Whether `box` repeats a draw of the same picture at the same place on
+ *  ANOTHER page: page chrome (a letterhead, a footer logo), not content. */
+function isChromeRepeat(seen: SeenPicture, box: DrawnBox): boolean {
+  return seen.boxes.some(
+    (b) =>
+      b.page !== box.page &&
+      Math.abs(b.left - box.left) <= SAME_PLACE_PT &&
+      Math.abs(b.bottom - box.bottom) <= SAME_PLACE_PT &&
+      Math.abs(b.width - box.width) <= SAME_PLACE_PT &&
+      Math.abs(b.height - box.height) <= SAME_PLACE_PT,
+  );
 }
 
 /** Whether page `page` (1-based) may still be searched. */
@@ -205,11 +254,16 @@ function yielder(): () => Promise<void> {
  * picture). An object id beginning `g_` lives in the document-wide store — the
  * same rule pdfjs's own canvas code follows.
  *
- * Two more are left out, both before any pixel is encoded: a picture covering
- * most of a page that has text (`FULL_PAGE_SHARE`), and a picture whose pixels
- * the document already showed — a letterhead logo on every page is chrome, so
- * its first appearance keeps the only line and the repeats neither add lines
- * nor spend `MAX_PDF_PICTURES`.
+ * A picture covering most of a page that has text (`FULL_PAGE_SHARE`) is left
+ * out before any pixel is read. A picture whose pixels the document already
+ * showed is never encoded again, and never spends `MAX_PDF_PICTURES`; what it
+ * becomes depends on where it is drawn (2026-10-01). At the same place as on
+ * an earlier page it is page chrome — a letterhead, a footer logo — and adds
+ * no line: its first appearance keeps the only one. Anywhere else it is
+ * content used twice, a formula two questions both show, and it gets a line
+ * there too, citing the same stored file and transcript. (The first cut of
+ * this rule dropped every repeat, which took the second question's formula
+ * with the letterhead.)
  *
  * Never throws: a page whose operator list will not build, or a picture that
  * will not decode, just contributes fewer pictures — the text is the
@@ -219,7 +273,12 @@ export async function collectPagePictures(
   page: PicturePage,
   pdfjs: Pick<PdfJs, "OPS" | "ImageKind">,
   scan: PictureScan,
-  opts: { readonly pageHasText: boolean },
+  opts: {
+    readonly pageHasText: boolean;
+    /** 1-based; tells a letterhead (same place, another page) from content
+     *  used twice. */
+    readonly page: number;
+  },
 ): Promise<PagePicture[]> {
   const { OPS } = pdfjs;
   let list: Awaited<ReturnType<PicturePage["getOperatorList"]>>;
@@ -299,7 +358,22 @@ export async function collectPagePictures(
           )
         : draw.ref;
     const key = await pixelKey(data);
-    if (key === null || scan.seen.has(key)) continue;
+    if (key === null) continue;
+    const box: DrawnBox = {
+      page: opts.page,
+      left,
+      bottom,
+      width,
+      height: top - bottom,
+    };
+    const seen = scan.seen.get(key);
+    if (seen !== undefined) {
+      // Never encoded twice, never counted twice; chrome adds no line.
+      const chrome = isChromeRepeat(seen, box);
+      seen.boxes.push(box);
+      if (!chrome) pictures.push({ png: seen.png, top, bottom, left });
+      continue;
+    }
     let png: Buffer | null;
     try {
       png = await encodePicture(data, pdfjs.ImageKind);
@@ -307,7 +381,7 @@ export async function collectPagePictures(
       png = null;
     }
     if (png === null) continue;
-    scan.seen.add(key);
+    scan.seen.set(key, { png, boxes: [box] });
     scan.remaining -= 1;
     pictures.push({ png, top, bottom, left });
   }

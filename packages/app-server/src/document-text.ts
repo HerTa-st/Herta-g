@@ -4,6 +4,7 @@ import { strFromU8, unzipSync } from "fflate";
 import {
   type BaselinedLine,
   collectPagePictures,
+  MAX_PICTURE_DECODE_PIXELS,
   type PdfPicture,
   pictureScanOpen,
   slotPictures,
@@ -285,6 +286,13 @@ async function extractPdfText(
       useSystemFonts: false,
       disableFontFace: true,
       verbosity: 0,
+      // The picture search's decode ceiling (2026-10-01): an image above it is
+      // dropped from the operator list before pdfjs decodes it — the one
+      // lever that spares the main process a scan's page images. Only the
+      // operator list reads this; text extraction never decodes an image.
+      ...(opts.pictures === true
+        ? { maxImageSize: MAX_PICTURE_DECODE_PIXELS }
+        : {}),
     });
     const doc = await task.promise;
     const pages = doc.numPages;
@@ -319,6 +327,7 @@ async function extractPdfText(
         // decoding its page images first would only delay that answer.
         if (scan !== undefined && body > 0 && pictureScanOpen(scan, p)) {
           const found = await collectPagePictures(page, pdfjs, scan, {
+            page: p,
             pageHasText: pageText.trim().length > 0,
           });
           if (found.length > 0) {

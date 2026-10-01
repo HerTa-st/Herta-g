@@ -8,7 +8,11 @@ import {
   textOfWordprocessingXml,
   walkWordprocessingXml,
 } from "./document-text.js";
-import { MAX_PDF_PICTURES, pictureToken } from "./pdf-pictures.js";
+import {
+  MAX_PDF_PICTURES,
+  MAX_PICTURE_DECODE_PIXELS,
+  pictureToken,
+} from "./pdf-pictures.js";
 import {
   docxHeading,
   docxParagraphs,
@@ -587,6 +591,44 @@ describe("extractDocumentText — pictures that are not content (review on #6)",
     );
   });
 
+  it("an image above the decode ceiling is never decoded or kept, whatever it covers; one below it is (2026-10-01)", async () => {
+    // pdfjs drops it from the operator list before decoding — the main-process
+    // cost the full-page rule cannot avoid, because that rule needs the
+    // decoded draw. Drawn small here, so ONLY the ceiling can exclude it.
+    const side = Math.ceil(Math.sqrt(MAX_PICTURE_DECODE_PIXELS)) + 1;
+    const huge: PdfPictureFixture = {
+      at: [300, 300, 150, 150],
+      width: side,
+      height: side,
+      kind: "gray1",
+    };
+    const under: PdfPictureFixture = {
+      ...huge,
+      width: side - 200,
+      height: side - 200,
+    };
+    expect(huge.width * huge.height).toBeGreaterThan(MAX_PICTURE_DECODE_PIXELS);
+    expect(under.width * under.height).toBeLessThan(MAX_PICTURE_DECODE_PIXELS);
+    const r = await extractDocumentText(
+      "pdf",
+      makePdf([questionPage, questionPage], {
+        lineGap: 60,
+        pictures: [
+          [huge, formula(1)],
+          [under, formula(2)],
+        ],
+      }),
+      { pictures: true },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    // Page 1 keeps only its formula; page 2 keeps both.
+    expect(r.pictures?.map(({ page, index }) => `${page}-${index}`)).toEqual([
+      "1-1",
+      "2-1",
+      "2-2",
+    ]);
+  });
+
   it("…but on a page WITHOUT text the same picture is the content, and is kept", async () => {
     const r = await extractDocumentText(
       "pdf",
@@ -599,6 +641,30 @@ describe("extractDocumentText — pictures that are not content (review on #6)",
     if (!r.ok) throw new Error(r.reason);
     expect(r.pictures?.map(({ page }) => page)).toEqual([2]);
     expect(r.text.endsWith(`── 第 2 页 ──\n${pictureToken(1)}`)).toBe(true);
+  });
+
+  it("the same picture elsewhere is content and keeps a line; at the same place on another page it is chrome (2026-10-01)", async () => {
+    // Page 1 draws the formula under (a); page 2 draws the SAME pixels under
+    // its (b) — a different place: content used twice. Page 3 draws them at
+    // page 1's exact place: a template element, so no line.
+    const same = formula(42);
+    const elsewhere: PdfPictureFixture = { ...same, at: [72, 550, 120, 40] };
+    const r = await extractDocumentText(
+      "pdf",
+      makePdf([questionPage, questionPage, questionPage], {
+        lineGap: 60,
+        pictures: [[same], [elsewhere], [same]],
+      }),
+      { pictures: true },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.pictures?.map(({ page }) => page)).toEqual([1, 2]);
+    // One picture, encoded once: both lines carry the same PNG.
+    expect(r.pictures?.[1]?.png).toBe(r.pictures?.[0]?.png);
+    const pages = r.text.split(/── 第 \d+ 页 ──\n/).slice(1);
+    expect(pages[0]).toContain(pictureToken(1));
+    expect(pages[1]).toContain(pictureToken(2));
+    expect(pages[2]).not.toMatch(/⟦picture:/);
   });
 
   it("a picture drawn again — a letterhead on every page — keeps its first line only and counts once toward the cap", async () => {

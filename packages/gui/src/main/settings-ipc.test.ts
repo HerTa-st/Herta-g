@@ -96,6 +96,44 @@ describe("settings IPC — Dream says what the running app has (dream review 202
   });
 });
 
+describe("settings IPC — PDF picture transcription (2026-10-01)", () => {
+  it("defaults on; a write persists, reaches the running host at once, and ignores anything but a boolean", async () => {
+    userData.dir = mkdtempSync(join(tmpdir(), "herta-settings-"));
+    const handlers = new Map<string, Handler>();
+    const setPdfPictureTranscription = vi.fn();
+    registerSettingsHandlers({
+      handle: ((channel: string, fn: Handler) => {
+        handlers.set(channel, fn);
+      }) as never,
+      hooks: {},
+      host: () => ({ setPdfPictureTranscription }) as never,
+      workspaceRoot: () => userData.dir,
+      voice: {
+        synthesizer: null,
+        voiceModel: null,
+        minimaxVoice: null,
+        engine: "local",
+        realtimeEnabled: false,
+        minimaxFetch: (async () => new Response("")) as never,
+        anyMiniMaxKey: () => false,
+        minimaxRefusal: () => null,
+        stopSpeech: () => {},
+      },
+    });
+    const get = handlers.get(CMD.getPdfPictureTranscripts);
+    const set = handlers.get(CMD.setPdfPictureTranscripts);
+    expect(await get?.(null)).toBe(true);
+
+    await set?.(null, false);
+    expect(await get?.(null)).toBe(false);
+    expect(setPdfPictureTranscription).toHaveBeenLastCalledWith(false);
+
+    await set?.(null, "yes");
+    expect(setPdfPictureTranscription).toHaveBeenCalledTimes(1);
+    expect(await get?.(null)).toBe(false);
+  });
+});
+
 describe("settings IPC — attention (ADR 0072 §1)", () => {
   it("both default on; a write carries either one, ignores anything but a boolean, and tells main both values", async () => {
     userData.dir = mkdtempSync(join(tmpdir(), "herta-settings-"));

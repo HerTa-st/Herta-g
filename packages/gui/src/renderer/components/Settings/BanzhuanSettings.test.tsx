@@ -262,6 +262,46 @@ describe("BanzhuanSettings", () => {
     });
   });
 
+  describe("PDF picture transcription row (2026-10-01)", () => {
+    it("hides the row when the bridge lacks the surface (fakes / website demo)", () => {
+      renderPane(createMockHertaBridge());
+      expect(screen.queryByLabelText("Transcribe PDF pictures")).toBeNull();
+    });
+
+    it("loads the stored value, and a flip persists through the bridge", async () => {
+      const mock = createMockHertaBridge({
+        pdfPictureTranscriptsResult: false,
+      });
+      renderPane(mock);
+      const toggle = await screen.findByLabelText("Transcribe PDF pictures");
+      await waitFor(() =>
+        expect(toggle.getAttribute("aria-checked")).toBe("false"),
+      );
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+      await waitFor(() =>
+        expect(mock.calls.setPdfPictureTranscripts).toEqual([true]),
+      );
+    });
+
+    it("a failed write snaps back and says it could not save", async () => {
+      const mock = createMockHertaBridge({
+        pdfPictureTranscriptsResult: true,
+        failSetPdfPictureTranscripts: true,
+      });
+      const { queryByText } = renderPane(mock);
+      const toggle = await screen.findByLabelText("Transcribe PDF pictures");
+      await waitFor(() =>
+        expect(toggle.getAttribute("aria-checked")).toBe("true"),
+      );
+      fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(queryByText("Could not save — try again.")).toBeTruthy(),
+      );
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+    });
+  });
+
   it("has NO command-rule section — rules moved to the device card's ⋯ menu (owner 2026-08-04)", async () => {
     const { container } = renderPane(
       createMockHertaBridge({ commandRules: ["node src/index.mjs:*"] }),

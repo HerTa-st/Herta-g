@@ -1109,6 +1109,13 @@ export async function ingestAttachment(opts: {
    *  reading them — the state under test, without a key, and whenever the
    *  call fails. */
   readonly captionImage?: ImageCaptioner | null;
+  /** Whether a PDF's pictures go to the instrument for transcription
+   *  (2026-10-01, the user's switch; default on). Off, they are still stored
+   *  and cited — each line says it was not transcribed and names the file
+   *  `view_image` opens. Images attached on their own are captioned as before:
+   *  this switch is the per-picture cost of a DOCUMENT, up to
+   *  `MAX_PICTURE_TRANSCRIPTS` calls for one attach. */
+  readonly transcribePdfPictures?: boolean;
 }): Promise<IngestedAttachment> {
   const displayName = opts.displayName ?? basename(opts.sourcePath);
 
@@ -1163,7 +1170,11 @@ export async function ingestAttachment(opts: {
       workspaceRoot: opts.workspaceRoot,
       sessionId: opts.sessionId,
       lang: opts.lang ?? "zh",
-      caption: opts.captionImage ?? null,
+      // The document path uses the instrument for ONE thing: its pictures.
+      caption:
+        opts.transcribePdfPictures === false
+          ? null
+          : (opts.captionImage ?? null),
     });
   }
 

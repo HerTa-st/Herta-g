@@ -272,6 +272,9 @@ export const en = {
   "banzhuan.scene": "3D device",
   "banzhuan.sceneDesc":
     "On: a lit object. Off: a flat picture, easier on the GPU.",
+  "banzhuan.pdfPictures": "Transcribe PDF pictures",
+  "banzhuan.pdfPicturesDesc":
+    "When a PDF is attached, its pictures, such as formulas and tables, are transcribed into text by the vision model. One call per picture, at most 40 per document. When off, the pictures are still stored, and it can still look at them. Applies immediately.",
   "approval.title": "Permission request",
   "approval.allow": "Allow",
   "approval.alwaysAllow": "Allow for this task",

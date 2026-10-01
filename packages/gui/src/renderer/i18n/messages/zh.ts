@@ -249,6 +249,9 @@ export const zh = {
   // the one trade-off, apply semantics.
   "banzhuan.scene": "立体板砖",
   "banzhuan.sceneDesc": "开：一块打了光的实物；关：平面图，省显卡。",
+  "banzhuan.pdfPictures": "转写 PDF 图片",
+  "banzhuan.pdfPicturesDesc":
+    "附加 PDF 时，把其中的公式、表格等图片交给视觉模型转写成文字。每张图片调用一次，每份文档至多 40 次。关闭后图片照常保存，它仍能查看原图。立即生效。",
   "approval.title": "请求权限",
   "approval.allow": "同意",
   "approval.alwaysAllow": "任务内同意",

@@ -47,6 +47,7 @@ import {
   type InteractionLang,
   type Locale,
   osLocale,
+  pdfPictureTranscriptsEnabled,
   readGlobalSettings,
   resolveInitialLocale,
   resolveInteractionLang,
@@ -1410,6 +1411,11 @@ export function createSessionService(
         // `buildConfig`.
         usageLogPath: join(userDataPath, "usage.jsonl"),
       });
+      // The PDF-picture switch (2026-10-01) before any session can attach;
+      // Settings mirrors later changes to the host live.
+      host.setPdfPictureTranscription(
+        pdfPictureTranscriptsEnabled(startupSettings),
+      );
       // Launch lands on the connect screen (接入黑塔空间站) rather than
       // auto-resuming the latest session: the user explicitly opens one from the
       // sidebar or starts a new one from the connect button (user 2026-06-20).

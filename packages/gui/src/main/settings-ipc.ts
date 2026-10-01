@@ -30,6 +30,7 @@ import {
   type GlobalSettings,
   type Locale,
   osLocale,
+  pdfPictureTranscriptsEnabled,
   readGlobalSettings,
   resolveInitialLocale,
   type ThemePref,
@@ -352,6 +353,22 @@ export function registerSettingsHandlers(deps: SettingsIpcDeps): void {
       ...s,
       deviceScene: enabled === true,
     }));
+  });
+  // Settings → 差分协处理器 → PDF picture transcription (2026-10-01). Per user
+  // and LIVE: persisted here, mirrored to the running host, which every
+  // session reads at its next attach. Anything but a boolean is ignored.
+  handle(CMD.getPdfPictureTranscripts, async () =>
+    pdfPictureTranscriptsEnabled(
+      await readGlobalSettings(app.getPath("userData")),
+    ),
+  );
+  handle(CMD.setPdfPictureTranscripts, async (_e, enabled: unknown) => {
+    if (typeof enabled !== "boolean") return;
+    await updateGlobalSettings(app.getPath("userData"), (s) => ({
+      ...s,
+      pdfPictureTranscripts: enabled,
+    }));
+    deps.host()?.setPdfPictureTranscription(enabled);
   });
   // Settings → Voice: Herta's real-time synthesized voice (ADR 0042).
   // App-global and applied LIVE — the synthesizer reads the cached flag at

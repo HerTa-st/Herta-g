@@ -48,6 +48,10 @@ export interface SessionAttachmentsDeps {
   /** The image-captioning instrument (ADR 0048); null = images are stored
    *  but not read (no key, tests, a failed call). */
   readonly captionImage: ImageCaptioner | null;
+  /** Whether an attached PDF's pictures are transcribed (the user's switch,
+   *  2026-10-01), read at each attach so a change applies to the next one.
+   *  Absent = on. */
+  readonly transcribePdfPictures?: () => boolean;
   readonly turnInFlight: () => boolean;
   readonly driver: Pick<
     V2ActorDriver,
@@ -185,6 +189,8 @@ export class SessionAttachments {
     // guard-to-append path contains no await; with ingest I/O in between,
     // the guard must be re-checked on the far side.
     const ingested = [];
+    // Read once per attach: one batch, one answer.
+    const transcribePdfPictures = this.deps.transcribePdfPictures?.() ?? true;
     for (const sourcePath of paths) {
       ingested.push({
         sourcePath,
@@ -194,6 +200,7 @@ export class SessionAttachments {
           sessionId: this.deps.sessionId,
           lang: this.deps.lang,
           captionImage: this.deps.captionImage,
+          transcribePdfPictures,
         }),
       });
     }

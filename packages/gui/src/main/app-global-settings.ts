@@ -83,6 +83,18 @@ export interface GlobalSettings {
   readonly notifications?: boolean;
   /** Keep the machine awake while 板砖 runs (ADR 0072 §1). ABSENT = on. */
   readonly keepAwake?: boolean;
+  /** Transcribe an attached PDF's pictures with the vision model (2026-10-01,
+   *  Settings → 差分协处理器). ABSENT = on (the owner's pick). Live: the host
+   *  reads it at every attach. Per user, like the other cost switches here,
+   *  because the calls are paid on the user's key. */
+  readonly pdfPictureTranscripts?: boolean;
+}
+
+/** Whether an attached PDF's pictures are transcribed: the ONE resolver the
+ *  bootstrap and the Settings row both read, so the row never shows a default
+ *  the app is not running with. */
+export function pdfPictureTranscriptsEnabled(s: GlobalSettings): boolean {
+  return s.pdfPictureTranscripts ?? true;
 }
 
 export interface WindowStateSnapshot {
@@ -120,6 +132,7 @@ export async function readGlobalSettings(
       minimaxVoice,
       notifications,
       keepAwake,
+      pdfPictureTranscripts,
     } = parsed as {
       locale?: unknown;
       closeToTray?: unknown;
@@ -133,7 +146,14 @@ export async function readGlobalSettings(
       minimaxVoice?: unknown;
       notifications?: unknown;
       keepAwake?: unknown;
+      pdfPictureTranscripts?: unknown;
     };
+    if (
+      pdfPictureTranscripts !== undefined &&
+      typeof pdfPictureTranscripts !== "boolean"
+    ) {
+      return {};
+    }
     if (notifications !== undefined && typeof notifications !== "boolean") {
       return {};
     }

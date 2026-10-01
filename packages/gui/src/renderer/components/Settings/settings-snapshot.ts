@@ -62,6 +62,7 @@ export interface SettingsSnapshot {
   "banzhuan.thinking": BackendThinking;
   "banzhuan.contract": BackendContractChoice;
   "banzhuan.bashFound": boolean | undefined;
+  "banzhuan.pdfPictureTranscripts": boolean;
 }
 
 type Key = keyof SettingsSnapshot;
@@ -178,4 +179,7 @@ export function primeSettings(bridge: HertaBridge): void {
     if (c.contract !== undefined) keep("banzhuan.contract", c.contract);
     keep("banzhuan.bashFound", c.bashFound);
   }, quiet);
+  void bridge
+    .getPdfPictureTranscripts?.()
+    .then((v) => keep("banzhuan.pdfPictureTranscripts", v), quiet);
 }

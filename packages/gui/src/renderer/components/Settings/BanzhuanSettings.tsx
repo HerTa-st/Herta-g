@@ -216,6 +216,45 @@ export function BanzhuanSettings(): JSX.Element {
     });
   };
 
+  // PDF picture transcription (2026-10-01). Live (main applies it to the next
+  // attach), per user, default on; the first frame shows the last-known value
+  // (settings-snapshot.ts). Optimistic + latest-wins like the rows above;
+  // hides when the bridge has no surface (fakes / the website demo).
+  const pdfSupported = bridge.setPdfPictureTranscripts !== undefined;
+  const [pdfPictures, setPdfPictures] = useRememberedSetting(
+    bridge,
+    "banzhuan.pdfPictureTranscripts",
+    true,
+  );
+  const [pdfFailed, setPdfFailed] = useState(false);
+  const pdfTouchedRef = useRef(false);
+  const pdfSeqRef = useRef(0);
+  useEffect(() => {
+    let alive = true;
+    bridge.getPdfPictureTranscripts?.().then(
+      (v) => {
+        if (alive && !pdfTouchedRef.current) setPdfPictures(v);
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [bridge, setPdfPictures]);
+  const onPdfPictures = (next: boolean): void => {
+    const prev = pdfPictures;
+    pdfSeqRef.current += 1;
+    const seq = pdfSeqRef.current;
+    pdfTouchedRef.current = true;
+    setPdfPictures(next);
+    setPdfFailed(false);
+    void bridge.setPdfPictureTranscripts?.(next).catch(() => {
+      if (seq !== pdfSeqRef.current) return;
+      setPdfPictures(prev);
+      setPdfFailed(true);
+    });
+  };
+
   const onThinking = (next: BackendThinking): void => {
     // Optimistic: show the pick now, persist async. On a failed write, snap
     // back so the row never claims a state that didn't reach disk.
@@ -312,14 +351,30 @@ export function BanzhuanSettings(): JSX.Element {
             }
           />
         )}
+        {pdfSupported && (
+          <SettingRow
+            title={t("banzhuan.pdfPictures")}
+            description={t("banzhuan.pdfPicturesDesc")}
+            control={
+              <Toggle
+                checked={pdfPictures}
+                ariaLabel={t("banzhuan.pdfPictures")}
+                onChange={onPdfPictures}
+              />
+            }
+          />
+        )}
       </div>
-      {((thinkingSupported && (failed || contractFailed)) || sceneFailed) && (
+      {((thinkingSupported && (failed || contractFailed)) ||
+        sceneFailed ||
+        pdfFailed) && (
         <p className="settings-note">{t("common.couldntSave")}</p>
       )}
       {thinkingSupported &&
         !failed &&
         !contractFailed &&
         !sceneFailed &&
+        !pdfFailed &&
         loadFailed && (
           <p className="settings-note">{t("settings.loadFailed")}</p>
         )}

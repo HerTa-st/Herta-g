@@ -541,6 +541,10 @@ export interface SessionHost {
    *  session reads it through a getter, so the NEXT turn uses the new value with
    *  no restart. Pass "" to clear. Persistence is the caller's job (key-store). */
   setDeepSeekKey(key: string): void;
+  /** Update the PDF-picture transcription switch (Settings, 2026-10-01): the
+   *  NEXT attach, in any session, reads it — no restart. On until set.
+   *  Persistence is the caller's job. */
+  setPdfPictureTranscription(enabled: boolean): void;
   /** The user did something in the window that is not a turn (a rewind, an
    *  attachment, a search, a file opened in the viewer): it counts as
    *  activity for the dream trigger, and a running pass steps aside at its

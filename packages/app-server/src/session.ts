@@ -513,6 +513,8 @@ export class SessionImpl implements Session {
     lastTurnEnd?: LastTurnEnd;
     pendingContractNote: string | null;
     captionImage: ImageCaptioner | null;
+    /** The user's PDF-picture transcription switch, live (2026-10-01). */
+    transcribePdfPictures: () => boolean;
     steer: SteerChannel;
     bus: EventBus<AgentEvent>;
     /** ADR 0067: the toolset follows the environment. Fired after the
@@ -563,6 +565,7 @@ export class SessionImpl implements Session {
       lang: opts.lang,
       wsHolder: this.wsHolder,
       captionImage: opts.captionImage,
+      transcribePdfPictures: opts.transcribePdfPictures,
       turnInFlight: () => this.currentTurn !== null,
       driver: this.driver,
       onAppended: () => {
@@ -1718,6 +1721,9 @@ export class SessionImpl implements Session {
      *  in Settings / onboarding takes effect on the next turn. Falls back to the
      *  static config key when omitted (tests). */
     deepSeekKey?: () => string;
+    /** Live getter for the user's PDF-picture transcription switch (from the
+     *  host's holder, 2026-10-01). Absent = on (tests, the CLI). */
+    transcribePdfPictures?: () => boolean;
     /** Interaction language (slice 4): threaded into every language-
      *  parameterized constructor below (static prefix, seeds, opening,
      *  meta-think, hints, recap, title) and into the V2ActorDriver. The
@@ -2118,6 +2124,7 @@ export class SessionImpl implements Session {
         deps.providerOverrides === undefined
           ? deepseekVisionCaptioner({ apiKey, ...baseUrl })
           : null,
+      transcribePdfPictures: opts.transcribePdfPictures ?? (() => true),
       repoDescriber: deps.repoDescriber ?? describeRepoOutcome,
       repoWatcher: deps.repoWatcher ?? watchGitDir,
       repoWatchDebounceMs: deps.repoWatchDebounceMs ?? REPO_WATCH_DEBOUNCE_MS,

@@ -763,6 +763,12 @@ export interface HertaBridge {
   getDeviceScene?(): Promise<boolean>;
   /** Persist the 3D device card toggle; the card applies it live. */
   setDeviceScene?(enabled: boolean): Promise<void>;
+  /** Read whether an attached PDF's pictures are transcribed (2026-10-01;
+   *  Settings → 差分协处理器). Default on. OPTIONAL — fakes and the website
+   *  demo omit it, and the row hides. */
+  getPdfPictureTranscripts?(): Promise<boolean>;
+  /** Persist the switch; main applies it to the next attach, no restart. */
+  setPdfPictureTranscripts?(enabled: boolean): Promise<void>;
   /** Read Herta's real-time-voice state (ADR 0042): whether the user has it
    *  ON, and whether it can run here at all — `available` folds in the model
    *  bundle, the native runtime, and a worker that has failed for good, so

@@ -107,6 +107,10 @@ const bridge: HertaBridge = {
   setTheme: (theme) => ipcRenderer.invoke(CMD.setTheme, theme),
   getDeviceScene: () => ipcRenderer.invoke(CMD.getDeviceScene),
   setDeviceScene: (enabled) => ipcRenderer.invoke(CMD.setDeviceScene, enabled),
+  getPdfPictureTranscripts: () =>
+    ipcRenderer.invoke(CMD.getPdfPictureTranscripts),
+  setPdfPictureTranscripts: (enabled) =>
+    ipcRenderer.invoke(CMD.setPdfPictureTranscripts, enabled),
   getRealtimeVoice: () => ipcRenderer.invoke(CMD.getRealtimeVoice),
   setRealtimeVoice: (enabled) =>
     ipcRenderer.invoke(CMD.setRealtimeVoice, enabled),

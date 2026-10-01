@@ -82,6 +82,10 @@ class SessionHostImpl implements SessionHost {
    *  (no-key onboarding / Settings). Each session reads it through a getter, so
    *  a change takes effect on the NEXT turn with no restart. */
   private readonly keyHolder: { current: string };
+  /** The user's PDF-picture transcription switch (2026-10-01), live the same
+   *  way as the key: each session reads it at every attach. On until a host
+   *  says otherwise — the CLI never does. */
+  private readonly pdfTranscriptsHolder = { current: true };
   /** Serializes create/open/delete/closeActive (audit 2026-07-10, finding
    *  11): each op awaits a long disk load and then assigns `_active`
    *  unconditionally, so two concurrent activations could leave `_active`
@@ -363,6 +367,13 @@ class SessionHostImpl implements SessionHost {
     this.keyHolder.current = key;
   }
 
+  /** Update the PDF-picture transcription switch (Settings, 2026-10-01). The
+   *  next attach — in this session or any later one — reads the new value.
+   *  Persistence is the caller's job. */
+  setPdfPictureTranscription(enabled: boolean): void {
+    this.pdfTranscriptsHolder.current = enabled;
+  }
+
   async reapOrphanedProcesses(): Promise<void> {
     try {
       const reaped = await reapOrphanedDispatches(
@@ -420,6 +431,7 @@ class SessionHostImpl implements SessionHost {
       isDefaultWorkspace: opts.backendWorkspace === undefined,
       config: this.config,
       deepSeekKey: () => this.keyHolder.current,
+      transcribePdfPictures: () => this.pdfTranscriptsHolder.current,
       persister,
       ...(opts.lang !== undefined ? { lang: opts.lang } : {}),
     });
@@ -492,6 +504,7 @@ class SessionHostImpl implements SessionHost {
       isDefaultWorkspace,
       config: this.config,
       deepSeekKey: () => this.keyHolder.current,
+      transcribePdfPictures: () => this.pdfTranscriptsHolder.current,
       persister,
       initialRecord: record,
       // How the last turn ENDED, when the file recorded it. Its absence is

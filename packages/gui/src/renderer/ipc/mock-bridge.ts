@@ -147,6 +147,11 @@ export interface MockHertaBridgeOpts {
   readonly deviceSceneResult?: boolean;
   /** When true, setDeviceScene rejects (simulates a failed settings write). */
   readonly failSetDeviceScene?: boolean;
+  /** Seed for getPdfPictureTranscripts (2026-10-01). UNDEFINED (the default)
+   *  omits the surface — the row hides, like the website demo's bridge. */
+  readonly pdfPictureTranscriptsResult?: boolean;
+  /** When true, setPdfPictureTranscripts rejects. */
+  readonly failSetPdfPictureTranscripts?: boolean;
   /** Seed for getInteractionLanguage (Settings → Language, slice 4).
    *  Default "follow" (no stored choice). Mutated by setInteractionLanguage
    *  so tests observe the round-trip. */
@@ -260,6 +265,7 @@ export interface MockHertaBridge {
     saveSessionExport: Array<[string, string]>;
     setTheme: ThemePref[];
     setDeviceScene: boolean[];
+    setPdfPictureTranscripts: boolean[];
     getInteractionLanguage: number;
     setInteractionLanguage: InteractionLanguageChoice[];
     getRealtimeVoice: number;
@@ -380,6 +386,7 @@ export function createMockHertaBridge(
     saveSessionExport: [],
     setTheme: [],
     setDeviceScene: [],
+    setPdfPictureTranscripts: [],
     getInteractionLanguage: 0,
     setInteractionLanguage: [],
     getRealtimeVoice: 0,
@@ -852,6 +859,18 @@ export function createMockHertaBridge(
           setAttention: async (prefs: Partial<AttentionSettings>) => {
             calls.setAttention.push(prefs);
             if (opts.failSetAttention === true) {
+              throw new Error("write failed");
+            }
+          },
+        }
+      : {}),
+    ...(opts.pdfPictureTranscriptsResult !== undefined
+      ? {
+          getPdfPictureTranscripts: async () =>
+            opts.pdfPictureTranscriptsResult === true,
+          setPdfPictureTranscripts: async (enabled: boolean) => {
+            calls.setPdfPictureTranscripts.push(enabled);
+            if (opts.failSetPdfPictureTranscripts === true) {
               throw new Error("write failed");
             }
           },
