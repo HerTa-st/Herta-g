@@ -13,6 +13,12 @@ coverage/
 .DS_Store
 *.log
 
+# Local package-manager stores and one-off audit output — machine-specific,
+# huge (tens of thousands of files), never part of the repo.
+.pnpm-store/
+.npm-cache/
+herta-audit-report.md
+
 # Local Herta canon corpus — large, derived/exported, not redistributable.
 # The hybrid knowledge DB (.herta/knowledge/) is built from this; never commit either.
 data/
