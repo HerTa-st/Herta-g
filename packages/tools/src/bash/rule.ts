@@ -12,6 +12,7 @@ import { splitShellSegments } from "../run-command/classifier.js";
 import { checkReaderArgvPaths } from "../run-command/reader-guard.js";
 import { previewHeredocWrites } from "./heredoc-write.js";
 import { PersistentShell, SHELL_BG_ID } from "./persistent-shell.js";
+import { readRedirectTargets, writesUndoable } from "./redirect-writes.js";
 import { bashInputSchema } from "./schema.js";
 import {
   classifyShellCommandDetailed,
@@ -69,15 +70,25 @@ export function makeBashRule(deps: BashRuleDeps): PermissionRule {
     if (verdict.kind === "ask") {
       // The effective program (ADR 0040): lets the approval cache scope this
       // ask by argv[0] like run_command's (the cache applies its own
-      // interpreter/shell exclusion), and lets ADR 0030 project rules derive
-      // from it (which DO allow the script-pinned `node scripts/x.mjs:*`
-      // shape) — only when the line really runs one program (see
-      // singleProgramArgv); otherwise every call re-prompts.
+      // interpreter/shell exclusion, and keys a script-pinned
+      // `node scripts/x.mjs`) — only when the line really runs one program
+      // (see singleProgramArgv); otherwise every call re-prompts.
       const scopeOpts = { workspaceRoot: ctx.workspaceRoot, paths, cwd };
       const argv = singleProgramArgv(parsed.data.command, scopeOpts);
       // For the task CACHE only: the distinct programs of a chained line
       // (`git add && git commit && git status` → ["git"]).
       const programs = effectivePrograms(parsed.data.command, scopeOpts);
+      // Everything the line changes is held for undo (ADR 0064 amendment
+      // 2026-10-10): with automatic review on, it runs without a review.
+      // Read from the line's own text and its targets as they are now; the
+      // tool reads the targets again when it runs.
+      const undoable =
+        verdict.risk === "workspace_write" &&
+        writesUndoable(
+          parsed.data.command,
+          scopeOpts,
+          await readRedirectTargets(parsed.data.command, scopeOpts),
+        );
       // A heredoc file write (`cat > src/x <<'EOF' … EOF`, the contract's
       // file-write idiom) is previewed like a file write: the diff the write
       // would produce reaches the ask (the card folds the body out of the
@@ -121,6 +132,7 @@ export function makeBashRule(deps: BashRuleDeps): PermissionRule {
           ...(verdict.consequence !== undefined
             ? { consequence: verdict.consequence }
             : {}),
+          ...(undoable ? { undoable: true as const } : {}),
         };
       }
       return {
@@ -134,6 +146,7 @@ export function makeBashRule(deps: BashRuleDeps): PermissionRule {
         ...(verdict.consequence !== undefined
           ? { consequence: verdict.consequence }
           : {}),
+        ...(undoable ? { undoable: true as const } : {}),
       };
     }
     // allow → realpath the reader operands of every segment (async guard).

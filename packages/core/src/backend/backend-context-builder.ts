@@ -693,7 +693,6 @@ export interface BackendBuildInput {
    *  bounded section after the contract. Absent → section omitted, frame
    *  byte-identical to before (the `hostNote` pattern). */
   repoContext?: RepoContextSnapshot;
-  scopedRepoInstructions: string;
   scopedMemory: string;
   messages: readonly Message[];
 }
@@ -763,7 +762,6 @@ export class BackendContextBuilder {
     if (userHistory.length > 0) sections.push(userHistory);
     return {
       backendSystem: sections.join("\n\n"),
-      scopedRepoInstructions: input.scopedRepoInstructions,
       scopedMemory: input.scopedMemory,
       toolSchemas: this.tools.list().map((t) => t.schema()),
       messages: [...input.messages],

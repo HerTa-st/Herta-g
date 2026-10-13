@@ -13,6 +13,7 @@ import {
   stripInlineCodeTicks,
 } from "../../lib/banzhuan-mention.js";
 import { journeyMark } from "../../lib/journey.js";
+import { quotedMessagePreview } from "../../lib/quote-format.js";
 import { isRepeatClick } from "../../lib/repeat-click.js";
 import { TitleText } from "../TitleText.js";
 import { TrashIcon } from "./icons.js";
@@ -90,8 +91,13 @@ export function SessionItem(props: SessionItemProps): JSX.Element {
   // Localize the preview's 板砖 the same way the bubble does, but keyed on THIS
   // card's own interaction language (not the active session's) — so an EN
   // session's card shows @Brick like its bubbles, while a zh card stays 板砖.
+  // A message that quotes the viewer's page shows its labels, not the fence
+  // (ADR 0078 §7).
   const message = stripInlineCodeTicks(
-    aliasBanzhuanPlain(rawMessage, props.session.lang ?? "zh"),
+    aliasBanzhuanPlain(
+      quotedMessagePreview(rawMessage),
+      props.session.lang ?? "zh",
+    ),
   );
   // A snippet always shows, even on an untitled card — the match is the point.
   const showPreview = (hasTitle && message !== "") || snippet !== undefined;

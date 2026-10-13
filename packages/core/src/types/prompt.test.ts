@@ -9,7 +9,6 @@ describe("prompt frame types", () => {
   it("ActorPromptFrame is the existing PromptFrame shape", () => {
     const actor: ActorPromptFrame = {
       stableSystem: "",
-      repoInstructions: "",
       memoryContext: "",
       retrievedLore: "",
       messages: [],
@@ -23,7 +22,6 @@ describe("prompt frame types", () => {
   it("BackendPromptFrame has the prescribed fields and no actor-only fields", () => {
     const backend: BackendPromptFrame = {
       backendSystem: "",
-      scopedRepoInstructions: "",
       scopedMemory: "",
       toolSchemas: [],
       messages: [],

@@ -27,6 +27,9 @@ export interface PermissionRequest {
   /** Consequence note code (ADR 0049 §5) — display-only; see
    *  `CommandConsequence` in permission-engine. */
   consequence?: CommandConsequence;
+  /** Rule-decided: everything it changes is a workspace file kept for undo;
+   *  see `RuleVerdict`. */
+  undoable?: true;
 }
 
 /** What a test run came back with. `passed` was added 2026-09-03 so the
@@ -52,6 +55,9 @@ export type AgentEvent =
       id: string;
       tool: string;
       inputSummary: string;
+      /** The tool recognised the call as a test run (`HertaTool.runsTests`,
+       *  ADR 0073 amendment 2026-10-08). Absent otherwise. */
+      runsTests?: true;
     }
   | {
       type: "tool.call.progress";

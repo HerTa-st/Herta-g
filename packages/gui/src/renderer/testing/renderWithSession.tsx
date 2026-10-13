@@ -63,7 +63,16 @@ let seq = 0;
 
 export function renderWithSession(
   ui: ReactNode,
-  opts: { locale?: Locale; sessionId?: string; mock?: MockHertaBridge } = {},
+  opts: {
+    locale?: Locale;
+    sessionId?: string;
+    mock?: MockHertaBridge;
+    /** Open a session in this interaction language at once — for what
+     *  reads in the session's language rather than the app's (ADR 0019).
+     *  Without it no session is opened, and the store's default (zh)
+     *  stands. */
+    lang?: "zh" | "en";
+  } = {},
 ): SessionHarness {
   const mock = opts.mock ?? createMockHertaBridge();
   const locale = opts.locale ?? "en";
@@ -92,6 +101,7 @@ export function renderWithSession(
         overlay: null,
         backendWorkspace: "/r",
         backendWorkspaceIsDefault: true,
+        ...(opts.lang !== undefined ? { lang: opts.lang } : {}),
       });
     });
   };
@@ -203,5 +213,6 @@ export function renderWithSession(
   };
 
   openSession(opts.sessionId);
+  if (opts.lang !== undefined) openSession(opts.sessionId);
   return harness;
 }

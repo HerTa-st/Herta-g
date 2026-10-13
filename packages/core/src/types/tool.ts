@@ -97,6 +97,25 @@ export interface ToolContext {
   /** This call's view of the run's journal (ADR 0071 §1.1). Absent when the
    *  run keeps none (the CLI, tests). */
   journal?: ToolCallJournal;
+  /** Where a writer leaves what it replaces, so the user can take the turn's
+   *  edits back (ADR 0074). Absent when the run keeps no undo store. */
+  undo?: ToolCallUndo;
+}
+
+/**
+ * What a writer hands the undo store (ADR 0074 §1) right before a file is
+ * replaced: its absolute path, its bytes now (null for a file being
+ * created) and the sha256 it will have.
+ */
+export interface ToolCallUndo {
+  /** Best effort: NEVER rejects. A capture that fails marks the turn
+   *  incomplete and the write goes ahead — undo is a convenience, and 板砖's
+   *  work does not wait on it. */
+  captureWrite(w: {
+    path: string;
+    before: Buffer | null;
+    after: string;
+  }): Promise<void>;
 }
 
 /**
@@ -159,6 +178,16 @@ export interface HertaTool {
     input: unknown,
     ctx: { workspaceRoot: string },
   ): string | undefined;
+  /**
+   * Whether the call runs tests, read from its input at dispatch by the same
+   * detector that later turns its result into a test row (ADR 0073
+   * amendment 2026-10-08). The trace card reads a recognised test run as 验证
+   * whatever its command looks like, and must know it from the op row on: the
+   * result row lands seconds later behind Herta's beats, and the card used to
+   * re-sort its nodes when it did. A fact about the command, not a claim
+   * about the run: nothing is decided by it (D4). Optional; a throw is false.
+   */
+  runsTests?(input: unknown): boolean;
   run(
     call: ToolCallRequest,
     ctx: ToolContext,

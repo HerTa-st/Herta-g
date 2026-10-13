@@ -11,7 +11,7 @@
  * but resolveExternal will still return { ok: false, reason: "stale_request" }
  * if the requestId doesn't match (defense-in-depth).
  *
- * The POLICY (cache / project-rule short-circuits, which persistence choices
+ * The POLICY (cache / undoable-write short-circuits, which persistence choices
  * to offer, what a grant writes back) is `@herta/core`'s `ApprovalPolicy`,
  * shared with the CLI's resolver; this class only renders and awaits.
  *
@@ -19,13 +19,21 @@
  */
 import {
   ApprovalPolicy,
+  type ApprovalPreflight,
+  type AskAnswer,
   type AskResolver,
   abortError,
   type PendingPermissionApproval,
   type PermissionRequest,
-  type ProjectCommandRuleStore,
   type SessionApprovalCache,
+  type WorkspacePermissions,
 } from "@herta/core";
+import {
+  type ReviewDeps,
+  requestCommand,
+  reviewBeforeCard,
+  reviewTakes,
+} from "./auto-review.js";
 
 export interface OverlayAskResolverDeps {
   /**
@@ -47,21 +55,26 @@ export interface OverlayAskResolverDeps {
    */
   readonly cache: SessionApprovalCache;
   /**
-   * Project-scoped command allow rules (ADR 0030). Consulted before
-   * surfacing a rule-eligible run_command ask (a match short-circuits to
-   * "allow", silent like a cache hit — the operation still projects its
-   * → 系统 blocks into the record); written when a request resolves with
-   * persistence "always" (the reserved value the v0.3 design doc §7 left
-   * for exactly this store). Optional so hand-built test resolvers keep
-   * their pre-0030 behavior.
+   * The workspace's permission choices (`.herta/permissions.json`): whether
+   * automatic review is on. Written when a request resolves with
+   * persistence "auto_review". Optional: a hand-built test resolver without
+   * one has only the host's default.
    */
-  readonly rules?: ProjectCommandRuleStore;
+  readonly permissions?: WorkspacePermissions;
   /**
-   * Whether the CURRENT workspace trusts by default (ADR 0064): the
-   * session's managed sandbox does, a real project does not. A provider —
-   * the workspace can move mid-session. Absent → never by default.
+   * Whether automatic review is on by default in the CURRENT workspace
+   * (ADR 0064 amendment 2026-10-10): the session's managed sandbox is, a
+   * real project is not. A provider — the workspace can move mid-session.
+   * Absent → off by default.
    */
-  readonly defaultTrust?: () => boolean;
+  readonly defaultAutoReview?: () => boolean;
+  /**
+   * The automatic reviewer (ADR 0075), when one is mounted. Asked before the
+   * card, only where automatic review is on in the CURRENT workspace; its
+   * allow or deny settles the request without a card, and anything else
+   * shows the card.
+   */
+  readonly review?: ReviewDeps;
 }
 
 export type ResolveExternalResult =
@@ -87,27 +100,68 @@ export class OverlayAskResolver implements AskResolver {
   private readonly policy: ApprovalPolicy;
 
   constructor(private readonly deps: OverlayAskResolverDeps) {
-    this.policy = new ApprovalPolicy(deps.cache, deps.rules, {
-      ...(deps.defaultTrust !== undefined
-        ? { defaultTrust: deps.defaultTrust }
+    this.policy = new ApprovalPolicy(deps.cache, deps.permissions, {
+      ...(deps.defaultAutoReview !== undefined
+        ? { defaultAutoReview: deps.defaultAutoReview }
+        : {}),
+      ...(deps.review !== undefined
+        ? {
+            reviewable: (request: PermissionRequest) =>
+              reviewTakes(request, deps.review?.workspace() ?? ""),
+          }
         : {}),
     });
   }
 
-  /** The policy's view of workspace trust (ADR 0064) — the session's
-   *  trust surface reads it here so the two never disagree. */
-  get workspaceTrusted(): boolean {
-    return this.policy.workspaceTrusted();
+  /** The policy's view of automatic review — the session's switch reads it
+   *  here so the two never disagree. */
+  get autoReviewOn(): boolean {
+    return this.policy.autoReviewOn();
   }
 
-  present(
-    request: PermissionRequest,
-    signal: AbortSignal,
-  ): Promise<"allow" | "deny"> {
-    // Cache / project-rule hit: short-circuit without surfacing an overlay.
+  /** A new user message: the reviewer's brake lifts (ADR 0075). */
+  resetReviewBrake(): void {
+    this.deps.review?.reviewer.resetBrake();
+  }
+
+  present(request: PermissionRequest, signal: AbortSignal): Promise<AskAnswer> {
+    // Cache / undoable-write hit: no overlay.
     const pre = this.policy.preflight(request);
     if (pre.kind === "auto") return Promise.resolve("allow");
+    const review = this.deps.review;
+    if (review !== undefined && this.policy.autoReviewOn()) {
+      return this.reviewFirst(review, request, pre, signal);
+    }
+    return this.surface(request, pre, signal);
+  }
 
+  /**
+   * ADR 0075: the reviewer answers in the owner's place, or the card shows.
+   * An abort while it reviews rejects like an abort at the card — no
+   * decision is fabricated either way.
+   */
+  private async reviewFirst(
+    review: ReviewDeps,
+    request: PermissionRequest,
+    pre: Extract<ApprovalPreflight, { kind: "ask" }>,
+    signal: AbortSignal,
+  ): Promise<AskAnswer> {
+    let answer: AskAnswer | null;
+    try {
+      answer = await reviewBeforeCard(review, request, signal);
+    } catch {
+      // Only an abort rejects: the card's own abort contract applies.
+      throw gateAbortError();
+    }
+    return answer ?? this.surface(request, pre, signal);
+  }
+
+  /** Show the card and await the owner. */
+  private surface(
+    request: PermissionRequest,
+    pre: Extract<ApprovalPreflight, { kind: "ask" }>,
+    signal: AbortSignal,
+  ): Promise<AskAnswer> {
     const requestId = request.id;
     // An interrupted turn must settle a pending ask — but as an ABORT, not a
     // decision. Two prior states of this code were both wrong:
@@ -128,7 +182,7 @@ export class OverlayAskResolver implements AskResolver {
     // while producing NO permission.resolved event and NO fabricated tool
     // result. The overlay still clears so the renderer unlocks.
     if (signal.aborted) return Promise.reject(gateAbortError());
-    return new Promise<"allow" | "deny">((resolve, reject) => {
+    return new Promise<AskAnswer>((resolve, reject) => {
       const onAbort = (): void => {
         // Only if still the pending slot (a user resolution wins the race).
         if (this.pending?.requestId !== requestId) return;
@@ -160,7 +214,7 @@ export class OverlayAskResolver implements AskResolver {
         ...(request.consequence !== undefined
           ? { consequence: request.consequence }
           : {}),
-        command: extractCommand(request),
+        command: requestCommand(request),
         diff: request.diff,
         files: request.files,
         // Gate the GUI "always allow (session)" button: only offer it when a
@@ -170,12 +224,9 @@ export class OverlayAskResolver implements AskResolver {
         // silently no-op and re-prompt (audit T3.4 follow-up; mirrors the
         // CLI showRemember gate).
         cacheable: pre.showRemember,
-        // Same contract for the 「本项目允许」 button (ADR 0030): present only
-        // when persistence:"always" would actually save this exact rule.
-        projectRule: pre.projectRule,
-        // And for 「信任此工作区」 (ADR 0064): only when the tier would
-        // cover this class and the workspace does not trust yet.
-        ...(pre.showTrust ? { trustable: true } : {}),
+        // Same contract for 「开启自动审核」: only when automatic review is
+        // off and would answer this request.
+        ...(pre.showAutoReview ? { offerAutoReview: true } : {}),
       };
       this.deps.setPendingOverlay(overlay);
     });
@@ -187,9 +238,8 @@ export class OverlayAskResolver implements AskResolver {
    *
    * When decision is "allow" and persistence is "session", the (tool, risk)
    * pair is written to the task-scoped cache so subsequent identical asks
-   * short-circuit until the brief ends. Persistence "always" instead persists
-   * the derived PROJECT rule (ADR 0030) — the reserved value the v0.3 design
-   * doc §7 left open now has its store. Both re-derive from the pending
+   * short-circuit until the brief ends. Persistence "auto_review" turns
+   * automatic review on for the workspace. Both re-derive from the pending
    * request (never a caller-supplied shape) inside `ApprovalPolicy.commit`.
    *
    * Returns:
@@ -200,7 +250,7 @@ export class OverlayAskResolver implements AskResolver {
   resolveExternal(opts: {
     readonly requestId: string;
     readonly decision: "allow" | "deny";
-    readonly persistence?: "once" | "session" | "always" | "trust";
+    readonly persistence?: "once" | "session" | "auto_review";
   }): ResolveExternalResult {
     if (this.pending === null) {
       return { ok: false, reason: "no_pending_overlay" };
@@ -221,29 +271,4 @@ export class OverlayAskResolver implements AskResolver {
     resolve(opts.decision);
     return { ok: true };
   }
-}
-
-/**
- * Build a display command string for a command permission request:
- * run_command's argv joined with spaces, or the minimal contract's `bash`
- * command line verbatim (ADR 0040 — the panel's console well wraps and
- * scrolls, so a multi-line heredoc shows whole; a user must SEE what they
- * approve, live GUI 2026-08-17 showed only "未识别的命令" with no command).
- * Returns undefined for other tools or malformed input — the panel then
- * shows only the summary.
- */
-function extractCommand(request: PermissionRequest): string | undefined {
-  const input = request.call.input;
-  if (typeof input !== "object" || input === null) return undefined;
-  if (request.call.tool === "bash") {
-    const command = (input as { command?: unknown }).command;
-    return typeof command === "string" && command.trim().length > 0
-      ? command
-      : undefined;
-  }
-  if (request.call.tool !== "run_command") return undefined;
-  const argv = (input as { argv?: unknown }).argv;
-  if (!Array.isArray(argv) || argv.length === 0) return undefined;
-  const parts = argv.filter((a): a is string => typeof a === "string");
-  return parts.length > 0 ? parts.join(" ") : undefined;
 }

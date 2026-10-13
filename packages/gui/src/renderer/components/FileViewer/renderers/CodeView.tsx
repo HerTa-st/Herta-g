@@ -1,6 +1,20 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useT } from "../../../i18n/LocaleProvider.js";
 import type { ViewerAnchor } from "../file-viewer-context.js";
+import {
+  type MaskPiece,
+  PieceMask,
+  type PieceQuoting,
+  quotesFromRuns,
+} from "../PieceQuote.js";
+import { codePieces } from "../piece-segments.js";
 import { sanitizedFragment, setSanitizedHtml } from "./dom-html.js";
 import { chunkLines, splitHighlightHtml } from "./highlight-chunks.js";
 import { viewerHighlighter } from "./highlighter.js";
@@ -103,15 +117,19 @@ export function CodeView({
   truncated,
   language,
   anchor,
+  piece,
 }: {
   readonly content: string;
   readonly truncated: boolean;
   /** highlight.js language id; undefined = plain text. */
   readonly language?: string | undefined;
   readonly anchor?: ViewerAnchor | undefined;
+  /** Piece quoting (ADR 0078); absent where the panel offers none. */
+  readonly piece?: PieceQuoting | undefined;
 }): JSX.Element {
   const t = useT();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef<HTMLPreElement | null>(null);
   const [band, setBand] = useState<{
     readonly top: number;
@@ -122,7 +140,7 @@ export function CodeView({
   // move of its divider and every frame of a sidebar slide (its width is
   // state), and this split / slice / join / gutter build runs over up to
   // 300K characters and 8 000 lines (perf audit 2026-09-20).
-  const { elided, lineCount, shown, gutter, chunks } = useMemo(() => {
+  const { elided, lineCount, shown, gutter, chunks, lines } = useMemo(() => {
     const allLines = content.split("\n");
     const lines = allLines.slice(0, MAX_RENDER_LINES);
     return {
@@ -131,8 +149,38 @@ export function CodeView({
       shown: lines.join("\n"),
       gutter: lines.map((_, i) => i + 1).join("\n"),
       chunks: chunkLines(lines),
+      lines,
     };
   }, [content]);
+
+  // The pieces (ADR 0078 §2): runs of lines to their blank line, laid out
+  // by the same line metrics the cite band uses, full width, gutter and all.
+  const measurePieces = useCallback((): readonly MaskPiece[] => {
+    const inner = innerRef.current;
+    const text = textRef.current;
+    if (inner === null || text === null) return [];
+    const cs = getComputedStyle(text);
+    const lh = Number.parseFloat(cs.lineHeight) || FALLBACK_LINE_H;
+    const padTop = Number.parseFloat(cs.paddingTop) || 0;
+    const ranges = codePieces(lines);
+    const tops = ranges.map((r, i) =>
+      i === 0 ? 0 : padTop + (r.from - 1) * lh,
+    );
+    return ranges.map((r, i) => {
+      const top = tops[i] ?? 0;
+      const bottom = tops[i + 1] ?? inner.offsetHeight;
+      return { top, height: bottom - top, from: r.from, to: r.to };
+    });
+  }, [lines]);
+  const quotePieces = useCallback(
+    (runs: readonly (readonly MaskPiece[])[]): void => {
+      if (piece === undefined) return;
+      piece.onQuote(
+        quotesFromRuns(runs, lines, piece.path, piece.lang, language),
+      );
+    },
+    [piece, lines, language],
+  );
 
   // Plain text first (synchronous, so the first paint and the anchor
   // metrics never wait on the highlighter), as blocks the tokens will land
@@ -189,7 +237,7 @@ export function CodeView({
   return (
     <div className="file-viewer__body">
       <div ref={scrollerRef} className="file-viewer__code">
-        <div className="file-viewer__code-inner">
+        <div ref={innerRef} className="file-viewer__code-inner">
           {band !== null && (
             <div
               className="file-viewer__anchor"
@@ -201,6 +249,16 @@ export function CodeView({
             {gutter}
           </pre>
           <pre ref={textRef} className="file-viewer__text" />
+          {piece !== undefined && (
+            <PieceMask
+              enabled={piece.enabled}
+              hostRef={innerRef}
+              scrollerRef={scrollerRef}
+              measure={measurePieces}
+              onQuote={quotePieces}
+              resetKey={content}
+            />
+          )}
         </div>
       </div>
       {(truncated || elided > 0) && (

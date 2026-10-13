@@ -34,6 +34,42 @@ function emitPending(mock: MockHertaBridge): void {
   });
 }
 
+describe("Workspace — the pane speaks the session's language (ADR 0019, amended 2026-10-13)", () => {
+  it("an English session in the Chinese app: the composer and the approval card read in English", async () => {
+    // Seen live: an English session showed a 请求权限 card and 给黑塔发消息….
+    const mock = createMockHertaBridge();
+    renderWithLocale(
+      <HertaBridgeProvider bridge={mock.bridge}>
+        <Workspace />
+      </HertaBridgeProvider>,
+      { locale: "zh" },
+    );
+    const open = (lang: "zh" | "en", sessionId: string): void =>
+      act(() => {
+        mock.emitReset({
+          sessionId,
+          workspaceRoot: "/r",
+          record: [],
+          overlay: null,
+          backendWorkspace: "/r",
+          backendWorkspaceIsDefault: true,
+          lang,
+        });
+      });
+    open("en", "s-en");
+    await settle();
+    expect(screen.getByPlaceholderText("Message Herta…")).toBeInTheDocument();
+    emitPending(mock);
+    expect(
+      screen.getByTestId("approval-panel").getAttribute("aria-label"),
+    ).toBe("Permission request");
+    // A Chinese session in the same app reads in Chinese.
+    open("zh", "s-zh");
+    await settle();
+    expect(screen.getByPlaceholderText("给黑塔发消息…")).toBeInTheDocument();
+  });
+});
+
 describe("Workspace", () => {
   it("renders the tide wave at the composer's floor (voice card retired)", async () => {
     const mock = createMockHertaBridge();

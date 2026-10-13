@@ -178,16 +178,12 @@ describe("BackendContextBuilder", () => {
     const frame = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "Repo prefers edit_file over write_new_file.",
       scopedMemory: "User dislikes overlong replies.",
       messages: [],
     });
 
     expect(frame.backendSystem).toContain(BACKEND_EXECUTION_CONTRACT);
     expect(frame.backendSystem).toContain("fix the failing parser test");
-    expect(frame.scopedRepoInstructions).toBe(
-      "Repo prefers edit_file over write_new_file.",
-    );
     expect(frame.scopedMemory).toBe("User dislikes overlong replies.");
     expect(frame.messages).toEqual([]);
     expect(frame.toolSchemas).toEqual([]);
@@ -200,14 +196,12 @@ describe("BackendContextBuilder", () => {
     const a = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
     });
     const b = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
     });
@@ -236,7 +230,6 @@ describe("BackendContextBuilder", () => {
     const frame = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
     });
@@ -251,7 +244,6 @@ describe("BackendContextBuilder", () => {
     const frame = builder.build({
       brief: sampleBrief,
       userMessages: [],
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
     });
@@ -265,7 +257,6 @@ describe("BackendContextBuilder", () => {
     const frame = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
     });
@@ -281,7 +272,6 @@ describe("BackendContextBuilder", () => {
     const frame = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
       workingHistory: "完成 · 1 file\n↳ 改动文件: auth.ts",
@@ -307,7 +297,6 @@ describe("BackendContextBuilder", () => {
     const frame = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
       workingHistory: "",
@@ -329,7 +318,6 @@ describe("prompt separation invariants", () => {
   const frame = builder.build({
     brief: sampleBrief,
     userMessages: sampleUserMessages,
-    scopedRepoInstructions: "scoped repo only",
     scopedMemory: "scoped memory only",
     messages: [],
   });
@@ -442,7 +430,6 @@ describe("EN backend prompt (ADR 0016)", () => {
     const frame = builder.build({
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
       lang: "en",
@@ -470,7 +457,6 @@ describe("EN backend prompt (ADR 0016)", () => {
     const common = {
       brief: sampleBrief,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
       workingHistory: "完成 · 1 file",
@@ -489,7 +475,6 @@ describe("minimal contract (ADR 0040)", () => {
   const common = {
     brief: sampleBrief,
     userMessages: sampleUserMessages,
-    scopedRepoInstructions: "",
     scopedMemory: "",
     messages: [],
   };
@@ -595,7 +580,6 @@ describe("host note (ADR 0044)", () => {
   const common = {
     brief: sampleBrief,
     userMessages: sampleUserMessages,
-    scopedRepoInstructions: "",
     scopedMemory: "",
     messages: [],
   };
@@ -681,7 +665,6 @@ describe("repo snapshot section (ADR 0049)", () => {
   const common = {
     brief: sampleBrief,
     userMessages: sampleUserMessages,
-    scopedRepoInstructions: "",
     scopedMemory: "",
     messages: [],
   };

@@ -66,6 +66,8 @@ function openApp(blocks: number): ReturnType<typeof createMockHertaBridge> {
       overlay: null,
       backendWorkspace: "/r",
       backendWorkspaceIsDefault: true,
+      // The pane reads in the session's language; this one matches the UI.
+      lang: "en",
     });
   });
   act(() => {

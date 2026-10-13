@@ -68,6 +68,21 @@ describe("runCommandTool — the live view (ADR 0073)", () => {
 });
 
 describe.skipIf(!POSIX)("runCommandTool", () => {
+  it("says whether the command was of a class that changes nothing — what undo leaves out of its note (ADR 0074 §2)", async () => {
+    ws = await mkTmpWorkspace({});
+    const tool = runCommandTool();
+    const run = async (argv: string[]) => {
+      const r = await tool.run(
+        { id: "c", tool: "run_command", input: { argv } },
+        ctxFor(ws.root),
+        noopProgress,
+      );
+      return (r.data as { readOnly?: boolean } | undefined)?.readOnly;
+    };
+    expect(await run(["node", "-v"])).toBe(true);
+    expect(await run(["mkdir", "made-here"])).toBe(false);
+  });
+
   it("happy path: runs echo, returns stdout, writes log file", async () => {
     ws = await mkTmpWorkspace({});
     const tool = runCommandTool();
@@ -333,4 +348,18 @@ describe("runCommandTool — timeout output capture", () => {
     const log = await readFile(join(ws.root, data.logPath), "utf-8");
     expect(log).toContain("partial-marker");
   }, 20_000);
+});
+
+describe("runCommandTool runsTests (ADR 0073 amendment 2026-10-08)", () => {
+  it("reads the argv its result's test row is detected on", () => {
+    const tool = runCommandTool();
+    expect(tool.runsTests?.({ argv: ["npm", "test"] })).toBe(true);
+    expect(tool.runsTests?.({ argv: ["python", "-m", "pytest", "-q"] })).toBe(
+      true,
+    );
+    expect(tool.runsTests?.({ argv: ["ls", "-la"] })).toBe(false);
+    expect(tool.runsTests?.({ argv: "npm test" })).toBe(false);
+    expect(tool.runsTests?.({ argv: ["npm", 1] })).toBe(false);
+    expect(tool.runsTests?.({})).toBe(false);
+  });
 });

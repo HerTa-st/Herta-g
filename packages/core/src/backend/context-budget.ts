@@ -97,7 +97,7 @@ export function estimateMessagesTokens(messages: readonly Message[]): number {
 
 type FrameBase = Pick<
   BackendPromptFrame,
-  "backendSystem" | "scopedRepoInstructions" | "scopedMemory" | "toolSchemas"
+  "backendSystem" | "scopedMemory" | "toolSchemas"
 >;
 
 /** The frame's INVARIANT part, memoized on the frame object: the turn
@@ -111,7 +111,6 @@ function frameStaticTokens(frame: FrameBase): number {
   if (cached !== undefined) return cached;
   const t =
     estimatePromptTokens(frame.backendSystem) +
-    estimatePromptTokens(frame.scopedRepoInstructions) +
     estimatePromptTokens(frame.scopedMemory) +
     estimatePromptTokens(JSON.stringify(frame.toolSchemas));
   frameBaseTokenCache.set(frame, t);

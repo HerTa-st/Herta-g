@@ -112,6 +112,14 @@ export function sanitizeDigest(digest: SystemBlockDigest): SystemBlockDigest {
         source: cleanBody(digest.source),
         path: cleanBody(digest.path),
       };
+    case "undo":
+      // Paths 板砖 wrote, or its commands touched (ADR 0074): backend-derived
+      // like every path here. The results and flags are harness-made.
+      return {
+        ...digest,
+        files: digest.files.map((f) => ({ ...f, path: cleanBody(f.path) })),
+        commands: digest.commands.map(cleanBody),
+      };
     case "skip":
       return digest;
   }
@@ -328,8 +336,15 @@ export function projectBackendEventUnsanitized(
         label: "差分协处理器",
         body,
         // Structured digest (M-projection-3): compaction digests from THIS,
-        // not by regex-parsing the rendered body back apart.
-        digest: { kind: "op", verb: label, arg },
+        // not by regex-parsing the rendered body back apart. `runsTests`
+        // rides along when the tool recognised a test run at dispatch (ADR
+        // 0073 amendment 2026-10-08) — the body is unchanged.
+        digest: {
+          kind: "op",
+          verb: label,
+          arg,
+          ...(event.runsTests === true ? { runsTests: true as const } : {}),
+        },
       };
     }
 
@@ -384,6 +399,21 @@ export function projectBackendEventUnsanitized(
             label: "差分协处理器",
             body: `↳ finding: ${data.claim}${cites.length > 0 ? ` — ${cites.join(", ")}` : ""}`,
             digest: { kind: "finding", claim: data.claim, cites },
+          };
+        }
+        // A saved fact, as the store holds it — redacted (ADR 0077). The op
+        // row names only its kind; this says what 板砖 will remember, so the
+        // user and Herta can see it (PHILOSOPHY §9). Bounded: a fact is one
+        // sentence by schema.
+        if (event.tool === "memory_save") {
+          const data = event.result.data as { text?: unknown } | undefined;
+          if (typeof data?.text !== "string") return null;
+          const fact =
+            data.text.length > 200 ? `${data.text.slice(0, 200)}…` : data.text;
+          return {
+            kind: "system",
+            label: "差分协处理器",
+            body: `↳ remembered: ${fact.replace(/\s+/g, " ").trim()}`,
           };
         }
         // search_text surfaces its hits (2026-08-17). Same reasoning as

@@ -19,7 +19,6 @@ async function fakeFetchFromFixture(name: string): Promise<typeof fetch> {
 
 const userOnly: PromptFrame = {
   stableSystem: "",
-  repoInstructions: "",
   memoryContext: "",
   retrievedLore: "",
   messages: [{ role: "user", text: "hi", ts: "t" }],

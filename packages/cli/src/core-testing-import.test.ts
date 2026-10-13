@@ -11,7 +11,6 @@ describe("@herta/core/testing sub-export", () => {
     for await (const e of provider.streamChat(
       {
         stableSystem: "",
-        repoInstructions: "",
         memoryContext: "",
         retrievedLore: "",
         messages: [],

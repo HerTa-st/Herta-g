@@ -13,7 +13,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   type AgentEvent,
   type ApprovalOverlayState,
@@ -22,24 +22,30 @@ import {
   type EventBus,
   isAbortError,
   type LastTurnEnd,
-  type ProjectCommandRuleStore,
   type ProviderAdapter,
   type RepoContextSnapshot,
   readDispatchJournal,
+  readUndoIndex,
+  restoreUndo,
   resumableRun,
-  ruleDisplay,
   type SessionTopic,
   type SystemBlock,
   type TerminalRecord,
   type TerminalRecordBlock,
+  type UndoMark,
+  type UndoSegmentView,
+  UndoStore,
+  undoSegments,
+  undoStoreDir,
   type V2RecordPersister,
-  type WorkspaceTrust,
+  type WorkspacePermissions,
 } from "@herta/core";
 import {
   type MetaThinkCorpus,
   type OpeningChoice,
   type PromptLang,
   type StaticHertaPrefix,
+  sanitizeSystemBlock,
   V2ActorDriver,
 } from "@herta/herta";
 import { type ApiKey, deepseekVisionCaptioner } from "@herta/providers";
@@ -58,8 +64,17 @@ import {
   type WorkingDiff,
 } from "@herta/tools";
 import { type ImageCaptioner, migrateAttachments } from "./attachments.js";
+import {
+  AutoReviewer,
+  defaultReviewModel,
+  reviewModelFrom,
+} from "./auto-review.js";
 import { BusActorStreamingSink } from "./bus-streaming-sink.js";
 import { dropWithdrawnJournal } from "./dispatch-recovery.js";
+import {
+  offlineChatProvider,
+  offlineCompletionProvider,
+} from "./offline-providers.js";
 import { OverlayAskResolver } from "./overlay-ask-resolver.js";
 import { recordTail } from "./record-window.js";
 import {
@@ -92,6 +107,7 @@ import type {
   AppServerConfig,
   AttachProgress,
   AttachResult,
+  AutoReviewState,
   ContinueInterruptedResult,
   OverlayEvent,
   RecordEvent,
@@ -107,11 +123,14 @@ import type {
   SteerTextResult,
   TitleEvent,
   TurnLifecycleEvent,
+  UndoEvent,
+  UndoTarget,
+  UndoTurnEditsResult,
   VoiceCueEvent,
   WorkspaceEvent,
   WorkspaceSetResult,
-  WorkspaceTrustState,
 } from "./types.js";
+import { undoNoteBody } from "./undo-note.js";
 
 /**
  * True when a withdrawn span includes a backend (板砖) done-marker that reports
@@ -185,6 +204,9 @@ export interface SessionInternalDeps {
     /** The digest tool's side model (ADR 0043). With `providerOverrides`
      *  present and this absent, the tool mounts `unavailable`. */
     readonly digest?: ProviderAdapter;
+    /** The automatic reviewer's model (ADR 0075). With `providerOverrides`
+     *  present and this absent, no reviewer is mounted. */
+    readonly review?: ProviderAdapter;
   };
   /** Skip the async buildStaticHertaPrefix disk scan. */
   readonly staticPrefixOverride?: StaticHertaPrefix;
@@ -371,9 +393,9 @@ export class SessionImpl implements Session {
   // resolveApproval() can call resolveExternal().
   private readonly overlayResolver: OverlayAskResolver;
 
-  // Project command allow rules (ADR 0030) — held for the Settings
-  // management surface (list/remove); the resolver consults it directly.
-  private readonly commandRules: ProjectCommandRuleStore;
+  // The workspace's permission choices — held for the automatic-review
+  // switch; the resolver consults it directly.
+  private readonly workspacePermissions: WorkspacePermissions;
 
   // The narrative-completion actor driver — owns the growing TerminalRecord,
   // mood routing, the supervisor, and (via its persister) block persistence.
@@ -420,6 +442,11 @@ export class SessionImpl implements Session {
   // Live DeepSeek key getter (the host's mutable holder). submitText reads it to
   // detect the no-key case; the providers were built with the same getter.
   private readonly deepSeekKey: () => string;
+  /** The composer-prediction switch, live (2026-10-10). */
+  private readonly composerPredictions: () => boolean;
+  /** The prediction in flight after a finished turn, if any — aborted when
+   *  the next turn starts or the session closes. */
+  private prediction: AbortController | null = null;
 
   // Per-turn abort tracking. Set at the start of submitText; cleared in
   // finally. interrupt() aborts this controller; close() calls interrupt()
@@ -453,6 +480,16 @@ export class SessionImpl implements Session {
   private readonly contract: string;
   /** Whether a 继续 is on offer (ADR 0071 §1.4); see `refreshResumable`. */
   private _resumable = false;
+  /** Whether the latest turn can be undone (ADR 0074); see
+   *  `refreshUndoable`. */
+  private _undoable = false;
+  /** An undo is running: a second one waits its turn by refusing. */
+  private undoing = false;
+  /** Settles when the running undo has landed. A send or a 继续 that
+   *  arrives meanwhile waits for it, so the undo's `→ 系统` line goes in
+   *  before the message, never inside its turn (release review 2026-10-13:
+   *  only the undo checked for a turn, not a turn for the undo). */
+  private undoSettled: Promise<void> = Promise.resolve();
 
   /** The session title and its topic history — generation after a user
    *  turn, the rewind fence, the sidecar (session-titler.ts). */
@@ -503,7 +540,7 @@ export class SessionImpl implements Session {
     sink: BusActorStreamingSink;
     projector: SessionEventProjector;
     overlayResolver: OverlayAskResolver;
-    commandRules: ProjectCommandRuleStore;
+    workspacePermissions: WorkspacePermissions;
     transcriptDir: string;
     titler: SessionTitler;
     pendingOpening: TerminalRecordBlock | null;
@@ -516,6 +553,8 @@ export class SessionImpl implements Session {
     captionImage: ImageCaptioner | null;
     /** The user's PDF-picture transcription switch, live (2026-10-01). */
     transcribePdfPictures: () => boolean;
+    /** The composer-prediction switch, live (2026-10-10). */
+    composerPredictions: () => boolean;
     steer: SteerChannel;
     bus: EventBus<AgentEvent>;
     /** ADR 0067: the toolset follows the environment. Fired after the
@@ -552,13 +591,14 @@ export class SessionImpl implements Session {
     this._record = opts.driver.getRecord();
     this.projector = opts.projector;
     this.overlayResolver = opts.overlayResolver;
-    this.commandRules = opts.commandRules;
+    this.workspacePermissions = opts.workspacePermissions;
     this.transcriptDir = opts.transcriptDir;
     this.titler = opts.titler;
     this.pendingOpening = opts.pendingOpening;
     this.voice = opts.voice;
     this.openingLeadMs = opts.openingLeadMs;
     this.deepSeekKey = opts.deepSeekKey;
+    this.composerPredictions = opts.composerPredictions;
     this.lang = opts.lang;
     this.pendingContractNote = opts.pendingContractNote;
     this.attachments = new SessionAttachments({
@@ -642,6 +682,7 @@ export class SessionImpl implements Session {
       settleTurn = resolve;
     });
     this.currentTurn = { turnId, abortController, settled };
+    this.abortPrediction();
     this.projector.emitTurnLifecycle({ kind: "started", turnId });
     try {
       await body(abortController.signal);
@@ -652,6 +693,9 @@ export class SessionImpl implements Session {
       // streaming bubble out from under it. In the shared runner rather than
       // one caller, so a regenerated reply (D2) settles the same way a
       // submitted one does; the opening is unvoiced and this is a no-op there.
+      // A text reveal (a beat, or the whole reply with the supervisor off)
+      // finishes at its own pace first: landing it would flash its tail.
+      await this.sink.textRevealsDone();
       this.sink.settleVoice();
       this._record = this.driver.getRecord();
       hooks.onFinished?.();
@@ -704,6 +748,8 @@ export class SessionImpl implements Session {
       // A dispatch, a Stop or a 继续 may have changed what can be continued
       // (ADR 0071 §1.4).
       void this.refreshResumable();
+      // And whether its edits can be taken back (ADR 0074).
+      void this.refreshUndoable();
     }
     return turnId;
   }
@@ -847,6 +893,161 @@ export class SessionImpl implements Session {
     this.projector.emitResume({ kind: "offer", resumable: value });
   }
 
+  // ───── Undo (ADR 0074) ─────────────────────────────────────────────────
+
+  /** Whether the record's latest turn can be undone — the 撤销 chip. */
+  get undoable(): boolean {
+    return this._undoable;
+  }
+
+  subscribeUndo(): AsyncIterable<UndoEvent> {
+    return this.projector.subscribeUndo();
+  }
+
+  /** Work out whether the latest turn can be undone, and say so when it
+   *  changes. The user's alone: nothing of it enters the record. */
+  async refreshUndoable(): Promise<void> {
+    const value =
+      this.currentTurn === null &&
+      this.latestTurnSegments(await this.undoViews()).some(
+        (v) => v.writes.length > 0,
+      );
+    if (value === this._undoable) return;
+    this._undoable = value;
+    this.projector.emitUndo({ kind: "offer", undoable: value });
+  }
+
+  private get undoDir(): string {
+    return undoStoreDir(this.transcriptDir, this.sessionId);
+  }
+
+  private async undoViews(): Promise<UndoSegmentView[]> {
+    return undoSegments(await readUndoIndex(this.undoDir));
+  }
+
+  /** Where the latest turn starts: its user block, never a steer (ADR 0063
+   *  §1.10) — the cut a rewind makes. -1 with no turn. */
+  private latestTurnStart(): number {
+    const record = this.driver.getRecord();
+    for (let i = record.length - 1; i >= 0; i -= 1) {
+      const b = record[i];
+      if (b?.kind === "user" && b.steer !== true) return i;
+    }
+    return -1;
+  }
+
+  /** The latest turn's segments still to be undone: begun after its user
+   *  block, and neither withdrawn, undone nor dropped. */
+  private latestTurnSegments(
+    views: readonly UndoSegmentView[],
+  ): UndoSegmentView[] {
+    const start = this.latestTurnStart();
+    if (start === -1) return [];
+    return views.filter(
+      (v) => v.at > start && !v.withdrawn && !v.undone && !v.dropped,
+    );
+  }
+
+  /** Segments ⟲ took out since the last send, not yet undone. */
+  private static pendingWithdrawn(
+    views: readonly UndoSegmentView[],
+  ): UndoSegmentView[] {
+    return views.filter((v) => v.withdrawn && !v.undone && !v.dropped);
+  }
+
+  private async markUndo(
+    kind: UndoMark,
+    views: readonly UndoSegmentView[],
+  ): Promise<void> {
+    if (views.length === 0) return;
+    const store = await UndoStore.open(this.undoDir);
+    await store.mark(
+      kind,
+      views.map((v) => v.seg),
+    );
+    await store.close();
+  }
+
+  /** A withdrawn turn's edits stay undoable until the next send (the
+   *  rewind notice lasts that long); then they go. Called inside the next
+   *  turn, so no undo can race it. */
+  private async dropWithdrawnEdits(): Promise<void> {
+    await this.markUndo(
+      "dropped",
+      SessionImpl.pendingWithdrawn(await this.undoViews()),
+    );
+  }
+
+  /**
+   * Take a turn's edits back (ADR 0074 §3–§4): harness code, three ways per
+   * file — never overwriting one changed since. `latest`: the record's
+   * latest turn, from its card; the turn stays in the record, so a `→ 系统`
+   * line says what came back and what is still changed — Herta must not
+   * believe edits that are gone. `withdrawn`: what ⟲ took out since the
+   * last send, from its notice; that turn is no longer in the record, so
+   * nothing is written there. Idle-only.
+   */
+  async undoLastTurnEdits(target: UndoTarget): Promise<UndoTurnEditsResult> {
+    if (this.currentTurn !== null || this.undoing) {
+      return { ok: false, reason: "turn_in_progress" };
+    }
+    this.undoing = true;
+    let landed: () => void = () => {};
+    this.undoSettled = new Promise((resolve) => {
+      landed = resolve;
+    });
+    try {
+      const views = await this.undoViews();
+      const segs =
+        target === "latest"
+          ? this.latestTurnSegments(views)
+          : SessionImpl.pendingWithdrawn(views);
+      if (!segs.some((v) => v.writes.length > 0)) {
+        return { ok: false, reason: "nothing_to_undo" };
+      }
+      const root = this.backendWorkspace;
+      const outcome = await restoreUndo(this.undoDir, segs, root);
+      await this.markUndo("undone", segs);
+      const result = {
+        files: outcome.files.map((f) => ({
+          path: relative(root, f.path).replaceAll("\\", "/"),
+          result: f.result,
+        })),
+        commands: outcome.commands.paths,
+        commandsUnknown: outcome.commands.unknown,
+        incomplete: outcome.incomplete,
+      };
+      if (target === "latest") {
+        // The paths came from 板砖's writes: sanitized at construction, the
+        // one gate on a system block (the serializer does not clean bodies).
+        this.driver.appendSystemBlock(
+          sanitizeSystemBlock({
+            kind: "system",
+            label: "系统",
+            body: undoNoteBody(result, this.lang),
+            digest: { kind: "undo", ...result },
+          }),
+        );
+        this._record = this.driver.getRecord();
+      }
+      return { ok: true, ...result };
+    } finally {
+      try {
+        await this.refreshUndoable();
+      } finally {
+        this.undoing = false;
+        landed();
+      }
+    }
+  }
+
+  /** Wait for an undo in flight to land (see `undoSettled`). Callers check
+   *  `undoing` first: with none running, a turn still takes its slot in the
+   *  call's own tick. */
+  private async undoLanded(): Promise<void> {
+    while (this.undoing) await this.undoSettled;
+  }
+
   /**
    * 继续 (ADR 0071 §1.4): continue the interrupted 板砖 run. The turn's user
    * block is `继续` (`Continue`) marked `resume`; the run continues from its
@@ -856,6 +1057,7 @@ export class SessionImpl implements Session {
    */
   async continueInterrupted(): Promise<ContinueInterruptedResult> {
     if (this.deepSeekKey().trim() === "") return { needsKey: true };
+    if (this.undoing) await this.undoLanded();
     if (this.currentTurn !== null) return { unavailable: true };
     // Checked against the journal now, not trusted from the last answer.
     await this.refreshResumable();
@@ -865,7 +1067,11 @@ export class SessionImpl implements Session {
     this.setResumable(false);
     const text = this.lang === "en" ? "Continue" : "继续";
     const turnId = await this.runAsTurn(
-      (signal) => this.driver.runTurn(text, signal, true, [], { resume: true }),
+      async (signal) => {
+        // A send: a withdrawn turn's edits are past undoing now (ADR 0074).
+        await this.dropWithdrawnEdits();
+        return this.driver.runTurn(text, signal, true, [], { resume: true });
+      },
       {
         onFinished: () => this.recordTurnEnd("completed"),
         onFailed: (err) => {
@@ -901,15 +1107,22 @@ export class SessionImpl implements Session {
     // gate, so a duplicate IPC / renderer-reload race could otherwise run two
     // turns concurrently on the single-threaded driver and corrupt the shared
     // record + persist cursor.
+    if (this.undoing) await this.undoLanded();
     if (this.currentTurn !== null) {
       throw new Error("a turn is already in progress");
     }
+    // ADR 0075: the owner has spoken — the reviewer's brake lifts.
+    this.overlayResolver.resetReviewBrake();
     // ADR 0044: a front-end that never calls playOpening (the CLI) still gets
     // the contract-fallback note — between turns, before this turn's user
     // block. One-shot no-op everywhere else.
     this.flushContractNote();
     const turnId = await this.runAsTurn(
       async (signal) => {
+        // A send: a withdrawn turn's edits are past undoing now — the rewind
+        // notice that offered them is gone (ADR 0074 §4). Inside the turn,
+        // so no undo can race it.
+        await this.dropWithdrawnEdits();
         // Take the staged pictures BEFORE the driver runs (ADR 0048 §4):
         // their blocks go in right after the user block, so Herta reads the
         // message and what came with it as one thing. `commit` awaits the
@@ -952,7 +1165,38 @@ export class SessionImpl implements Session {
     // re-entry, or periodic on a long session). Fire-and-forget — the user
     // already sees Herta's reply; the title fills/updates after.
     this.titler.afterUserTurn();
+    // And the composer's suggestion for what they might say next.
+    void this.predictNextMessage(turnId);
     return { turnId };
+  }
+
+  /**
+   * Composer predictions (owner 2026-10-10): after a submitted turn finishes,
+   * the driver guesses the Trailblazer's next message and the composer offers
+   * it (`predicted`). Fire-and-forget and best-effort: off unless the user's
+   * switch is on, dropped when another turn has started by the time it
+   * lands, and silent on any failure. Never touches the record.
+   */
+  private async predictNextMessage(turnId: string): Promise<void> {
+    if (!this.composerPredictions()) return;
+    this.abortPrediction();
+    const ac = new AbortController();
+    this.prediction = ac;
+    try {
+      const text = await this.driver.predictNextUserMessage(ac.signal);
+      if (text === null || ac.signal.aborted || this.currentTurn !== null)
+        return;
+      this.projector.emitTurnLifecycle({ kind: "predicted", turnId, text });
+    } catch {
+      // An abort, or a failure the driver did not swallow: no suggestion.
+    } finally {
+      if (this.prediction === ac) this.prediction = null;
+    }
+  }
+
+  private abortPrediction(): void {
+    this.prediction?.abort();
+    this.prediction = null;
   }
 
   /**
@@ -1157,13 +1401,23 @@ export class SessionImpl implements Session {
     // D-Idle-only: never rewind across an in-flight turn (mirrors submitText's
     // single-turn invariant). The button is also hidden client-side while busy,
     // but enforce it here so an IPC race can't truncate mid-stream.
-    if (this.currentTurn !== null) {
+    if (this.currentTurn !== null || this.undoing) {
       return { ok: false, reason: "turn_in_progress" };
     }
+    // The turn's edits, read before the cut moves the turn's start (ADR
+    // 0074 §4): they leave the record with it, and stay undoable from the
+    // rewind notice until the next send.
+    const views = await this.undoViews();
+    const turnSegments = this.latestTurnSegments(views);
     const result = this.driver.rewindLastUserTurn();
     if (result === null) {
       return { ok: false, reason: "no_user_turn" };
     }
+    await this.markUndo("withdrawn", turnSegments);
+    const undoable = [
+      ...SessionImpl.pendingWithdrawn(views),
+      ...turnSegments,
+    ].some((v) => v.writes.length > 0);
     this._record = this.driver.getRecord();
     // Reset the sink's canonical-diff cursor to the new (shorter) length: the
     // record just shrank, so the next turn's flushBlocks must emit from there,
@@ -1211,11 +1465,14 @@ export class SessionImpl implements Session {
     // Rewinding past a 中断 marker takes the offer away; rewinding a 继续
     // turn can bring it back.
     await this.refreshResumable();
+    // The turn now latest may have edits of its own to offer (ADR 0074).
+    await this.refreshUndoable();
     return {
       ok: true,
       userText: result.userText,
       editedFiles: spanEditedFiles(result.withdrawn),
       ...(images.length > 0 ? { images } : {}),
+      undoable,
     };
   }
 
@@ -1298,32 +1555,21 @@ export class SessionImpl implements Session {
     }
   }
 
-  /** Display forms of the project command allow rules (ADR 0030) for the
-   *  CURRENT effective workspace — the Settings management list. */
-  async listCommandRules(): Promise<readonly string[]> {
-    return this.commandRules.list().map(ruleDisplay);
-  }
-
-  /** Removes one rule by its display form. False when nothing matched. */
-  async removeCommandRule(display: string): Promise<boolean> {
-    return this.commandRules.remove(display);
-  }
-
-  /** Workspace trust (ADR 0064) for the CURRENT effective workspace — read
-   *  through the resolver's policy so the card and the menu agree. */
-  async getWorkspaceTrust(): Promise<WorkspaceTrustState> {
+  /** Automatic review (ADR 0075) for the CURRENT effective workspace —
+   *  read through the resolver's policy so the card and the menu agree. */
+  async getAutoReview(): Promise<AutoReviewState> {
     return {
-      effective: this.overlayResolver.workspaceTrusted ? "workspace" : "ask",
-      explicit: this.commandRules.trust(),
+      on: this.overlayResolver.autoReviewOn,
+      explicit: this.workspacePermissions.autoReview(),
       isDefaultWorkspace: this.backendWorkspaceIsDefault,
     };
   }
 
-  async setWorkspaceTrust(
-    value: WorkspaceTrust | null,
-  ): Promise<WorkspaceTrustState> {
-    this.commandRules.setTrust(value);
-    return this.getWorkspaceTrust();
+  /** The owner's choice for the CURRENT workspace, in the file no command
+   *  may write; null clears it back to the default. */
+  async setAutoReview(on: boolean | null): Promise<AutoReviewState> {
+    this.workspacePermissions.setAutoReview(on);
+    return this.getAutoReview();
   }
 
   async resolveApproval(opts: ResolveApprovalOpts): Promise<ApprovalResult> {
@@ -1655,8 +1901,9 @@ export class SessionImpl implements Session {
     // currentTurn is null, so this is always safe to call.
     await this.interrupt();
     // Abort any in-flight title generation so a slow flash call can't outlive
-    // the session.
+    // the session — and the composer's prediction with it.
     this.titler.dispose();
+    this.abortPrediction();
 
     // Await the interrupted turn's REAL settlement (audit 2026-07-10,
     // finding 14): one setImmediate was not enough — a still-unwinding turn
@@ -1728,6 +1975,10 @@ export class SessionImpl implements Session {
     /** Live getter for the user's PDF-picture transcription switch (from the
      *  host's holder, 2026-10-01). Absent = on (tests, the CLI). */
     transcribePdfPictures?: () => boolean;
+    /** Live getter for the composer-prediction switch (from the host's
+     *  holder, 2026-10-10). Absent = off: a host that offers no switch
+     *  (tests, the CLI) makes no prediction calls. */
+    composerPredictions?: () => boolean;
     /** Interaction language (slice 4): threaded into every language-
      *  parameterized constructor below (static prefix, seeds, opening,
      *  meta-think, hints, recap, title) and into the V2ActorDriver. The
@@ -1758,17 +2009,37 @@ export class SessionImpl implements Session {
       config.providers.baseUrl !== undefined
         ? { baseUrl: config.providers.baseUrl }
         : {};
+    // ADR 0075: the automatic reviewer — flash, thinking low, the replay's
+    // better config. It answers only where the owner opted the workspace in.
+    // A test override takes the real provider's place; a test without one
+    // mounts none, so nothing reaches the network under test.
+    const reviewModel =
+      deps.providerOverrides?.review !== undefined
+        ? reviewModelFrom(deps.providerOverrides.review)
+        : deps.providerOverrides === undefined
+          ? defaultReviewModel(apiKey, baseUrl)
+          : null;
+    const autoReviewer =
+      reviewModel === null ? null : new AutoReviewer(reviewModel);
     // The one way both hosts build it (session-wiring.ts): Settings →
     // Coprocessor supplies the model and the thinking level (default
     // "high"), the wiring supplies everything the CLI would spell the same.
+    // Under the test seam a role left unstubbed is offline, never a real
+    // provider (offline-providers.ts) — and the same for the actor's roles
+    // and the title below.
+    const stubs = deps.providerOverrides;
     const backendProvider =
-      deps.providerOverrides?.backend ??
-      createBackendProvider({
-        apiKey,
-        model: config.providers.backendModel,
-        ...(config.thinking !== undefined ? { thinking: config.thinking } : {}),
-        ...baseUrl,
-      });
+      stubs?.backend ??
+      (stubs !== undefined
+        ? offlineChatProvider("backend")
+        : createBackendProvider({
+            apiKey,
+            model: config.providers.backendModel,
+            ...(config.thinking !== undefined
+              ? { thinking: config.thinking }
+              : {}),
+            ...baseUrl,
+          }));
 
     // 1. Backend stack (shared wiring — see session-wiring.ts). The
     //    OverlayAskResolver surfaces pending permission requests through the
@@ -1794,6 +2065,8 @@ export class SessionImpl implements Session {
       pendingUserInput: () => steer.drain(),
       // The run journal beside the session's record (ADR 0071).
       journalPath: dispatchJournalPath(config.transcriptDir, sessionId),
+      // And what 板砖's editors replace, for undo (ADR 0074).
+      undoDir: undoStoreDir(config.transcriptDir, sessionId),
       // The contract the setting asks for (ADR 0040). `minimal` needs a bash
       // on this machine; without one the session runs `standard`. The
       // Settings row shows the detection result (the GUI's getBackendContract
@@ -1821,15 +2094,45 @@ export class SessionImpl implements Session {
           : deps.providerOverrides === undefined
             ? defaultDigestModel(apiKey, baseUrl)
             : null,
-      makeAsk: ({ cache, rules }) => {
+      makeAsk: ({ cache, workspacePermissions }) => {
         overlayResolver = new OverlayAskResolver({
           cache,
-          rules,
-          // The managed sandbox trusts by default (ADR 0064): a new session's
-          // workspace under ~/.herta/workspaces holds nothing of the user's.
-          // A provider — setWorkspace moves the workspace mid-session.
-          defaultTrust: () =>
+          permissions: workspacePermissions,
+          // Automatic review is on by default in the managed sandbox (ADR 0064
+          // amendment 2026-10-10): a new session's workspace under
+          // ~/.herta/workspaces holds nothing of the user's. A provider —
+          // setWorkspace moves the workspace mid-session.
+          defaultAutoReview: () =>
             sessionHolder.session?.backendWorkspaceIsDefault === true,
+          ...(autoReviewer !== null
+            ? {
+                review: {
+                  reviewer: autoReviewer,
+                  // What the sink has projected so far — this turn's own
+                  // blocks included. `record` and the driver's `getRecord()`
+                  // both commit at turn boundaries, so mid-turn neither yet
+                  // holds the message this run answers (live lab 2026-10-09:
+                  // the reviewer was sent no user message at all and denied
+                  // what was asked for). The bridge reads the turn's working
+                  // record, which the sink mirrors.
+                  userMessages: () => {
+                    const s = sessionHolder.session;
+                    if (s === undefined || s === null) return [];
+                    const live = s.sink.flushedRecord() ?? s.driver.getRecord();
+                    return live.flatMap((b) =>
+                      b.kind === "user" && b.resume !== true ? [b.text] : [],
+                    );
+                  },
+                  workspace: () =>
+                    sessionHolder.session?.backendWorkspace ?? "",
+                  onReviewed: (notice) =>
+                    sessionHolder.session?.projector.emitOverlay({
+                      kind: "reviewed",
+                      notice,
+                    }),
+                },
+              }
+            : {}),
           setPendingOverlay(overlay) {
             // biome-ignore lint/style/noNonNullAssertion: set before any turn runs
             sessionHolder.session!._overlay = overlay;
@@ -1863,7 +2166,7 @@ export class SessionImpl implements Session {
         "[herta] backendContract=minimal requested but no bash found (install Git for Windows or set HERTA_BASH); running the standard contract",
       );
     }
-    const { bus, commandRules, runtimeFactory } = backend;
+    const { bus, workspacePermissions, runtimeFactory } = backend;
 
     // 1a. Event projector — subscribes to the bus so agent events fan-out
     //     to all SessionAgentEvent consumers automatically.
@@ -1905,14 +2208,17 @@ export class SessionImpl implements Session {
       dream: config.dream,
       promptDumpDir: config.transcriptDir,
       overrides: {
-        ...(deps.providerOverrides?.actor !== undefined
-          ? { actorProvider: deps.providerOverrides.actor }
-          : {}),
-        ...(deps.providerOverrides?.router !== undefined
-          ? { routerProvider: deps.providerOverrides.router }
-          : {}),
-        ...(deps.providerOverrides?.supervisor !== undefined
-          ? { supervisorProvider: deps.providerOverrides.supervisor }
+        ...(stubs !== undefined
+          ? {
+              actorProvider: stubs.actor ?? offlineCompletionProvider("actor"),
+              routerProvider: stubs.router ?? offlineChatProvider("router"),
+              // A router stub still covers the supervisor (and the recap,
+              // which rides its adapter) — the wiring's own test-seam rule.
+              supervisorProvider:
+                stubs.supervisor ??
+                stubs.router ??
+                offlineChatProvider("supervisor"),
+            }
           : {}),
         ...(deps.staticPrefixOverride !== undefined
           ? { staticPrefix: deps.staticPrefixOverride }
@@ -1932,7 +2238,10 @@ export class SessionImpl implements Session {
     // The title model (see createTitleProvider) and the title/topics the
     // session opens with, judged against the record actually loaded.
     const titleProvider =
-      deps.providerOverrides?.title ?? createTitleProvider(apiKey, baseUrl);
+      stubs?.title ??
+      (stubs !== undefined
+        ? offlineChatProvider("title")
+        : createTitleProvider(apiKey, baseUrl));
     const existing = loadSessionTitleState(
       config.transcriptDir,
       sessionId,
@@ -2093,7 +2402,7 @@ export class SessionImpl implements Session {
       sink,
       projector,
       overlayResolver,
-      commandRules,
+      workspacePermissions,
       transcriptDir: config.transcriptDir,
       titler: new SessionTitler({
         sessionId,
@@ -2129,6 +2438,7 @@ export class SessionImpl implements Session {
           ? deepseekVisionCaptioner({ apiKey, ...baseUrl })
           : null,
       transcribePdfPictures: opts.transcribePdfPictures ?? (() => true),
+      composerPredictions: opts.composerPredictions ?? (() => false),
       repoDescriber: deps.repoDescriber ?? describeRepoOutcome,
       repoWatcher: deps.repoWatcher ?? watchGitDir,
       repoWatchDebounceMs: deps.repoWatchDebounceMs ?? REPO_WATCH_DEBOUNCE_MS,
@@ -2147,6 +2457,11 @@ export class SessionImpl implements Session {
     // card: the open's snapshot is what a reload re-syncs from, and the
     // answer is one small file read.
     await session.refreshResumable();
+    // A withdrawn turn's edits were undoable from a rewind notice, which did
+    // not survive the restart; the latest turn's chip state is read fresh
+    // (ADR 0074).
+    await session.dropWithdrawnEdits();
+    await session.refreshUndoable();
     return session;
   }
 }

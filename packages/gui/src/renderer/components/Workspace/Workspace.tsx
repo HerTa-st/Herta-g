@@ -1,9 +1,15 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useSessionLang } from "../../hooks/useActiveSession.js";
 import { useDisconnected } from "../../hooks/useDisconnected.js";
 import { useReducedMotion } from "../../hooks/useReducedMotion.js";
 import { useSessionSelector } from "../../hooks/useSessionSelector.js";
-import { useT } from "../../i18n/LocaleProvider.js";
+import {
+  LocaleProvider,
+  makeT,
+  useLocale,
+  useT,
+} from "../../i18n/LocaleProvider.js";
 import { ApprovalPanel } from "../Approval/ApprovalPanel.js";
 import { Composer } from "./Composer.js";
 import { ConnectStation } from "./ConnectStation.js";
@@ -38,14 +44,27 @@ function WorkspaceInner(): JSX.Element {
   const arrivedViaMorph = useRef(false);
   if (morphing) arrivedViaMorph.current = true;
   if (!disconnected) arrivedViaMorph.current = false;
+  // The conversation pane speaks the session's language, the app's chrome
+  // the app's (owner, 2026-10-13: an English session in the Chinese app
+  // showed 消息正在穿越银河 and a 请求权限 card; ADR 0019 amendment). The
+  // last session's language is kept for the composer that turns into the
+  // connect button as the session goes, so the riser carries the same words.
+  const app = useLocale();
+  const sessionLang = useSessionLang();
+  const lastPaneLang = useRef(app.locale);
+  if (connected) lastPaneLang.current = sessionLang;
+  const paneLang = connected ? sessionLang : lastPaneLang.current;
+  const paneT = useMemo(() => makeT(paneLang), [paneLang]);
   const cls = `workspace${morphing ? " is-morphing" : ""}${reconnect.reconnecting ? " is-reconnecting" : ""}${reconnect.revealing ? " is-revealing" : ""}`;
   return (
     <main className={cls} data-testid="workspace">
-      <Conversation />
-      <div className="workspace-footer">
-        <Composer />
-        <ApprovalPanel />
-      </div>
+      <LocaleProvider locale={paneLang} onLocaleChange={app.setLocale}>
+        <Conversation />
+        <div className="workspace-footer">
+          <Composer />
+          <ApprovalPanel />
+        </div>
+      </LocaleProvider>
       {/* The static button is withheld until the morph settles (`!morphing`),
           so the flying clone hands off to it at the centre with no re-fade.
           Under reduced motion `morphing` is always false → A5's swap. When the
@@ -76,7 +95,7 @@ function WorkspaceInner(): JSX.Element {
           >
             <div className="connect-morph-clone-input" aria-hidden="true">
               <span className="connect-morph-clone-placeholder">
-                {t("composer.placeholder")}
+                {paneT("composer.placeholder")}
               </span>
               <span className="connect-morph-clone-send">
                 <SendArrowIcon />

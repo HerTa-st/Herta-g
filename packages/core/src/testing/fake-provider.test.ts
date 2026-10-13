@@ -5,7 +5,6 @@ import { FakeProvider } from "./fake-provider.js";
 
 const FRAME: PromptFrame = {
   stableSystem: "",
-  repoInstructions: "",
   memoryContext: "",
   retrievedLore: "",
   messages: [],

@@ -6,6 +6,7 @@ import {
   globReachesHertaState,
   hertaStateWriteDenial,
   mentionsHertaState,
+  namesHertaState,
   resolveSafePath,
 } from "./path-safety.js";
 import { mkTmpWorkspace, type TmpWorkspace } from "./testing/tmp-workspace.js";
@@ -122,6 +123,35 @@ describe("hertaStateWriteDenial — the harness's own state is not command-writa
     for (const body of ["echo hertaland", "cat my.herta.txt", "x.herta2/y"]) {
       expect(mentionsHertaState(body), body).toBe(false);
     }
+  });
+
+  it("a managed sandbox's own root names .herta without reaching its state (release review 2026-10-13)", () => {
+    const home = "C:\\Users\\u";
+    const ws = "C:\\Users\\u\\.herta\\workspaces\\abc";
+    const names = (text: string) => namesHertaState(text, ws, home);
+    for (const text of [
+      "cd C:\\Users\\u\\.herta\\workspaces\\abc && npm test",
+      "cd C:/Users/u/.herta/workspaces/abc && npm test",
+      "cd /c/users/u/.herta/workspaces/abc && npm test",
+      "node ~/.herta/workspaces/abc/x.js",
+      'cat "$HOME/.herta/workspaces/abc/out.txt"',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: bash's own ${HOME}
+      "cat ${HOME}/.herta/workspaces/abc/out.txt",
+    ]) {
+      expect(names(text), text).toBe(false);
+    }
+    for (const text of [
+      "cd /c/Users/u/.herta/workspaces/abc && cat x > .herta/p.json",
+      "echo x > C:/Users/u/.herta/workspaces/abc/.herta/p.json",
+      "echo x > ~/.herta/workspaces/other/.herta/p.json",
+      'echo x > "$PWD/.herta/p.json"',
+      // Another sandbox is not this workspace.
+      "cd ~/.herta/workspaces/abcd && ls",
+    ]) {
+      expect(names(text), text).toBe(true);
+    }
+    // An ordinary project: nothing to take out.
+    expect(namesHertaState("cd /e/repo && make", "E:\\repo", home)).toBe(false);
   });
 });
 

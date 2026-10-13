@@ -7,7 +7,7 @@ describe("SupervisorHoldRow", () => {
   afterEach(() => vi.useRealTimers());
 
   it("shimmers the gamma-storm hint, text only (no transfer icons)", () => {
-    const { container } = renderWithLocale(<SupervisorHoldRow />);
+    const { container } = renderWithLocale(<SupervisorHoldRow lang="en" />);
     // Reuses the shimmer shell…
     expect(
       container
@@ -23,9 +23,16 @@ describe("SupervisorHoldRow", () => {
     expect(container.querySelector(".transfer-icon")).toBeNull();
   });
 
+  it("reads in the session's language, not the app's (release review 2026-10-13)", () => {
+    const { container } = renderWithLocale(<SupervisorHoldRow lang="zh" />);
+    expect(container.querySelector(".transfer-text")?.textContent).toBe(
+      "消息受到伽马风暴干扰…",
+    );
+  });
+
   it("rotates to the long-wait line after HINT_ROTATE_MS (front-load spec rider)", () => {
     vi.useFakeTimers();
-    const { container } = renderWithLocale(<SupervisorHoldRow />);
+    const { container } = renderWithLocale(<SupervisorHoldRow lang="en" />);
     expect(container.querySelector(".transfer-text")?.textContent).toBe(
       "Message caught in a gamma storm…",
     );

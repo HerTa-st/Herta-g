@@ -1,5 +1,6 @@
 import type {
   ApprovalResult,
+  AutoReviewState,
   ContinueInterruptedResult,
   CreateSessionOpts,
   OverlayEvent,
@@ -19,11 +20,12 @@ import type {
   TerminalRecord,
   TitleEvent,
   TurnLifecycleEvent,
+  UndoEvent,
+  UndoTarget,
+  UndoTurnEditsResult,
   VoiceCueEvent,
   WorkspaceEvent,
-  WorkspaceTrustState,
 } from "@herta/app-server";
-import type { WorkspaceTrust } from "@herta/core";
 import type {
   AttachProgressEvent,
   AttentionSettings,
@@ -59,6 +61,8 @@ export interface MockHertaBridgeOpts {
   /** What `continueInterrupted` answers (ADR 0071 §1.4); default a turn. */
   readonly continueInterruptedResult?: ContinueInterruptedResult;
   readonly rewindLastTurnResult?: RewindResult;
+  /** What `undoLastTurnEdits` answers (ADR 0074); default nothing to undo. */
+  readonly undoLastTurnEditsResult?: UndoTurnEditsResult;
   readonly listSessionsResult?: readonly SessionMetadata[];
   /** Seed for searchSessions (transcript content search). Default []. */
   readonly searchSessionsResult?: readonly SessionSearchHit[];
@@ -70,13 +74,9 @@ export interface MockHertaBridgeOpts {
   readonly openSessionResult?: SessionSnapshot | SessionOpenFailure;
   readonly createSessionResult?: SessionSnapshot;
   readonly resolveApprovalResult?: ApprovalResult;
-  /** Seed for listCommandRules (Settings → Coprocessor, ADR 0030). The list
-   *  is mutated by removeCommandRule so tests observe the round-trip.
-   *  Default []. */
-  readonly commandRules?: readonly string[];
-  /** Seed for getWorkspaceTrust (ADR 0064); setWorkspaceTrust mutates it so
-   *  tests observe the round-trip. Default: a real project, asking. */
-  readonly workspaceTrust?: WorkspaceTrustState;
+  /** Seed for getAutoReview (ADR 0075); setAutoReview mutates it so tests
+   *  observe the round-trip. Default: a real project, off. */
+  readonly autoReview?: AutoReviewState;
   readonly pickWorkspaceResult?: string | null;
   readonly setWorkspaceResult?: { ok: boolean; message?: string };
   /** Seed for the attachment picker (ADR 0033). Null = cancelled. */
@@ -151,6 +151,9 @@ export interface MockHertaBridgeOpts {
   readonly pdfPictureTranscriptsResult?: boolean;
   /** When true, setPdfPictureTranscripts rejects. */
   readonly failSetPdfPictureTranscripts?: boolean;
+  /** Seed for getComposerPredictions (2026-10-10). UNDEFINED (the default)
+   *  omits the surface — the row hides, like the website demo's bridge. */
+  readonly composerPredictionsResult?: boolean;
   /** Seed for getInteractionLanguage (Settings → Language, slice 4).
    *  Default "follow" (no stored choice). Mutated by setInteractionLanguage
    *  so tests observe the round-trip. */
@@ -211,15 +214,15 @@ export interface MockHertaBridge {
     /** 继续 presses (ADR 0071 §1.4). */
     continueInterrupted: number;
     rewindLastTurn: number;
+    /** Each undo asked for: the session it was bound to, and its target. */
+    undoLastTurnEdits: Array<readonly [string, UndoTarget]>;
     maybePlayEasterEgg: number;
     openSession: string[];
     createSession: CreateSessionOpts[];
     deleteSession: string[];
     resolveApproval: ResolveApprovalOpts[];
-    listCommandRules: number;
-    removeCommandRule: string[];
-    getWorkspaceTrust: number;
-    setWorkspaceTrust: Array<WorkspaceTrust | null>;
+    getAutoReview: number;
+    setAutoReview: Array<boolean | null>;
     resyncRecord: number;
     checkForUpdate: number;
     restartAndInstall: number;
@@ -264,6 +267,7 @@ export interface MockHertaBridge {
     saveSessionExport: Array<[string, string]>;
     setTheme: ThemePref[];
     setPdfPictureTranscripts: boolean[];
+    setComposerPredictions: boolean[];
     getInteractionLanguage: number;
     setInteractionLanguage: InteractionLanguageChoice[];
     getRealtimeVoice: number;
@@ -307,6 +311,8 @@ export interface MockHertaBridge {
   emitRepo(e: RepoEvent): void;
   /** The 继续 offer's stream (ADR 0071 §1.4). */
   emitResume(e: ResumeEvent): void;
+  /** The 撤销 chip's stream (ADR 0074 §4). */
+  emitUndo(e: UndoEvent): void;
   /** The live views of the call in flight (ADR 0073). */
   emitLive(e: LiveToolSnapshot): void;
   /** Drive the pending attach row's progress (2026-10-01). */
@@ -339,6 +345,7 @@ export function createMockHertaBridge(
   const workspaceCbs = new Set<(e: WorkspaceEvent) => void>();
   const repoCbs = new Set<(e: RepoEvent) => void>();
   const resumeCbs = new Set<(e: ResumeEvent) => void>();
+  const undoCbs = new Set<(e: UndoEvent) => void>();
   const liveCbs = new Set<(e: LiveToolSnapshot) => void>();
   const attachProgressCbs = new Set<(e: AttachProgressEvent) => void>();
   const voiceCbs = new Set<(e: VoiceCueEvent) => void>();
@@ -352,15 +359,14 @@ export function createMockHertaBridge(
     steerText: [],
     continueInterrupted: 0,
     rewindLastTurn: 0,
+    undoLastTurnEdits: [],
     maybePlayEasterEgg: 0,
     openSession: [],
     createSession: [],
     deleteSession: [],
     resolveApproval: [],
-    listCommandRules: 0,
-    removeCommandRule: [],
-    getWorkspaceTrust: 0,
-    setWorkspaceTrust: [],
+    getAutoReview: 0,
+    setAutoReview: [],
     resyncRecord: 0,
     checkForUpdate: 0,
     restartAndInstall: 0,
@@ -387,6 +393,7 @@ export function createMockHertaBridge(
     saveSessionExport: [],
     setTheme: [],
     setPdfPictureTranscripts: [],
+    setComposerPredictions: [],
     getInteractionLanguage: 0,
     setInteractionLanguage: [],
     getRealtimeVoice: 0,
@@ -428,12 +435,9 @@ export function createMockHertaBridge(
   let interactionLanguage: InteractionLanguageChoice =
     opts.interactionLanguageResult ?? "follow";
 
-  // Live project command rules (ADR 0030), seeded then mutated by
-  // removeCommandRule so tests observe the round-trip.
-  const commandRules: string[] = [...(opts.commandRules ?? [])];
-  // Live workspace trust (ADR 0064), seeded then mutated by setWorkspaceTrust.
-  let workspaceTrust: WorkspaceTrustState = opts.workspaceTrust ?? {
-    effective: "ask",
+  // Live automatic review (ADR 0075), seeded then mutated by setAutoReview.
+  let autoReview: AutoReviewState = opts.autoReview ?? {
+    on: false,
     explicit: null,
     isDefaultWorkspace: false,
   };
@@ -589,6 +593,13 @@ export function createMockHertaBridge(
       calls.rewindLastTurn += 1;
       return opts.rewindLastTurnResult ?? { ok: false, reason: "no_user_turn" };
     },
+    undoLastTurnEdits: async (sessionId, target) => {
+      calls.undoLastTurnEdits.push([sessionId, target]);
+      return (
+        opts.undoLastTurnEditsResult ?? { ok: false, reason: "nothing_to_undo" }
+      );
+    },
+    onUndo: (cb) => sub(undoCbs, cb),
     maybePlayEasterEgg: async () => {
       calls.maybePlayEasterEgg += 1;
     },
@@ -620,27 +631,18 @@ export function createMockHertaBridge(
       calls.resolveApproval.push(o);
       return opts.resolveApprovalResult ?? { ok: true };
     },
-    listCommandRules: async () => {
-      calls.listCommandRules += 1;
-      return commandRules;
+    getAutoReview: async () => {
+      calls.getAutoReview += 1;
+      return autoReview;
     },
-    removeCommandRule: async (display) => {
-      calls.removeCommandRule.push(display);
-      const i = commandRules.indexOf(display);
-      if (i === -1) return false;
-      commandRules.splice(i, 1);
-      return true;
-    },
-    getWorkspaceTrust: async () => {
-      calls.getWorkspaceTrust += 1;
-      return workspaceTrust;
-    },
-    setWorkspaceTrust: async (value) => {
-      calls.setWorkspaceTrust.push(value);
-      const effective =
-        value ?? (workspaceTrust.isDefaultWorkspace ? "workspace" : "ask");
-      workspaceTrust = { ...workspaceTrust, explicit: value, effective };
-      return workspaceTrust;
+    setAutoReview: async (on) => {
+      calls.setAutoReview.push(on);
+      autoReview = {
+        ...autoReview,
+        explicit: on,
+        on: on ?? autoReview.isDefaultWorkspace,
+      };
+      return autoReview;
     },
     resyncRecord: async () => {
       calls.resyncRecord += 1;
@@ -876,6 +878,15 @@ export function createMockHertaBridge(
           },
         }
       : {}),
+    ...(opts.composerPredictionsResult !== undefined
+      ? {
+          getComposerPredictions: async () =>
+            opts.composerPredictionsResult === true,
+          setComposerPredictions: async (enabled: boolean) => {
+            calls.setComposerPredictions.push(enabled);
+          },
+        }
+      : {}),
     ...(opts.deviceSceneResult !== undefined
       ? { getDeviceScene: async () => opts.deviceSceneResult === true }
       : {}),
@@ -1048,6 +1059,9 @@ export function createMockHertaBridge(
     },
     emitResume: (e) => {
       for (const cb of resumeCbs) cb(e);
+    },
+    emitUndo: (e) => {
+      for (const cb of undoCbs) cb(e);
     },
     emitLive: (e) => {
       for (const cb of liveCbs) cb(e);

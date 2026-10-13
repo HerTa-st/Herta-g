@@ -1,20 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import earthIcon from "../../assets/earth-icon.png";
 import earthIconNight from "../../assets/earth-icon-night.png";
 import stationIcon from "../../assets/herta-station-icon.png";
 import stationIconNight from "../../assets/herta-station-icon-night.png";
 import { useReducedMotion } from "../../hooks/useReducedMotion.js";
-import { useT } from "../../i18n/LocaleProvider.js";
+import { makeT } from "../../i18n/LocaleProvider.js";
 
 export interface GalaxyTravelRowProps {
   /** Quiet-hide exit fade (user 2026-07-31): keeps `is-shown` so the row
    *  fades in place — `is-exiting` wins the opacity — then Conversation
    *  unmounts it after IN_FLIGHT_EXIT_MS. */
   readonly exiting?: boolean;
+  /** The active session's interaction language: an in-world line narrates
+   *  the session, so it reads in the session's language, like the pending
+   *  activity line (ADR 0019; release review 2026-10-13). */
+  readonly lang: "zh" | "en";
 }
 
 export function GalaxyTravelRow(props: GalaxyTravelRowProps): JSX.Element {
-  const t = useT();
+  const t = useMemo(() => makeT(props.lang), [props.lang]);
   const reduced = useReducedMotion();
   const [shown, setShown] = useState(reduced);
   useEffect(() => {

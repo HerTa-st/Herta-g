@@ -1441,6 +1441,54 @@ describe("invokeBanzhuanBridge", () => {
     ]);
   });
 
+  it("a saved fact projects as a row saying what 板砖 will remember, as the store holds it (ADR 0077)", async () => {
+    const bus = new InMemoryEventBus<AgentEvent>();
+    const runtime: CodingAgentRuntime = {
+      runBrief: async (brief: HertaToAgentBrief) => {
+        publishWithLayer(bus, "backend", {
+          type: "tool.call.started",
+          id: "m1",
+          tool: "memory_save",
+          inputSummary: "test_command",
+        } as never);
+        publishWithLayer(bus, "backend", {
+          type: "tool.call.finished",
+          id: "m1",
+          tool: "memory_save",
+          result: {
+            ok: true,
+            data: {
+              id: "x",
+              kind: "test_command",
+              text: "测试用 node --test test/，\n别用 npm test",
+              why: "开拓者说 package.json 的 test 脚本是坏的",
+            },
+            summary: "remembered: test_command",
+          },
+        } as never);
+        return {
+          taskId: brief.taskId,
+          status: "partial",
+          evidence: [],
+          changedFiles: [],
+          tests: [],
+          permissions: [],
+          residualRisks: [],
+        } as AgentExecutionReport;
+      },
+    } as unknown as CodingAgentRuntime;
+    const deps = mkBridgeDeps({ bus, runtime: () => runtime });
+    const out = await invokeBanzhuanBridge(
+      [{ kind: "user", text: "@板砖 记住：测试用 node --test test/" }],
+      [],
+      deps,
+    );
+    const bodies = out.flatMap((b) => (b.kind === "system" ? [b.body] : []));
+    expect(bodies).toContain(
+      "↳ remembered: 测试用 node --test test/， 别用 npm test",
+    );
+  });
+
   it("appends a → 差分协处理器 block for each backend tool.call.started during runBrief", async () => {
     const bus = new InMemoryEventBus<AgentEvent>();
     const runtime: CodingAgentRuntime = {
@@ -3639,5 +3687,33 @@ describe("task context — attachments reach 板砖 (ADR 0033)", () => {
     );
     expect(scan).toContain("scanned or image-only");
     expect(scan).toContain("do not look for it");
+  });
+});
+
+describe("projectBackendEvent — runsTests on the op row (ADR 0073 amendment 2026-10-08)", () => {
+  it("the op digest carries the flag the started event had, and the body is unchanged", () => {
+    const marked = projectBackendEvent({
+      type: "tool.call.started",
+      layer: "backend",
+      id: "c1",
+      tool: "bash",
+      inputSummary: "mkdir -p x && cp a x/ && cd x && …",
+      runsTests: true,
+    });
+    expect(marked?.digest).toEqual({
+      kind: "op",
+      verb: "Running",
+      arg: "mkdir -p x && cp a x/ && cd x && …",
+      runsTests: true,
+    });
+    expect(marked?.body).toBe("Running mkdir -p x && cp a x/ && cd x && …");
+    const plain = projectBackendEvent({
+      type: "tool.call.started",
+      layer: "backend",
+      id: "c2",
+      tool: "bash",
+      inputSummary: "ls",
+    });
+    expect(plain?.digest).toEqual({ kind: "op", verb: "Running", arg: "ls" });
   });
 });

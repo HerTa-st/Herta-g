@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { workspaceRelativeRepoPath } from "@herta/core/repo-path";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { attachmentImageUrl } from "../../../shared/attachment-image.js";
 import { useHertaBridge } from "../../context/HertaBridgeContext.js";
 import { useSessionLang } from "../../hooks/useActiveSession.js";
@@ -10,11 +18,14 @@ import { useT } from "../../i18n/LocaleProvider.js";
 import { aliasBrickInput } from "../../lib/banzhuan-mention.js";
 import { renderBanzhuanText } from "../../lib/banzhuan-text.js";
 import {
-  brickAhead,
+  brickComplete,
   findMentionQuery,
+  insertBrick,
   insertMention,
-  rankPaths,
+  type MentionItem,
+  mentionItems,
 } from "../../lib/file-mention.js";
+import { composeQuotedMessage, quoteLabel } from "../../lib/quote-format.js";
 import { recallLastMessage } from "../../lib/recall-last-message.js";
 import { submitMessage } from "../../lib/submit-message.js";
 import { stopAllVoice } from "../../voice/play-voice.js";
@@ -91,10 +102,13 @@ export function Composer(): JSX.Element {
     composerDraft,
     composerDraftImages,
     composerNotice,
+    rewindUndo,
     backendActive,
     held,
     resumable,
     restagedImages,
+    prediction,
+    composerQuotes,
   } = useSessionSelector(
     (s) => ({
       status: s.status,
@@ -103,10 +117,13 @@ export function Composer(): JSX.Element {
       composerDraft: s.composerDraft,
       composerDraftImages: s.composerDraftImages,
       composerNotice: s.composerNotice,
+      rewindUndo: s.rewindUndo,
       backendActive: s.backendActive,
       held: s.held,
       resumable: s.resumable,
       restagedImages: s.restagedImages,
+      prediction: s.prediction,
+      composerQuotes: s.composerQuotes,
     }),
     shallowEqualObjects,
   );
@@ -168,6 +185,21 @@ export function Composer(): JSX.Element {
   } | null>(null);
   const busy = status !== "idle";
   const suppressed = overlay?.kind === "pending-permission";
+  // Composer predictions (owner 2026-10-10): the Trailblazer's likely next
+  // line, shown where the placeholder is while the box is empty. Tab takes
+  // it (nothing is sent); typing replaces it. In an EN session the trigger
+  // is spelled the way this composer spells it, `@brick`.
+  // A staged quote (ADR 0078 §6) is its own subject: no prediction for it.
+  const suggestion =
+    prediction !== null &&
+    text.length === 0 &&
+    composerQuotes.length === 0 &&
+    !busy &&
+    !suppressed
+      ? lang === "en"
+        ? prediction.replaceAll("@板砖", "@brick")
+        : prediction
+      : null;
   // A message while 板砖 works (ADR 0063). The hold exists ONLY while the
   // coprocessor runs — the one phase with a sampling boundary a steer can
   // reach (owner 2026-09-14: a conversation with Herta has no such
@@ -265,7 +297,8 @@ export function Composer(): JSX.Element {
       return;
     }
     const trimmed = text.trim();
-    if (trimmed.length === 0) {
+    // Quotes alone are a message (ADR 0078 §6): the source is what was said.
+    if (trimmed.length === 0 && composerQuotes.length === 0) {
       // Pictures need words (owner 2026-08-27, reversing the first cut): an
       // empty user block is a degenerate moment in the record — （用户 说）
       // with nothing said, which the narrative actor then completes against.
@@ -287,7 +320,13 @@ export function Composer(): JSX.Element {
     // trigger "@板砖" BEFORE it enters the record/dispatch — code spans exempt
     // (a backticked `@brick` is quotation). See aliasBrickInput, kept in
     // lockstep with the CLI's converter of the same name.
-    const dispatched = aliasBrickInput(trimmed, lang);
+    // The quotes go first, as written (ADR 0078 §5): the alias applies to
+    // what was typed, never to quoted source.
+    const dispatched = composeQuotedMessage(
+      composerQuotes,
+      aliasBrickInput(trimmed, lang),
+      lang,
+    );
     // Take the staged pictures BEFORE dispatching: they ride this message,
     // and the strip must empty on the same frame the text does (ADR 0048 §4).
     const staged = images.take();
@@ -300,6 +339,7 @@ export function Composer(): JSX.Element {
       staged.length > 0 ? staged : undefined,
     );
     setText("");
+    sessionStore.clearComposerQuotes();
     // The rewind file-edit notice persists through editing; clear it once the
     // (re-)send actually goes out (a session switch clears it via onReset).
     if (composerNotice !== null) sessionStore.clearComposerNotice();
@@ -445,6 +485,38 @@ export function Composer(): JSX.Element {
   // the source; `noticeText` is the locally-held copy that stays mounted through
   // the slide-out (React would otherwise unmount it instantly, skipping the exit).
   const [noticeText, setNoticeText] = useState<string | null>(null);
+  // 撤销改动 pressed (ADR 0074 §4): take the withdrawn turn's edits back and
+  // say what happened in the notice's place. The withdrawn turn is out of
+  // the record, so this notice is the only place a file left alone shows.
+  const undoWithdrawn = async (): Promise<void> => {
+    if (sessionStore.getSnapshot().rewindUndo !== "offer") return;
+    sessionStore.setRewindUndo("busy");
+    const r = await sessionStore.undoTurnEdits("withdrawn");
+    // The session changed under the answer: the notice went with it.
+    if (r === null) return;
+    if (!r.ok) {
+      sessionStore.setComposerNotice(t("workspace.undoFailed"));
+      return;
+    }
+    const left = r.files
+      .filter(
+        (f) =>
+          f.result !== "restored" &&
+          f.result !== "deleted" &&
+          f.result !== "unchanged",
+      )
+      .map((f) => f.path);
+    sessionStore.setComposerNotice(
+      left.length === 0
+        ? t("workspace.editsUndone")
+        : t("workspace.editsUndoneLeftAlone").replace(
+            "{files}",
+            left.length > 3
+              ? `${left.slice(0, 3).join(t("workspace.listJoin"))}${t("workspace.listJoin")}…`
+              : left.join(t("workspace.listJoin")),
+          ),
+    );
+  };
   const [noticeExiting, setNoticeExiting] = useState(false);
   const noticeShown = useRef(false);
   const noticeTimer = useRef<number | null>(null);
@@ -464,19 +536,20 @@ export function Composer(): JSX.Element {
     mentionDismissed.current = -1;
   }, [sessionId]);
 
-  // The mention list for the caret's `@query`: only where the bridge can
-  // list files, only past what could still become `@板砖` (its ghost keeps
-  // precedence), and not for a mention the user dismissed. The files are
-  // fetched once and kept for a few seconds, so typing does not re-list.
+  // The mention list for the caret's `@query`, from the bare `@` on (owner
+  // 2026-10-08: it waited for a query past what could still be `@板砖`, so a
+  // bare `@` showed the ghost alone and the files went unnoticed). Not for
+  // the token already typed out, nor for a mention the user dismissed. The
+  // files are fetched once and kept for a few seconds, so typing does not
+  // re-list; where the bridge cannot list them, the list offers `@板砖`
+  // alone.
   const updateMention = (value: string, caret: number | null): void => {
     const mq = findMentionQuery(value, caret);
     if (mq === null) mentionDismissed.current = -1;
     if (
       mq === null ||
       mq.start === mentionDismissed.current ||
-      brickAhead(mq.query, lang) ||
-      bridge.listWorkspaceFiles === undefined ||
-      sessionId === null
+      brickComplete(mq.query, lang)
     ) {
       mentionKey.current = "";
       setMention(null);
@@ -491,6 +564,7 @@ export function Composer(): JSX.Element {
       setMentionIndex(0);
     }
     setMention(mq);
+    if (bridge.listWorkspaceFiles === undefined || sessionId === null) return;
     const cached = mentionCache.current;
     if (
       cached === null ||
@@ -508,21 +582,38 @@ export function Composer(): JSX.Element {
       );
     }
   };
-  const mentionMatches = useMemo(
-    () =>
-      mention !== null && mentionFiles !== null
-        ? rankPaths(mentionFiles, mention.query)
-        : [],
-    [mention, mentionFiles],
-  );
+  // A bare `@` offers the files being worked on first: the repository's
+  // uncommitted paths, read from the store when the list is built (the
+  // composer does not re-render on every repository probe).
+  const mentionMatches = useMemo((): MentionItem[] => {
+    if (mention === null) return [];
+    const repo = sessionStore.getSnapshot().repo;
+    const changed =
+      repo === null
+        ? []
+        : repo.dirty.map((d) => workspaceRelativeRepoPath(d.path, repo.prefix));
+    return mentionItems(mention.query, lang, mentionFiles, changed);
+  }, [mention, mentionFiles, lang, sessionStore]);
   const mentionOpen = mention !== null && mentionMatches.length > 0;
-  const pickMention = (path: string): void => {
+  const mentionActive = mentionOpen
+    ? mentionMatches[mentionIndex % mentionMatches.length]
+    : undefined;
+  const pickMention = (item: MentionItem): void => {
     if (mention === null) return;
     const caret = taRef.current?.selectionStart ?? text.length;
-    const next = insertMention(text, mention.start, caret, path);
+    const next =
+      item.kind === "brick"
+        ? insertBrick(
+            text,
+            mention.start,
+            caret,
+            lang === "en" ? "brick" : "板砖",
+          )
+        : insertMention(text, mention.start, caret, item.path);
     pendingCaret.current = next.caret;
     setText(next.text);
     setMention(null);
+    setHintActive(false);
     taRef.current?.focus({ preventScroll: true });
   };
 
@@ -614,7 +705,8 @@ export function Composer(): JSX.Element {
   // pictures also hold it open: the strip is the only sign the pictures are
   // pending, and shrinking would clip it (ADR 0048 §4).
   const hasStaged = images.staged.length > 0;
-  const shrunk = !focusWithin && !dragOver && !hasStaged;
+  const hasQuotes = composerQuotes.length > 0;
+  const shrunk = !focusWithin && !dragOver && !hasStaged && !hasQuotes;
 
   /**
    * A picked or dropped batch splits by KIND (ADR 0048 §4): pictures stage in
@@ -724,6 +816,18 @@ export function Composer(): JSX.Element {
           role="status"
         >
           {noticeText}
+          {/* 撤销改动 (ADR 0074 §4): the rewound turn's edits can still be
+              taken back — until the next send, which clears this notice. */}
+          {rewindUndo !== null && !noticeExiting && (
+            <button
+              type="button"
+              className="composer-notice__action"
+              disabled={rewindUndo === "busy"}
+              onClick={() => void undoWithdrawn()}
+            >
+              {t("workspace.undoEdits")}
+            </button>
+          )}
         </div>
       )}
       {/* The held message (ADR 0063): sent while 板砖 worked, waiting to go
@@ -861,7 +965,7 @@ export function Composer(): JSX.Element {
       )}
       <form
         ref={composerRef}
-        className={`composer${shrunk ? " is-shrunk" : ""}${hasStaged ? " has-staged" : ""}${suppressed ? " is-suppressed" : ""}${dragOver ? " is-dragover" : ""}`}
+        className={`composer${shrunk ? " is-shrunk" : ""}${hasStaged ? " has-staged" : ""}${hasQuotes ? " has-quotes" : ""}${suppressed ? " is-suppressed" : ""}${dragOver ? " is-dragover" : ""}`}
         onSubmit={(e) => {
           e.preventDefault();
           doSubmit();
@@ -988,6 +1092,51 @@ export function Composer(): JSX.Element {
             ))}
           </ul>
         )}
+        {/* Quotes from the viewer's page (ADR 0078 §6): the source rides
+          the message when it is sent; × takes one back. */}
+        {composerQuotes.length > 0 && (
+          <ul className="composer-quotes">
+            {composerQuotes.map((q) => (
+              <li className="composer-quote" key={q.id}>
+                <svg
+                  className="composer-quote__icon"
+                  viewBox="0 0 13 13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 9.5c-.3-1.8.3-3.4 2-4.2M7.5 9.5c-.3-1.8.3-3.4 2-4.2" />
+                </svg>
+                <span className="composer-quote__label">{quoteLabel(q)}</span>
+                <span className="composer-quote__preview">
+                  {q.title ??
+                    q.text.split("\n").find((l) => l.trim().length > 0) ??
+                    ""}
+                </span>
+                <button
+                  type="button"
+                  className="composer-quote__remove"
+                  aria-label={`${t("composer.quote.remove")} ${quoteLabel(q)}`}
+                  onClick={() => sessionStore.removeComposerQuote(q.id)}
+                >
+                  <svg
+                    viewBox="0 0 10 10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M2.5 2.5l5 5M7.5 2.5l-5 5" />
+                  </svg>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         {mentionOpen && (
           <div
             id="composer-mentions"
@@ -995,14 +1144,13 @@ export function Composer(): JSX.Element {
             role="listbox"
             aria-label={t("composer.mentions.aria")}
           >
-            {mentionMatches.map((path, i) => {
-              const cut = path.lastIndexOf("/");
-              const name = path.slice(cut + 1);
-              const dir = cut >= 0 ? path.slice(0, cut) : "";
-              const active = i === mentionIndex % mentionMatches.length;
-              return (
+            {mentionMatches.map((item, i) => {
+              const active = item === mentionActive;
+              const firstFile =
+                item.kind === "file" && mentionMatches[i - 1]?.kind !== "file";
+              const option = (children: JSX.Element): JSX.Element => (
                 <button
-                  key={path}
+                  key={item.kind === "brick" ? "@brick" : item.path}
                   id={`composer-mention-${i}`}
                   type="button"
                   role="option"
@@ -1010,19 +1158,52 @@ export function Composer(): JSX.Element {
                   // the highlight, so an option is never tabbed to.
                   tabIndex={-1}
                   aria-selected={active}
-                  className={`composer-mentions__item${active ? " is-active" : ""}`}
+                  className={`composer-mentions__item${item.kind === "brick" ? " is-brick" : ""}${active ? " is-active" : ""}`}
                   // mousedown, not click: the textarea keeps the caret.
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    pickMention(path);
+                    pickMention(item);
                   }}
                   onMouseEnter={() => setMentionIndex(i)}
                 >
-                  <span className="composer-mentions__name">{name}</span>
-                  {dir.length > 0 && (
-                    <span className="composer-mentions__dir">{dir}</span>
-                  )}
+                  {children}
                 </button>
+              );
+              if (item.kind === "brick") {
+                return option(
+                  <>
+                    <span className="composer-mentions__name">
+                      {lang === "en" ? "@brick" : "@板砖"}
+                    </span>
+                    <span className="composer-mentions__desc">
+                      {t("composer.mentions.brick")}
+                    </span>
+                  </>,
+                );
+              }
+              const cut = item.path.lastIndexOf("/");
+              const name = item.path.slice(cut + 1);
+              const dir = cut >= 0 ? item.path.slice(0, cut) : "";
+              return (
+                <Fragment key={item.path}>
+                  {firstFile && (
+                    // What the rows below are — the list says so itself.
+                    <div
+                      className="composer-mentions__section"
+                      aria-hidden="true"
+                    >
+                      {t("composer.mentions.files")}
+                    </div>
+                  )}
+                  {option(
+                    <>
+                      <span className="composer-mentions__name">{name}</span>
+                      {dir.length > 0 && (
+                        <span className="composer-mentions__dir">{dir}</span>
+                      )}
+                    </>,
+                  )}
+                </Fragment>
               );
             })}
           </div>
@@ -1030,7 +1211,9 @@ export function Composer(): JSX.Element {
         <div className="composer-input-wrap">
           <div className="composer-highlight" aria-hidden="true">
             {renderBanzhuanText(text, "composer", lang)}
-            {hintActive && (
+            {/* The ghost previews the token while its row is the one Tab
+                or Enter would take — not once the highlight is on a file. */}
+            {hintActive && (mentionActive?.kind ?? "brick") === "brick" && (
               <span className="composer-ghost">
                 {lang === "en" ? "brick" : "板砖"}
               </span>
@@ -1039,13 +1222,20 @@ export function Composer(): JSX.Element {
           <textarea
             ref={taRef}
             className="composer-input"
-            placeholder={t("composer.placeholder")}
+            placeholder={
+              suggestion ??
+              t(
+                composerQuotes.length > 0
+                  ? "composer.quote.placeholder"
+                  : "composer.placeholder",
+              )
+            }
             // The mention list is the textarea's: assistive technology hears
             // it open and follows the highlighted option (review 2026-09-30).
             aria-autocomplete="list"
             aria-controls={mentionOpen ? "composer-mentions" : undefined}
             aria-activedescendant={
-              mentionOpen && mentionMatches.length > 0
+              mentionOpen
                 ? `composer-mention-${mentionIndex % mentionMatches.length}`
                 : undefined
             }
@@ -1080,8 +1270,14 @@ export function Composer(): JSX.Element {
             onBlur={() => setMention(null)}
             onKeyDown={(e) => {
               // The @-mention list, while it is open (ADR 0072 §2): arrows
-              // move, Enter or Tab inserts the path, Esc dismisses it.
-              if (mentionOpen && mention !== null) {
+              // move, Enter or Tab inserts the row, Esc dismisses it — and
+              // the ghost with it. An IME's pre-edit keeps every key: its
+              // arrows walk the candidates, its Enter confirms one.
+              if (
+                mentionOpen &&
+                mention !== null &&
+                !(e.nativeEvent.isComposing || e.keyCode === 229)
+              ) {
                 const n = mentionMatches.length;
                 if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                   e.preventDefault();
@@ -1091,15 +1287,15 @@ export function Composer(): JSX.Element {
                   return;
                 }
                 if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
-                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   e.preventDefault();
-                  const pick = mentionMatches[mentionIndex % n];
-                  if (pick !== undefined) pickMention(pick);
+                  if (mentionActive !== undefined) pickMention(mentionActive);
                   return;
                 }
                 if (e.key === "Escape") {
                   e.preventDefault();
                   mentionDismissed.current = mention.start;
+                  escDismissed.current = mention.start;
+                  setHintActive(false);
                   setMention(null);
                   return;
                 }
@@ -1128,6 +1324,18 @@ export function Composer(): JSX.Element {
                   setText(last);
                   pendingCaret.current = last.length;
                 }
+                return;
+              }
+              if (
+                e.key === "Tab" &&
+                suggestion !== null &&
+                !e.shiftKey &&
+                !(e.nativeEvent.isComposing || e.keyCode === 229)
+              ) {
+                // Take the suggestion into the box — never send it.
+                e.preventDefault();
+                setText(suggestion);
+                pendingCaret.current = suggestion.length;
                 return;
               }
               if (e.key === "Enter" && !e.shiftKey) {
@@ -1169,8 +1377,16 @@ export function Composer(): JSX.Element {
             }}
             rows={2}
             aria-label={t("composer.aria")}
+            aria-description={
+              suggestion !== null ? t("composer.predictionAria") : undefined
+            }
             disabled={busy && !holding}
           />
+          {suggestion !== null && (
+            <span className="composer-prediction-key" aria-hidden="true">
+              Tab
+            </span>
+          )}
         </div>
         {/* ONE persistent button that morphs between SEND (↑) and STOP (■).
           While a turn runs it is wired to bridge.interrupt — previously a
@@ -1220,7 +1436,11 @@ export function Composer(): JSX.Element {
           type={busy ? "button" : "submit"}
           className={`composer-send${busy ? " is-stop" : ""}`}
           aria-label={busy ? t("composer.stop") : t("composer.send")}
-          disabled={!busy && (text.trim().length === 0 || readingDoc)}
+          disabled={
+            !busy &&
+            ((text.trim().length === 0 && composerQuotes.length === 0) ||
+              readingDoc)
+          }
           onClick={
             busy
               ? () => {

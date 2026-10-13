@@ -56,7 +56,20 @@ export interface ActorTurnNote {
   readonly highWater?: number;
 }
 
-export type UsageNote = BackendRunNote | ActorTurnNote;
+/** One automatic review (ADR 0075): what it settled to, and why a card when
+ *  it handed the request back to the owner. The owner's screen stays silent
+ *  (owner, 2026-10-09); this is where "is the reviewer answering?" is
+ *  checked — a failing reviewer looks exactly like one switched off. */
+export interface ReviewNote {
+  readonly kind: "review";
+  readonly outcome: "allow" | "deny" | "card";
+  /** For a card: the reviewer's reason code (`error`, `timeout`, …). */
+  readonly why?: string;
+  /** Wall time of the model call, when one was made. */
+  readonly ms?: number;
+}
+
+export type UsageNote = BackendRunNote | ActorTurnNote | ReviewNote;
 
 export type UsageNoteSink = (note: UsageNote) => void;
 

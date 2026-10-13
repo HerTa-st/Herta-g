@@ -88,8 +88,15 @@ export function useConversationRows(opts: {
   readonly backendStartedAt: number | null;
   readonly backendInFlight: number;
   readonly backendActive: boolean;
+  /** 板砖 has been thinking for a while (`useBackendThinking`). */
+  readonly backendThinking: boolean;
   readonly handleRewind: () => Promise<void>;
   readonly removeAttachmentFactory: RemoveAttachmentFactory | undefined;
+  /** Main says the latest turn's edits can be taken back (ADR 0074 §4). */
+  readonly undoable: boolean;
+  /** An undo is on its way. */
+  readonly undoBusy: boolean;
+  readonly handleUndo: () => Promise<void>;
 }) {
   const {
     record,
@@ -100,8 +107,12 @@ export function useConversationRows(opts: {
     backendStartedAt,
     backendInFlight,
     backendActive,
+    backendThinking,
     handleRewind,
     removeAttachmentFactory,
+    undoable,
+    undoBusy,
+    handleUndo,
   } = opts;
 
   // Memoized on record identity: the store mutates `record` only per BLOCK
@@ -148,6 +159,19 @@ export function useConversationRows(opts: {
   //
   // Aligned with `items` (activity slots hold null) so the assembly below can
   // index straight into it.
+  // The 撤销 chip's card (ADR 0074 §4): the latest turn's LAST finished 板砖
+  // card — a turn can hold several dispatches, and the undo takes them all.
+  // A turn that already holds its undo line says so on that card instead.
+  const undoCard = useMemo(() => {
+    let card = -1;
+    let undone = false;
+    items.forEach((item, idx) => {
+      if (item.kind !== "activity" || item.startIndex <= lastUserIndex) return;
+      if (item.blocks.some((b) => b.digest?.kind === "undo")) undone = true;
+      else if (item.blocks.some((b) => b.role === "done-marker")) card = idx;
+    });
+    return { card, undone };
+  }, [items, lastUserIndex]);
   const blockRows = useMemo(
     () =>
       items.map((item) =>
@@ -233,7 +257,22 @@ export function useConversationRows(opts: {
               }
               lang={lang}
               inFlightCount={isActive ? backendInFlight : 1}
+              thinking={isActive && backendThinking}
               onRemoveAttachment={removeAttachmentFactory}
+              {...(idx !== undoCard.card
+                ? {}
+                : undoCard.undone
+                  ? { undo: { state: "done" as const } }
+                  : undoable && status === "idle"
+                    ? {
+                        undo: {
+                          state: undoBusy
+                            ? ("busy" as const)
+                            : ("offer" as const),
+                          onUndo: () => void handleUndo(),
+                        },
+                      }
+                    : {})}
             />
           </ErrorBoundary>
         );
@@ -252,9 +291,16 @@ export function useConversationRows(opts: {
       // memo would keep rendering the last group as live after the backend
       // stopped.
       backendActive,
+      backendThinking,
       // The live-turn gate above. Changes only with the record, which
       // already invalidates via `items` — listed for the lint contract.
       lastUserIndex,
+      // The 撤销 chip (ADR 0074 §4): its card moves with the record; its
+      // offer changes at turn end and after an undo — rarely.
+      undoCard,
+      undoable,
+      undoBusy,
+      handleUndo,
     ],
   );
 

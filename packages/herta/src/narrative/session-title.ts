@@ -148,7 +148,6 @@ export function buildTitlePrompt(input: {
       : `${text.system}\n\n${text.incumbent(escapeUserText(input.currentTitle))}`;
   return {
     stableSystem: system,
-    repoInstructions: "",
     memoryContext: "",
     retrievedLore: "",
     messages: [{ role: "user", text: user, ts: "1970-01-01T00:00:00.000Z" }],

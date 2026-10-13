@@ -30,6 +30,9 @@ export interface LiveToolView {
   /** The call's summary as the record's op row carries it (its
    *  `tool.call.started` input summary) — once dispatched. */
   readonly summary?: string;
+  /** The tool recognised a test run at dispatch, as the record's op row
+   *  says (`runsTests`, ADR 0073 amendment 2026-10-08). */
+  readonly runsTests?: true;
   /** The call produces a stream worth a ticker: an editor writing (not
    *  viewing), a shell line, a command's output. A read does not. */
   readonly streams: boolean;
@@ -62,6 +65,13 @@ export interface LiveToolSnapshot {
   readonly startedOps: number;
   /** The call most recently heard from — the one the ticker follows. */
   readonly focus?: string;
+  /** When 板砖 last went quiet between steps (main's `Date.now()`): every
+   *  call it made has finished and the next one has not been dispatched —
+   *  its model is thinking, or writing that call (owner 2026-10-12). Absent
+   *  while a call runs, while an approval waits, and between runs. The
+   *  working row says so once the quiet has lasted a few seconds
+   *  (`useBackendThinking`). */
+  readonly quietSince?: number;
 }
 
 export const EMPTY_LIVE: LiveToolSnapshot = { views: [], startedOps: 0 };
@@ -103,6 +113,7 @@ interface CallState {
   ok: boolean | undefined;
   commandLine: string | undefined;
   summary: string | undefined;
+  runsTests: boolean;
   seq: number;
   /** The arguments' string values, as of `fieldsLen` characters. */
   fields: JsonStringField[];
@@ -116,6 +127,8 @@ export interface LiveToolFeedOpts {
   /** The feed starts while a run is already under way: it has not seen the
    *  run's earlier calls, so it numbers none until the next run starts. */
   readonly midRun?: boolean;
+  /** The clock `quietSince` reads. */
+  readonly now?: () => number;
 }
 
 export interface LiveToolFeed {
@@ -149,7 +162,12 @@ export function createLiveToolFeed(
   const clearTimer =
     opts.clearTimer ??
     ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
+  const now = opts.now ?? Date.now;
   const calls = new Map<string, CallState>();
+  /** Dispatched calls not yet finished — a parallel batch has several. */
+  const running = new Set<string>();
+  /** See `LiveToolSnapshot.quietSince`; null while 板砖 is not quiet. */
+  let quietSince: number | null = null;
   let seq = 0;
   let order = 0;
   let startedOps = 0;
@@ -172,12 +190,14 @@ export function createLiveToolFeed(
     for (const c of ordered)
       if (focus === undefined || c.seq > focus.seq) focus = c;
     const views = ordered.map((c) => viewOf(c, c === focus));
-    if (views.length === 0 && !shown) return;
-    shown = views.length > 0;
+    const visible = views.length > 0 || quietSince !== null;
+    if (!visible && !shown) return;
+    shown = visible;
     emit({
       views,
       startedOps,
       ...(focus !== undefined ? { focus: focus.id } : {}),
+      ...(quietSince !== null ? { quietSince } : {}),
     });
   };
   const dirty = (): void => {
@@ -191,9 +211,20 @@ export function createLiveToolFeed(
   };
   const clearAll = (): void => {
     startedOps = 0;
+    running.clear();
     if (calls.size === 0) return;
     calls.clear();
     dirty();
+  };
+  /** 板砖 went quiet (`at`) or is busy again (null). */
+  const quiet = (at: number | null): void => {
+    if ((at === null) === (quietSince === null)) return;
+    quietSince = at;
+    dirty();
+  };
+  /** Quiet from now, unless a call still runs. */
+  const quietIfIdle = (): void => {
+    if (running.size === 0) quiet(now());
   };
   const create = (id: string, tool: string): CallState => {
     order += 1;
@@ -217,6 +248,7 @@ export function createLiveToolFeed(
       // has missed calls.
       clearAll();
       numbering = false;
+      quiet(null);
       return;
     }
     const ev: AgentEvent = e.event;
@@ -225,12 +257,27 @@ export function createLiveToolFeed(
       case "turn.started":
         clearAll();
         numbering = true;
+        // The run opens on its model's first inference.
+        quiet(now());
         return;
       case "turn.finished":
       case "turn.failed":
         clearAll();
+        quiet(null);
+        return;
+      case "permission.requested":
+        // Waiting on the user (or the reviewer), not thinking.
+        quiet(null);
+        return;
+      case "permission.resolved":
+        // Allowed: the call starts at once. Not: the model takes it up.
+        quietIfIdle();
         return;
       case "tool.call.delta": {
+        // Writing its next call is still 板砖 working out that step: the
+        // quiet holds until the call is dispatched. Ended here, the row
+        // went BACK to the step before it while a heredoc streamed, and only
+        // then on (lab 2026-10-12).
         if (!DRAFT_TOOLS.has(ev.tool)) return;
         const c = calls.get(ev.id) ?? create(ev.id, ev.tool);
         c.args += ev.argsDelta;
@@ -265,7 +312,10 @@ export function createLiveToolFeed(
           }
         }
         c.started = true;
+        running.add(c.id);
+        quiet(null);
         c.summary = ev.inputSummary;
+        c.runsTests = ev.runsTests === true;
         if (OUTPUT_TOOLS.has(ev.tool)) {
           c.stage = "running";
           if (ev.inputSummary.length > 0) c.commandLine = ev.inputSummary;
@@ -287,6 +337,9 @@ export function createLiveToolFeed(
         return;
       }
       case "tool.call.finished": {
+        running.delete(ev.id);
+        // The last call of a step is back: the model takes the results up.
+        quietIfIdle();
         const c = calls.get(ev.id);
         if (c === undefined) return;
         // A call the user did not allow never ran and has no row in the
@@ -315,6 +368,7 @@ export function createLiveToolFeed(
       if (timer !== null) clearTimer(timer);
       timer = null;
       calls.clear();
+      running.clear();
     },
   };
 }
@@ -334,6 +388,7 @@ function newCall(id: string, tool: string, order: number): CallState {
     ok: undefined,
     commandLine: undefined,
     summary: undefined,
+    runsTests: false,
     seq: 0,
     fields: [],
     fieldsLen: 0,
@@ -384,6 +439,7 @@ function viewOf(c: CallState, focused: boolean): LiveToolView {
     done: c.done,
     ...(c.ok !== undefined ? { ok: c.ok } : {}),
     ...(c.summary !== undefined ? { summary: c.summary } : {}),
+    ...(c.runsTests ? { runsTests: true as const } : {}),
     streams,
     ...(path !== undefined && path.length > 0 ? { path } : {}),
     ...(commandLine !== undefined ? { commandLine } : {}),

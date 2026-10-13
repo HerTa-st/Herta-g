@@ -201,7 +201,6 @@ describe("openSession — load pre-existing JSONL", () => {
           frame: {
             userMessages: [{ text: "run the tests" }],
             omittedUserMessages: 0,
-            scopedRepoInstructions: "",
             scopedMemory: "",
             recentDialogue: "",
             workingHistory: "",

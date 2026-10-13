@@ -429,7 +429,6 @@ describe("buildSupervisorPrompt", () => {
     expect(userMsg.role).toBe("user");
     if (userMsg.role !== "user") throw new Error("expected user message");
     expect(userMsg.text).toContain("CAND_MARKER");
-    expect(frame.repoInstructions).toBe("");
     expect(frame.memoryContext).toBe("");
     expect(frame.retrievedLore).toBe("");
     expect(frame.toolSchemas).toEqual([]);
@@ -1046,7 +1045,6 @@ describe("buildTriggerRecheckPrompt", () => {
       throw new Error("expected user message");
     }
     expect(m.text).toContain("CAND");
-    expect(frame.repoInstructions).toBe("");
     expect(frame.memoryContext).toBe("");
     expect(frame.retrievedLore).toBe("");
     expect(frame.toolSchemas).toEqual([]);

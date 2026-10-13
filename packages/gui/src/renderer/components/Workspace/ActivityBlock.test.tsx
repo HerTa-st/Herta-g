@@ -94,6 +94,26 @@ describe("ActivityBlock", () => {
     );
   });
 
+  it("thinking: the live line says so instead of the last step, which would read as still running (owner 2026-10-12)", () => {
+    for (const [lang, text] of [
+      ["en", "Thinking…"],
+      ["zh", "思考中…"],
+    ] as const) {
+      const { container, unmount } = renderWithLocale(
+        <A
+          blocks={[step("Running npm test"), step("↳ exit 0 · 12 lines")]}
+          active={true}
+          thinking={true}
+          turnStartedAt={Date.now() - 9000}
+          backendStartedAt={Date.now() - 9000}
+          lang={lang}
+        />,
+      );
+      expect(container.querySelector(".swap-text__in")?.textContent).toBe(text);
+      unmount();
+    }
+  });
+
   it("localizes op verbs from the digest under zh, keeping the canonical icon (bug 4)", () => {
     const opStep = (
       verb: "Reading" | "Writing" | "Running",

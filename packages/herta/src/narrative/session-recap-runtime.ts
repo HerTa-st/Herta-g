@@ -469,7 +469,6 @@ export function makeRecapSummarize(
   return async ({ system, user, signal }) => {
     const frame: ActorPromptFrame = {
       stableSystem: system,
-      repoInstructions: "",
       memoryContext: "",
       retrievedLore: "",
       messages: [{ role: "user", text: user, ts: now() }],

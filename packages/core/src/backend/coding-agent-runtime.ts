@@ -34,6 +34,7 @@ import {
 } from "./dispatch-journal.js";
 import { planResume, type ResumePlan } from "./journal-seal.js";
 import { renderScopedMemory } from "./scoped-memory.js";
+import { type UndoSegment, UndoStore } from "./undo-store.js";
 
 /**
  * Tools whose SUCCESS argues that the task advanced (audit 2026-07-24, 1.2).
@@ -47,7 +48,10 @@ const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "write_new_file",
   "run_command",
   "command_stop",
-  "memory_save",
+  // Not `memory_save` (ADR 0077): a saved fact changes the harness's own
+  // store, not the user's task, and on the default contract a run that
+  // read, failed and saved a fact would have reported 完成 — the trap the
+  // reads were taken out of (audit 2026-07-24, 1.2).
   // Minimal contract (ADR 0040): `bash` counts like run_command (exit 0
   // only, see below); the editor counts only for its writing commands —
   // a `view` is a read and proves nothing (the result data says which).
@@ -127,6 +131,13 @@ export interface CodingAgentRuntimeDeps {
    * tests): no journal is kept.
    */
   journalPath?: string;
+  /**
+   * Where this session keeps what 板砖's editors replace (ADR 0074; see
+   * `undoStoreDir`). Each dispatch and each continuation is a segment, keyed
+   * by the record length it began at — so a run given none keeps nothing.
+   * Absent (the CLI, tests): no undo store.
+   */
+  undoDir?: string;
   /** The execution contract this stack runs (ADR 0040), recorded in the
    *  journal so a resumed run can tell whether it still applies. */
   contract?: string;
@@ -149,7 +160,6 @@ export interface RepoRangeFile {
 
 export interface RunBriefOptions {
   signal?: AbortSignal;
-  scopedRepoInstructions?: string;
   /**
    * The frame's project-memory text. UNDEFINED (the production dispatch)
    * means the runtime recalls the store itself at brief start and renders
@@ -331,6 +341,9 @@ export class CodingAgentRuntime {
     // The run's journal (ADR 0071 §1.1), opened once the frame's inputs are
     // known. Every transcript append reaches it through `onAppend`.
     let journal: DispatchJournal | undefined;
+    // The undo store (ADR 0074 §1), opened beside it.
+    let undo: UndoStore | undefined;
+    let undoSegment: UndoSegment | undefined;
     try {
       // Ensure the managed sandbox exists before any tool runs. A fresh
       // session whose first @板砖 action is read-only (e.g. `git status`)
@@ -400,6 +413,13 @@ export class CodingAgentRuntime {
           diffSummary: string;
         }
       >();
+      // For undo (ADR 0074 §2): whether a command ran, and the paths the
+      // attribution below credits to commands rather than an editor. Undo
+      // restores only what the editors wrote; these are what it names as
+      // left alone.
+      let commandRan = false;
+      let commandsAttributed = false;
+      const commandPaths = new Set<string>();
       let okEvidence = 0;
       let deniedPermissions = 0;
       // A continued run's report speaks for the whole task: the files
@@ -514,6 +534,33 @@ export class CodingAgentRuntime {
                     : undefined
                   : 0;
               if (exit === 0) okEvidence += 1;
+            }
+            // A command that ran and could write — not a read, a test, a
+            // version query (ADR 0074 §2; `git status` in a folder with no
+            // repository was reported as an unknown change, live 2026-10-07),
+            // nor one whose only writes went to files undo holds.
+            const commandData = COMMAND_TOOLS.has(event.tool)
+              ? (event.result.data as unknown as RunCommandData | undefined)
+              : undefined;
+            if (
+              COMMAND_TOOLS.has(event.tool) &&
+              event.result.ok &&
+              commandData?.readOnly !== true &&
+              commandData?.writesAccounted !== true
+            ) {
+              commandRan = true;
+            }
+            // The files its redirections wrote are written files, as an
+            // editor's are (ADR 0074 amendment, 2026-10-08): the report lists
+            // them, and the git attribution below no longer credits them to
+            // commands — undo restores them. Whatever the command's exit:
+            // they are on disk either way.
+            for (const w of commandData?.redirectWrites ?? []) {
+              changedByPath.set(w.relPath, {
+                path: w.relPath,
+                kind: w.created ? "created" : "modified",
+                diffSummary: `+${w.added} -${w.removed}`,
+              });
             }
             if (COMMAND_TOOLS.has(event.tool) && event.result.ok) {
               const data = event.result.data as unknown as
@@ -639,8 +686,6 @@ export class CodingAgentRuntime {
         userMessages: frameIn?.userMessages ?? opts.userMessages ?? [],
         omittedUserMessages:
           frameIn?.omittedUserMessages ?? opts.omittedUserMessages ?? 0,
-        scopedRepoInstructions:
-          frameIn?.scopedRepoInstructions ?? opts.scopedRepoInstructions ?? "",
         scopedMemory: recalledMemory,
         recentDialogue: frameIn?.recentDialogue ?? opts.recentDialogue ?? "",
         workingHistory: frameIn?.workingHistory ?? opts.workingHistory ?? "",
@@ -692,7 +737,6 @@ export class CodingAgentRuntime {
           frame: {
             userMessages: handle.userMessages,
             omittedUserMessages: handle.omittedUserMessages,
-            scopedRepoInstructions: handle.scopedRepoInstructions,
             scopedMemory: handle.scopedMemory,
             recentDialogue: handle.recentDialogue,
             workingHistory: handle.workingHistory,
@@ -704,8 +748,18 @@ export class CodingAgentRuntime {
           await markJournalOpen(this.deps.journalPath, true);
         }
       }
-      const turnDepsWithJournal =
-        journal !== undefined ? { ...turnDeps, journal } : turnDeps;
+      // This run is a segment of the undo store: its writers leave what they
+      // replace there, under the record length it began at. Best effort:
+      // the store never fails the run.
+      if (this.deps.undoDir !== undefined && opts.recordLength !== undefined) {
+        undo = await UndoStore.open(this.deps.undoDir);
+        undoSegment = undo.openSegment(opts.recordLength, brief.taskId);
+      }
+      const turnDepsWithJournal = {
+        ...turnDeps,
+        ...(journal !== undefined ? { journal } : {}),
+        ...(undoSegment !== undefined ? { undo: undoSegment.undo } : {}),
+      };
 
       let stoppedBackground = 0;
       try {
@@ -767,6 +821,7 @@ export class CodingAgentRuntime {
           after !== null &&
           (after.head === baseline.head || range !== null)
         ) {
+          commandsAttributed = true;
           const wasDirty = new Set(baseline.dirty);
           for (const f of range ?? []) {
             // Already dirty before the brief: partly the user's edit, even
@@ -779,6 +834,7 @@ export class CodingAgentRuntime {
               kind: f.kind,
               diffSummary: "changed and committed during this dispatch",
             });
+            commandPaths.add(f.path);
           }
           for (const path of after.dirty) {
             // Already dirty before the brief: outside this mechanism's reach.
@@ -790,6 +846,7 @@ export class CodingAgentRuntime {
               kind: "modified",
               diffSummary: "changed via a command (no per-file diff)",
             });
+            commandPaths.add(path);
           }
           const carried = baseline.dirty.filter((p) => !changedByPath.has(p));
           if (carried.length > 0) {
@@ -807,6 +864,18 @@ export class CodingAgentRuntime {
             "HEAD moved during this dispatch, so file changes could not be attributed by comparing against the starting commit",
             { leading: true },
           );
+        }
+      }
+
+      // What the commands changed, for undo (ADR 0074 §2): the attribution's
+      // paths when there was one; otherwise only that commands ran.
+      if (undoSegment !== undefined) {
+        if (commandsAttributed) {
+          if (commandPaths.size > 0) {
+            await undoSegment.noteCommands([...commandPaths]);
+          }
+        } else if (commandRan) {
+          await undoSegment.noteCommands(null);
         }
       }
 
@@ -883,6 +952,7 @@ export class CodingAgentRuntime {
       return report;
     } finally {
       await journal?.close();
+      await undo?.close();
       this.briefInFlight = false;
     }
   }

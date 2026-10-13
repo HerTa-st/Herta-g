@@ -91,9 +91,6 @@ export function translateActor(
   if (frame.stableSystem.length > 0) {
     messages.push({ role: "system", content: frame.stableSystem });
   }
-  if (frame.repoInstructions.length > 0) {
-    messages.push({ role: "system", content: frame.repoInstructions });
-  }
   if (frame.memoryContext.length > 0) {
     messages.push({ role: "system", content: frame.memoryContext });
   }
@@ -116,9 +113,6 @@ export function translateBackend(
   const messages: OpenAIMessage[] = [];
   if (frame.backendSystem.length > 0) {
     messages.push({ role: "system", content: frame.backendSystem });
-  }
-  if (frame.scopedRepoInstructions.length > 0) {
-    messages.push({ role: "system", content: frame.scopedRepoInstructions });
   }
   if (frame.scopedMemory.length > 0) {
     messages.push({ role: "system", content: frame.scopedMemory });

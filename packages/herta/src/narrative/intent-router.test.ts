@@ -169,11 +169,10 @@ describe("classifyIntent — frame construction", () => {
     expect(frame.stableSystem).not.toContain("hello");
   });
 
-  it("leaves repoInstructions / memoryContext / retrievedLore / toolSchemas empty", async () => {
+  it("leaves memoryContext / retrievedLore / toolSchemas empty", async () => {
     const { provider, frames } = mkRouterProvider("默认");
     await classifyIntent(baseInput({ provider, currentState: "默认" }));
     const frame = frames[0]!;
-    expect(frame.repoInstructions).toBe("");
     expect(frame.memoryContext).toBe("");
     expect(frame.retrievedLore).toBe("");
     expect(frame.toolSchemas).toEqual([]);

@@ -366,6 +366,25 @@
   color: #63d68e;
 }
 *{box-sizing:border-box}
+/* The house scrollbar is the default for EVERY scroller (owner 2026-10-08:
+   a Markdown code block in the viewer still showed the OS bar, arrows and
+   all). Each surface used to opt in by name, and every new scroller —
+   a rendered document's <pre>, its tables — started on the system's grey
+   bar until someone noticed. The named rules below keep their own sizes;
+   these lose to any of them on specificity. */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner{background:transparent}
+::-webkit-scrollbar-thumb{
+  background:var(--ink-a13);
+  border-radius:999px;
+  border:3px solid transparent;
+  background-clip:padding-box;
+}
+::-webkit-scrollbar-thumb:hover{
+  background:var(--ink-a22);
+  background-clip:padding-box;
+}
 body{
   margin:0;
   min-height:100vh;
@@ -1162,9 +1181,15 @@ button,
    content-visibility, off-screen rows skip layout and paint entirely, so
    each animation frame costs only the ~dozen visible rows regardless of
    session length. `auto` intrinsic sizing remembers a row's REAL height
-   after its first layout — scroll geometry stays honest; 72px is only the
-   pre-first-layout estimate for rows that have never been on screen.
+   after its first layout — scroll geometry stays honest; the size below is
+   only the pre-first-layout estimate for rows that have never been on screen.
    Chromium-only app, fully supported.
+
+   The estimate is one collapsed group line, 23px (2026-10-08). It was 72px,
+   a message row's height kept when the rule narrowed to activity groups, and
+   every NEW group — mounting at the bottom of a live turn — laid out 49px
+   too tall for one frame, then shrank to its line: under held turn room the
+   conversation dipped 49px (the scroll engine now also re-syncs on shrink).
 
    ACTIVITY GROUPS ONLY — not .message-row: content-visibility imposes
    paint containment, which clips descendants to the row's padding box,
@@ -1177,7 +1202,7 @@ button,
    subtrees and have no overflowing hover UI, so they stay skipped. */
 .activity-line-group {
   content-visibility: auto;
-  contain-intrinsic-size: auto 72px;
+  contain-intrinsic-size: auto 23px;
 }
 .user-row {
   justify-content: flex-end;
@@ -1618,6 +1643,22 @@ button,
 }
 .composer-input::placeholder {
   color: var(--muted-4);
+}
+/* Composer predictions (owner 2026-10-10): the suggestion reads as the
+   placeholder; this is the key that takes it, at the box's right edge while
+   one shows. Clear of the 10px scrollbar gutter. */
+.composer-prediction-key {
+  position: absolute;
+  right: 14px;
+  bottom: 2px;
+  font-family: var(--mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--muted-4);
+  border: 1px solid var(--ink-a13);
+  border-radius: 5px;
+  padding: 2px 5px;
+  pointer-events: none;
 }
 /* Attachment take-back (ADR 0033). Hidden until the row is hovered or the
    button itself is focused — a persistent ✕ on every attachment row would
@@ -2188,6 +2229,7 @@ button.agent-preview {
   padding: 4px 0;
 }
 .card-menu-current {
+  position: relative;
   padding: 8px 12px;
 }
 .card-menu-label {
@@ -2197,6 +2239,8 @@ button.agent-preview {
 }
 .card-menu-path {
   display: block;
+  /* Clears the copy icon pinned in the block's top-right corner. */
+  width: calc(100% - 22px);
   margin-top: 2px;
   font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Code",
     "Source Code Pro", Consolas, "DejaVu Sans Mono", monospace;
@@ -2206,6 +2250,61 @@ button.agent-preview {
   /* Wrap at the <wbr> separators emitted by breakablePath; fall back to
      breaking an over-long single segment rather than overflowing. */
   overflow-wrap: anywhere;
+}
+/* The path that opens its folder (owner 2026-10-08): underlined faintly at
+   rest, as the viewer's document links are, so it reads as something to
+   click; the house accent on hover. */
+.card-menu-path.is-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 3px;
+  text-decoration: underline;
+  text-decoration-color: var(--ink-a22);
+  text-underline-offset: 2px;
+  transition: color 130ms ease, text-decoration-color 130ms ease;
+}
+.card-menu-path.is-action:hover {
+  color: var(--accent-blue);
+  text-decoration-color: currentColor;
+}
+.card-menu-path.is-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.card-menu-copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-3);
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease;
+}
+.card-menu-copy:hover {
+  background: var(--ink-a06);
+  color: var(--ink-2);
+}
+.card-menu-copy:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.card-menu-copy.is-copied {
+  color: var(--accent);
+}
+.card-menu-copy svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8;
 }
 .card-menu-divider {
   height: 1px;
@@ -2253,33 +2352,19 @@ button.agent-preview {
   line-height: 1.4;
   color: #c0392b;
 }
-/* ADR 0030 — project command rules, managed in THIS menu (owner 2026-08-04:
-   session-scoped state next to the workspace it binds to, not in Settings).
-   Empty state is one dim line; many rules scroll inside a capped list so the
-   menu never outgrows the rail. */
-.card-menu-rules {
-  padding: 6px 12px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.card-menu-rules-empty {
-  font-size: 11px;
-  color: var(--muted-slate);
-}
-/* Workspace trust row (ADR 0064): the label, the one-line state, and the
-   toggle — same register as the rules section it sits above. */
-.card-menu-trust {
+/* Automatic review row (ADR 0075, which replaced workspace trust): the
+   label, the one-line state, and the toggle. */
+.card-menu-review {
   padding: 6px 12px 4px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.card-menu-trust-state {
+.card-menu-review-state {
   font-size: 11px;
   color: var(--muted-slate);
 }
-.card-menu-trust-toggle {
+.card-menu-review-toggle {
   /* Bleeds through the section's 12px side padding so its hover band runs
      edge to edge like the rows above it. The width has to bleed WITH the
      margins: `.card-menu-item` is `width: 100%`, and a negative left margin
@@ -2287,45 +2372,6 @@ button.agent-preview {
      edge and stopped 24px short of its right one (owner 2026-09-21). */
   margin: 2px -12px 0;
   width: calc(100% + 24px);
-}
-.card-menu-rules-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  max-height: 96px;
-  overflow-y: auto;
-}
-.card-menu-rule {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.card-menu-rule-text {
-  font-family: var(--mono, ui-monospace, "SF Mono", Menlo, monospace);
-  font-size: 11px;
-  color: var(--slate-deep);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.card-menu-rule-remove {
-  flex: none;
-  border: 0;
-  background: transparent;
-  color: var(--muted-slate);
-  font-size: 11px;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.card-menu-rule-remove:hover {
-  color: #9a5b5b;
-  background: rgba(154, 91, 91, 0.1);
 }
 
 /* Slice 3.1 addition — frameless-window drag strip (SPEC v0.3 §5.1.1).
@@ -3061,6 +3107,31 @@ button.agent-preview {
 .composer-notice.is-exiting {
   animation: notice-out 240ms var(--ease-accel) both;
 }
+/* 撤销改动 (ADR 0074 §4): the pill lets clicks through to the record; its
+   one action does not. */
+.composer-notice__action {
+  pointer-events: auto;
+  margin-left: 10px;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--ink-a06);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.composer-notice__action:hover {
+  background: var(--ink-a09);
+}
+.composer-notice__action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.composer-notice__action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 /* @-file mentions (ADR 0072 §2): the workspace's matching files, floating
    above the composer like the rewind notice — absolute, so the input row
    never reflows. Dressed as the app's other menu (the Settings select): a
@@ -3117,6 +3188,25 @@ button.agent-preview {
   text-align: left;
   color: var(--muted-slate);
   font-size: 12px;
+}
+/* The delegation token's row (owner 2026-10-08): first while the query can
+   still become it, in the chip's ink, with what it does beside it. */
+.composer-mentions__item.is-brick .composer-mentions__name {
+  color: var(--mention-ink);
+}
+.composer-mentions__desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted-slate);
+  font-size: 12px;
+}
+/* What the rows below it are: the list names its files. */
+.composer-mentions__section {
+  padding: 7px 10px 3px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--muted-3);
 }
 @keyframes mentions-in {
   from {
@@ -4290,6 +4380,48 @@ button.session-item__badge--dismiss {
   font-size: 11px;
   color: var(--muted-faint);
 }
+/* 撤销 (ADR 0074 §4): a quiet text chip on the latest turn's finished card,
+   right of the summary and before the duration — the shape of the reference
+   the owner picked (Claude Desktop's per-turn Undo). The user's alone: it
+   is not in the record. */
+.activity-undo {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--ink-a05);
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--muted-slate);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) ease,
+    color var(--dur-micro) ease;
+}
+.activity-undo:hover {
+  background: var(--ink-a09);
+  color: var(--ink-2);
+}
+.activity-undo:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.activity-undo:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.activity-undo.is-done {
+  padding: 1px 0;
+  background: transparent;
+  color: var(--muted-faint);
+  cursor: default;
+}
+/* The chip takes the row's auto margin; the duration follows it. */
+.activity-undo + .activity-line__duration {
+  margin-left: 0;
+}
 .activity-line__chevron {
   flex: none;
   color: var(--muted-4);
@@ -4565,6 +4697,11 @@ button.session-item__badge--dismiss {
 .trace-node:last-child::before {
   display: none;
 }
+/* Every dot carries its ring (2026-10-08): a filled dot's is transparent
+   over its own fill. The ring used to exist only on the in-flight and queued
+   states, so finishing a step dropped it in one frame while the fill was
+   still fading in from transparent — the dot blinked out as the next node
+   arrived. Now only colours and the ring's width move, and they cross-fade. */
 .trace-node__dot {
   box-sizing: border-box;
   width: 9px;
@@ -4572,10 +4709,12 @@ button.session-item__badge--dismiss {
   /* Optical centre of the first line (12.5px × 1.45 ≈ 18px). */
   margin-top: 5px;
   border-radius: 50%;
+  border: 1.5px solid transparent;
   background: color-mix(in srgb, var(--banzhuan-led) 42%, transparent);
   transition:
     background-color 260ms ease,
-    border-color 260ms ease;
+    border-color 260ms ease,
+    border-width 260ms ease;
 }
 .trace-node.is-fail .trace-node__dot {
   background: #b98080;
@@ -4584,14 +4723,15 @@ button.session-item__badge--dismiss {
    faint ring, its line in the quietest ink. */
 .trace-node.is-queued .trace-node__dot {
   background: transparent;
-  border: 1px solid var(--hairline-strong);
+  border-width: 1px;
+  border-color: var(--hairline-strong);
 }
 .trace-node.is-queued .trace-node__line {
   color: var(--muted-4);
 }
 .trace-node.is-in-flight .trace-node__dot {
   background: transparent;
-  border: 1.5px solid var(--banzhuan-led);
+  border-color: var(--banzhuan-led);
 }
 /* Parked on an approval: the step is the current one, but nothing is being
    done to it — the ring breaks. */
@@ -4600,6 +4740,33 @@ button.session-item__badge--dismiss {
 }
 .trace-node__body {
   min-width: 0;
+}
+/* The ticker's place under the node in flight (TickerSlot, 2026-10-08): it
+   eases open as a step starts and shut as the node folds, so the card's
+   height glides instead of dipping by a line and growing back. Row heights
+   to and from auto via the 0fr/1fr grid track; the length MUST match
+   CARD_TICKER_MS (card-motion.ts). */
+.trace-node__slot {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 260ms var(--ease-signature),
+    opacity 200ms ease;
+}
+.trace-node__slot.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+/* Closing: the line goes first, then its room. */
+.trace-node__slot.is-closing {
+  transition:
+    grid-template-rows 260ms var(--ease-signature),
+    opacity 140ms ease;
+}
+.trace-node__slot-inner {
+  min-height: 0;
+  overflow: hidden;
 }
 .trace-node__line {
   display: flex;
@@ -5025,6 +5192,8 @@ button.repo-card__path,
   .plan-card,
   .plan-card__list { transition: none; }
   .trace-ticker__line { animation: none; }
+  .trace-node__slot,
+  .trace-node__dot { transition: none; }
   .plan-card__row { animation: none; }
 }
 .activity-step {
@@ -7431,7 +7600,12 @@ button.commit-view__path:hover {
    The settings "?" tip's face, floating. */
 .hover-tip {
   position: fixed;
-  z-index: 60;
+  /* With the app's other portal tooltips (.tooltip--portal), above every
+     popover a tipped element can sit in — the card menu floats at 70
+     (2026-10-08: its rule rows took this tip). */
+  z-index: 1000;
+  /* Fits its text, up to the layer's max-width (HoverTipLayer). */
+  width: max-content;
   padding: 7px 10px;
   font-size: 12.5px;
   line-height: 1.5;
@@ -8344,4 +8518,201 @@ button.commit-view__path:hover {
   .lightbox-backdrop {
     animation: none;
   }
+}
+/* ── Piece quoting (ADR 0078) ────────────────────────────────────────────
+   A mask over the page, cut into the document's pieces; the page never
+   moves. Values locked by the owner's tuner, 2026-10-13: 1200 ms rest,
+   14 % ink veil, straight 2 px seams, 280 ms fade, the selected piece
+   tinted accent at 16 %, the hovered piece lightened to 8 %. */
+.file-viewer__doc-host {
+  position: relative;
+}
+.piece-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 280ms ease;
+}
+.piece-mask.is-shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+.piece-mask__piece {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: color-mix(in srgb, var(--ink-3) 14%, transparent);
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+.piece-mask__piece:hover {
+  background: color-mix(in srgb, var(--ink-3) 8%, transparent);
+}
+.piece-mask__piece.is-selected {
+  background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
+}
+/* The selection pill: under the last picked piece, at the visible right
+   edge of the scroller (its left is that edge; it hangs back from it). */
+.piece-mask__pill {
+  position: absolute;
+  transform: translateX(-100%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-pop);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 6px 18px var(--shadow-pop);
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  z-index: 3;
+}
+.piece-mask__count {
+  color: var(--muted-slate);
+  margin-right: 2px;
+}
+.piece-mask__quote,
+.piece-mask__clear {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.piece-mask__quote:hover,
+.piece-mask__clear:hover {
+  background: var(--ink-a13);
+}
+.piece-mask__clear {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  color: var(--muted-slate);
+}
+/* The switch's icon (icon B, 抽出一块): the middle band pulled out 2 px
+   while on, slid back into line while off — 220 ms with a little overshoot. */
+.piece-quote-icon__mid {
+  transition: transform 220ms cubic-bezier(.34, 1.56, .64, 1);
+}
+.piece-quote-icon.is-off .piece-quote-icon__mid {
+  transform: translateX(-2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .piece-mask,
+  .piece-mask__piece,
+  .piece-quote-icon__mid { transition: none; }
+}
+
+/* ── Quotes in the composer (ADR 0078 §6) ────────────────────────────────
+   Pieces quoted from the viewer's page wait here as chips, above the input
+   like the staged pictures, and grow the composer by one row the same way.
+   × takes one back; the source rides the message when it is sent. */
+.composer.has-quotes { height: 112px; }
+.composer.has-staged.has-quotes { height: 178px; }
+@media (max-width: 1200px) {
+  .composer.has-quotes { height: 138px; }
+  .composer.has-staged.has-quotes { height: 204px; }
+}
+.composer-quotes {
+  order: -1;
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  max-width: 100%;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  position: relative;
+  animation: staged-strip-in 0.28s ease 0.14s both;
+}
+.composer-quote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 340px;
+  height: 24px;
+  padding: 0 3px 0 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-blue) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-blue) 22%, transparent);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.composer-quote__icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--accent-blue);
+}
+.composer-quote__label {
+  flex: none;
+  font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--accent-deep);
+  white-space: nowrap;
+}
+.composer-quote__preview {
+  min-width: 0;
+  color: var(--muted-slate);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-quote__remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-slate);
+  cursor: pointer;
+}
+.composer-quote__remove svg { width: 9px; height: 9px; }
+.composer-quote__remove:hover { background: var(--ink-a13); color: var(--slate-deep); }
+
+/* A quote in the sent bubble (ADR 0078 §7): its label opens the file at
+   those lines; the first lines of the source under it. */
+.message-quote {
+  margin: 0 0 8px;
+  padding: 6px 10px 7px;
+  border-radius: 10px;
+  background: var(--ink-a05);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.message-quote__label {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--accent-blue);
+  text-align: left;
+}
+button.message-quote__label { cursor: pointer; }
+button.message-quote__label:hover { text-decoration: underline; text-underline-offset: 2px; }
+.message-quote__text {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-slate);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 4.5em;
+  overflow: hidden;
 }

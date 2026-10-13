@@ -23,11 +23,14 @@ const finished = (id: string, tool: string, ok = true) =>
   });
 
 /** A feed on a hand-cranked timer: `tick()` runs the pending flush. */
-function harness(opts: { readonly midRun?: boolean } = {}) {
+function harness(
+  opts: { readonly midRun?: boolean; readonly now?: () => number } = {},
+) {
   const sent: LiveToolSnapshot[] = [];
   let pending: (() => void) | null = null;
   let timers = 0;
   const feed = createLiveToolFeed((s) => sent.push(s), {
+    now: () => 1_000,
     ...opts,
     setTimer: (fn) => {
       timers += 1;
@@ -48,6 +51,24 @@ function harness(opts: { readonly midRun?: boolean } = {}) {
 }
 
 describe("createLiveToolFeed (ADR 0073)", () => {
+  it("a call dispatched as a test run says so on its view (ADR 0073 amendment 2026-10-08)", () => {
+    const h = harness();
+    h.feed.push(
+      ev({
+        type: "tool.call.started",
+        layer: "backend",
+        id: "c1",
+        tool: "bash",
+        inputSummary: "mkdir -p x && cd x && …",
+        runsTests: true,
+      }),
+    );
+    h.feed.push(started("c2", "bash", "ls"));
+    const snap = h.tick();
+    expect(snap?.views.find((v) => v.id === "c1")?.runsTests).toBe(true);
+    expect(snap?.views.find((v) => v.id === "c2")?.runsTests).toBeUndefined();
+  });
+
   it("started mid-run, or after events were lost, it numbers no call until the next run starts (review 2026-09-30)", () => {
     const h = harness({ midRun: true });
     h.feed.push(started("c1", "bash", "pwd"));
@@ -348,9 +369,11 @@ describe("createLiveToolFeed (ADR 0073)", () => {
     expect(h.tick()).toEqual({ views: [], startedOps: 0 });
     const count = h.sent.length;
     // Nothing on screen: nothing more to say.
-    h.feed.push(ev({ type: "turn.started", layer: "backend", userText: "" }));
     h.tick();
     expect(h.sent).toHaveLength(count);
+    // A new run opens on its model's first inference: quiet, no views.
+    h.feed.push(ev({ type: "turn.started", layer: "backend", userText: "" }));
+    expect(h.tick()).toEqual({ views: [], startedOps: 0, quietSince: 1_000 });
     h.feed.push(started("c2", "bash", "ls"));
     h.tick();
     h.feed.push({ kind: "dropped", count: 3 });
@@ -374,5 +397,92 @@ describe("createLiveToolFeed (ADR 0073)", () => {
     h.feed.close();
     h.tick();
     expect(h.sent).toEqual([]);
+  });
+});
+
+describe("quietSince: 板砖 thinking between steps (owner 2026-10-12)", () => {
+  const runStarted = ev({
+    type: "turn.started",
+    layer: "backend",
+    userText: "",
+  });
+
+  it("a run opens quiet; writing the next call keeps it, dispatching it ends it; the last call back starts it again, from then", () => {
+    let clock = 1_000;
+    const h = harness({ now: () => clock });
+    h.feed.push(runStarted);
+    expect(h.tick()?.quietSince).toBe(1_000);
+    // Still working out that step (lab 2026-10-12: ended here, the row went
+    // back to the step before while a heredoc streamed).
+    clock = 1_500;
+    h.feed.push(delta("w1", "bash", '{"command":"cat > a.py'));
+    expect(h.tick()?.quietSince).toBe(1_000);
+    h.feed.push(started("w1", "bash", "cat > a.py"));
+    expect(h.tick()?.quietSince).toBeUndefined();
+    h.feed.push(finished("w1", "bash"));
+    h.tick();
+    h.feed.push(started("r1", "read_file", "a.ts"));
+    expect(h.tick()?.quietSince).toBeUndefined();
+    clock = 2_000;
+    h.feed.push(finished("r1", "read_file"));
+    expect(h.tick()?.quietSince).toBe(2_000);
+    // Still the same quiet stretch: its start holds.
+    clock = 9_000;
+    h.feed.push(finished("r1", "read_file"));
+    expect(h.tick()?.quietSince).toBe(2_000);
+  });
+
+  it("a parallel batch is quiet only once its last call is back", () => {
+    let clock = 1_000;
+    const h = harness({ now: () => clock });
+    h.feed.push(runStarted);
+    h.feed.push(started("a", "read_file", "a.ts"));
+    h.feed.push(started("b", "read_file", "b.ts"));
+    h.feed.push(finished("a", "read_file"));
+    expect(h.tick()?.quietSince).toBeUndefined();
+    clock = 3_000;
+    h.feed.push(finished("b", "read_file"));
+    expect(h.tick()?.quietSince).toBe(3_000);
+  });
+
+  it("an approval wait is not thinking; once answered, the model takes it up", () => {
+    let clock = 1_000;
+    const h = harness({ now: () => clock });
+    h.feed.push(runStarted);
+    h.feed.push(
+      ev({ type: "permission.requested", layer: "backend" } as AgentEvent),
+    );
+    expect(h.tick()?.quietSince).toBeUndefined();
+    clock = 4_000;
+    h.feed.push(
+      ev({ type: "permission.resolved", layer: "backend" } as AgentEvent),
+    );
+    expect(h.tick()?.quietSince).toBe(4_000);
+    // Allowed: the call starts at once, and it is busy again.
+    h.feed.push(started("c1", "bash", "rm x"));
+    expect(h.tick()?.quietSince).toBeUndefined();
+  });
+
+  it("a run's end, and lost events, end it", () => {
+    const h = harness();
+    h.feed.push(runStarted);
+    expect(h.tick()?.quietSince).toBe(1_000);
+    h.feed.push(
+      ev({
+        type: "turn.finished",
+        layer: "backend",
+        summary: {
+          durationMs: 1,
+          toolCallCount: 0,
+          messageCount: 1,
+          endedAt: "",
+        },
+      }),
+    );
+    expect(h.tick()).toEqual({ views: [], startedOps: 0 });
+    h.feed.push(runStarted);
+    h.tick();
+    h.feed.push({ kind: "dropped", count: 1 });
+    expect(h.tick()).toEqual({ views: [], startedOps: 0 });
   });
 });

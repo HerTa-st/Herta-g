@@ -191,7 +191,6 @@ describe("the providers name the endpoint and the model, and tell both listeners
     for await (const ev of provider.streamChat(
       {
         stableSystem: "",
-        repoInstructions: "",
         memoryContext: "",
         retrievedLore: "",
         messages: [{ role: "user", text: "hi", ts: "t" }],

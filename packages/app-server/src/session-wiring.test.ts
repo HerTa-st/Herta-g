@@ -25,7 +25,6 @@ describe("BACKEND_PROVIDER_MAX_RETRIES", () => {
 describe("createBackendProvider — the one backend provider both hosts build (2026-09-03)", () => {
   const frame = {
     stableSystem: "s",
-    repoInstructions: "",
     memoryContext: "",
     retrievedLore: "",
     messages: [
@@ -132,7 +131,7 @@ const noAsk: AskResolver = {
 describe("createBackendStack", () => {
   it("standard contract: registers the MVP tool set and the file/command rules", () => {
     const root = mkWorkspace();
-    let seen: { cacheSize: number; rulesListed: number } | null = null;
+    let seen: { cacheSize: number; autoReview: boolean | null } | null = null;
     const stack = createBackendStack({
       wsHolder: { current: root },
       workspaceRoot: root,
@@ -141,15 +140,18 @@ describe("createBackendStack", () => {
       backendProvider: new FakeProvider({ turns: [] }),
       backendModel: "deepseek-v4-pro",
       digestModel: null,
-      makeAsk: ({ cache, rules }) => {
-        seen = { cacheSize: cache.size(), rulesListed: rules.list().length };
+      makeAsk: ({ cache, workspacePermissions }) => {
+        seen = {
+          cacheSize: cache.size(),
+          autoReview: workspacePermissions.autoReview(),
+        };
         return noAsk;
       },
     });
     expect(stack.contract).toBe("standard");
     expect(stack.bashPath).toBeNull();
     // The ask resolver was built from the SAME cache/rules the stack exposes.
-    expect(seen).toEqual({ cacheSize: 0, rulesListed: 0 });
+    expect(seen).toEqual({ cacheSize: 0, autoReview: null });
     const names = stack.backendTools.list().map((t) => t.name);
     expect(names).toContain("read_file");
     expect(names).toContain("edit_file");
@@ -215,7 +217,6 @@ describe("createBackendStack", () => {
     const buildInput = {
       brief: { taskId: "t-1" },
       userMessages: [{ text: "hi" }],
-      scopedRepoInstructions: "",
       scopedMemory: "",
       messages: [],
     };
@@ -420,7 +421,6 @@ describe("createBackendStack", () => {
       const frame = stack.backendBuilder.build({
         brief: { taskId: "t-1" },
         userMessages: [{ text: "hi" }],
-        scopedRepoInstructions: "",
         scopedMemory: "",
         messages: [],
       });

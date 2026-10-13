@@ -2,6 +2,7 @@ import type {
   ApprovalOverlayState,
   ApprovalResult,
   AttachProgress,
+  AutoReviewState,
   BranchList,
   CommitDescription,
   ContinueInterruptedResult,
@@ -27,12 +28,13 @@ import type {
   TerminalRecord,
   TitleEvent,
   TurnLifecycleEvent,
+  UndoEvent,
+  UndoTarget,
+  UndoTurnEditsResult,
   VoiceCueEvent,
   WorkingDiff,
   WorkspaceEvent,
-  WorkspaceTrustState,
 } from "@herta/app-server";
-import type { WorkspaceTrust } from "@herta/core";
 import type { LiveToolSnapshot } from "../../shared/live-tool-feed.js";
 
 /** One file's progress in an attach in flight, from main (2026-10-01). */
@@ -86,6 +88,9 @@ export interface SessionSnapshot {
   /** A 继续 is on offer (ADR 0071 §1.4): a reloaded window's strip comes
    *  back. Optional on the wire; absent = no offer. */
   readonly resumable?: boolean;
+  /** The latest turn's edits can be taken back (ADR 0074 §4): a reloaded
+   *  window's card keeps its 撤销 chip. Optional on the wire; absent = no. */
+  readonly undoable?: boolean;
   /** Pictures staged in the composer and not yet sent (ADR 0048 §4): a
    *  reloaded window's strip comes back instead of vanishing while main
    *  still counts them. Optional on the wire; absent = none. */
@@ -517,6 +522,16 @@ export interface HertaBridge {
    *  withdraw animation races a session switch — an unbound rewind then
    *  truncated the WRONG session's latest turn). */
   rewindLastTurn(sessionId: string): Promise<RewindResult>;
+  /** Take a turn's edits back (ADR 0074): `latest` from its card's 撤销,
+   *  `withdrawn` from the rewind notice's 撤销改动. Bound to `sessionId` like
+   *  the rewind. OPTIONAL with `onUndo` — fakes and the website demo omit
+   *  them, and no chip shows. */
+  undoLastTurnEdits?(
+    sessionId: string,
+    target: UndoTarget,
+  ): Promise<UndoTurnEditsResult>;
+  /** Whether the latest turn can be undone changed. */
+  onUndo?(cb: (e: UndoEvent) => void): () => void;
   /** Fire-and-forget: a successful 板砖-card lift may play the easter-egg voice.
    *  The active session owns the 50% roll + per-session hourly throttle. */
   maybePlayEasterEgg(): Promise<void>;
@@ -567,21 +582,13 @@ export interface HertaBridge {
     markdown: string,
   ): Promise<{ readonly saved: boolean; readonly failed?: boolean }>;
   resolveApproval(opts: ResolveApprovalOpts): Promise<ApprovalResult>;
-  /** Project command allow rules (ADR 0030) for the ACTIVE session's
-   *  workspace, as display strings (`node src/index.mjs:*`). OPTIONAL —
-   *  fakes and the website demo omit the pair; the Settings management
-   *  list hides with it (same contract as getBackendConfig). */
-  listCommandRules?(): Promise<readonly string[]>;
-  /** Remove one rule by its display form; false when nothing matched. */
-  removeCommandRule?(display: string): Promise<boolean>;
-  /** Workspace trust (ADR 0064) for the ACTIVE session's workspace. OPTIONAL
-   *  like the rule pair; the device card's menu hides the row without it. */
-  getWorkspaceTrust?(): Promise<WorkspaceTrustState>;
+  /** Automatic review (ADR 0075, which replaced workspace trust) for the
+   *  ACTIVE session's workspace. OPTIONAL like the rule pair; the device
+   *  card's menu hides the row without it. */
+  getAutoReview?(): Promise<AutoReviewState>;
   /** Record the owner's choice for this workspace (null → back to the
    *  default); resolves with the state after the change. */
-  setWorkspaceTrust?(
-    value: WorkspaceTrust | null,
-  ): Promise<WorkspaceTrustState>;
+  setAutoReview?(on: boolean | null): Promise<AutoReviewState>;
   /** Fire-and-forget record heal: ask main to re-emit the active session's
    *  full record as a `reset` through the record stream. Called by the store
    *  when a record-channel `dropped` overflow sentinel arrives (a block was
@@ -774,6 +781,12 @@ export interface HertaBridge {
   getPdfPictureTranscripts?(): Promise<boolean>;
   /** Persist the switch; main applies it to the next attach, no restart. */
   setPdfPictureTranscripts?(enabled: boolean): Promise<void>;
+  /** Read whether the composer offers a predicted next message (2026-10-10;
+   *  Settings → 窗口). Default on. OPTIONAL — fakes and the website demo
+   *  omit it, and the row hides. */
+  getComposerPredictions?(): Promise<boolean>;
+  /** Persist the switch; main applies it from the next finished turn. */
+  setComposerPredictions?(enabled: boolean): Promise<void>;
   /** Read Herta's real-time-voice state (ADR 0042): whether the user has it
    *  ON, and whether it can run here at all — `available` folds in the model
    *  bundle, the native runtime, and a worker that has failed for good, so

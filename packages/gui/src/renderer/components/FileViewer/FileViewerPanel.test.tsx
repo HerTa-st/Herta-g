@@ -1160,7 +1160,7 @@ describe("FileViewerPanel — the file's kind picks the read and the renderer (A
     );
   });
 
-  it("a cite anchor opens Markdown at the SOURCE (lines are a source concept)", async () => {
+  it("a cite anchor opens Markdown as the page, banded where the cited lines render (ADR 0054, amended)", async () => {
     const mock = createMockHertaBridge();
     Object.assign(mock.bridge, {
       readWorkspaceFile: vi.fn(async () => ({
@@ -1174,14 +1174,44 @@ describe("FileViewerPanel — the file's kind picks the read and the renderer (A
     const h = renderWithSession(ui(), { mock });
     h.openSession("s1");
     fireEvent.click(screen.getByTestId("probe-md-anchored"));
+    const panel = () => screen.getByTestId("file-viewer");
     await waitFor(() =>
       expect(
-        screen.getByTestId("file-viewer").querySelector(".file-viewer__anchor"),
+        panel().querySelector(".file-viewer__doc-host > .file-viewer__anchor"),
       ).not.toBeNull(),
     );
-    expect(
-      screen.getByTestId("file-viewer").querySelector(".file-viewer__doc"),
-    ).toBeNull();
+    expect(panel().querySelector(".file-viewer__doc h1")?.textContent).toBe(
+      "Hello",
+    );
+    expect(panel().querySelector(".file-viewer__text")).toBeNull();
+  });
+
+  it("a page whose blocks cannot be matched to its lines shows that cite at the source; the toggle still reaches the page", async () => {
+    const mock = createMockHertaBridge();
+    Object.assign(mock.bridge, {
+      readWorkspaceFile: vi.fn(async () => ({
+        ok: true as const,
+        content: "<details>\n\n# Hello\n\n</details>\n",
+        truncated: false,
+        size: 30,
+        relative: "docs/notes.md",
+      })),
+    });
+    const h = renderWithSession(ui(), { mock });
+    h.openSession("s1");
+    fireEvent.click(screen.getByTestId("probe-md-anchored"));
+    const panel = () => screen.getByTestId("file-viewer");
+    await waitFor(() =>
+      expect(
+        panel().querySelector(".file-viewer__code-inner .file-viewer__anchor"),
+      ).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByTestId("viewer-toggle-source"));
+    await waitFor(() =>
+      expect(panel().querySelector(".file-viewer__doc h1")).not.toBeNull(),
+    );
+    // Chosen by hand, the page stays.
+    expect(panel().querySelector(".file-viewer__text")).toBeNull();
   });
 
   it("code files keep the gutter layout and gain tokens once the highlighter lands", async () => {

@@ -39,12 +39,12 @@ import {
   InMemoryEventBus,
   InMemoryToolRegistry,
   narrativeDirFor,
-  ProjectCommandRuleStore,
   type ProviderAdapter,
   RulePermissionEngine,
   SessionApprovalCache,
   type TerminalRecord,
   type TerminalRecordBlock,
+  WorkspacePermissions,
   windowsBackendHostNote,
   wireTaskScopedApprovalCache,
 } from "@herta/core";
@@ -105,6 +105,15 @@ import type { AppServerConfig } from "./types.js";
 
 // The usage log (token counts per model call) — a host that builds its
 // stacks by hand, as the CLI does, installs it from the same entry point.
+// ADR 0075: the automatic reviewer — the desktop session mounts it itself;
+// the CLI, a front-end over this same wiring, mounts it from here.
+export {
+  AutoReviewer,
+  defaultReviewModel,
+  type ReviewDeps,
+  reviewBeforeCard,
+  reviewTakes,
+} from "./auto-review.js";
 export { installUsageLog } from "./usage-log.js";
 
 // ── Backend stack ───────────────────────────────────────────────────────────
@@ -202,7 +211,6 @@ export function digestModelFrom(provider: ProviderAdapter): DigestModel {
     for await (const ev of provider.streamChat(
       {
         stableSystem: system,
-        repoInstructions: "",
         memoryContext: "",
         retrievedLore: "",
         messages: [{ role: "user", text: user, ts: new Date().toISOString() }],
@@ -262,11 +270,12 @@ export interface BackendStackOpts {
    *  `windowsBackendHostNote` — the minimal contract never does (it runs on
    *  bash by construction). */
   readonly platform?: NodeJS.Platform;
-  /** Builds the front-end's ask resolver once the cache and rule store it
-   *  consults exist. The returned resolver is the permission engine's. */
+  /** Builds the front-end's ask resolver once the cache and the
+   *  workspace's permission choices it consults exist. The returned
+   *  resolver is the permission engine's. */
   readonly makeAsk: (deps: {
     readonly cache: SessionApprovalCache;
-    readonly rules: ProjectCommandRuleStore;
+    readonly workspacePermissions: WorkspacePermissions;
   }) => AskResolver;
   /** The steer source (ADR 0063) every dispatch's runtime drains at its
    *  loop head — the session's `SteerChannel`. Absent (the CLI): no steer. */
@@ -274,6 +283,9 @@ export interface BackendStackOpts {
   /** Where this session keeps its run journal (ADR 0071; see
    *  `dispatchJournalPath`). Absent (the CLI): no journal is kept. */
   readonly journalPath?: string;
+  /** Where this session keeps what 板砖's editors replace, for undo (ADR
+   *  0074; see `undoStoreDir`). Absent (the CLI): nothing is kept. */
+  readonly undoDir?: string;
   /** Whether the session already holds an attached document (a reopened
    *  record with attachment rows). Mounts `digest_document` at build; a
    *  session without one gets it from `mountDigestTool` when the first
@@ -289,7 +301,7 @@ export interface BackendStack {
   /** Single shared bus across actor, backend, renderer and permission rules. */
   readonly bus: EventBus<AgentEvent>;
   readonly approvalCache: SessionApprovalCache;
-  readonly commandRules: ProjectCommandRuleStore;
+  readonly workspacePermissions: WorkspacePermissions;
   readonly permissions: RulePermissionEngine;
   readonly backendTools: InMemoryToolRegistry;
   readonly backendBuilder: BackendContextBuilder;
@@ -346,13 +358,14 @@ export function hostNoteFor(
 export function createBackendStack(opts: BackendStackOpts): BackendStack {
   const { wsHolder, lang } = opts;
 
-  // Approval cache + project rules first: the ask resolver consults them.
+  // Approval cache + the workspace's permission choices first: the ask
+  // resolver consults them.
   const approvalCache = new SessionApprovalCache();
-  // Project-scoped command allow rules (ADR 0030) — persisted under the
+  // Whether automatic review is on (ADR 0075) — persisted under the
   // EFFECTIVE workspace's .herta/permissions.json. Reads the holder so a
-  // mid-session workspace change re-anchors the rules with the workspace.
-  const commandRules = new ProjectCommandRuleStore(() => wsHolder.current);
-  const ask = opts.makeAsk({ cache: approvalCache, rules: commandRules });
+  // mid-session workspace change re-anchors the choice with the workspace.
+  const workspacePermissions = new WorkspacePermissions(() => wsHolder.current);
+  const ask = opts.makeAsk({ cache: approvalCache, workspacePermissions });
   const permissions = new RulePermissionEngine({ ask });
 
   const memory = new FileMemoryManager({ workspaceRoot: opts.workspaceRoot });
@@ -490,6 +503,8 @@ export function createBackendStack(opts: BackendStackOpts): BackendStack {
       ...(opts.journalPath !== undefined
         ? { journalPath: opts.journalPath }
         : {}),
+      // The undo store (ADR 0074): what the editors replace, per segment.
+      ...(opts.undoDir !== undefined ? { undoDir: opts.undoDir } : {}),
       contract,
     });
 
@@ -498,7 +513,7 @@ export function createBackendStack(opts: BackendStackOpts): BackendStack {
     bashPath,
     bus,
     approvalCache,
-    commandRules,
+    workspacePermissions,
     permissions,
     backendTools,
     backendBuilder,

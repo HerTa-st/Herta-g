@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   type AppServerConfig,
+  type AutoReviewState,
   type ContinueInterruptedResult,
   createSessionHost,
   defaultDirsFor,
@@ -15,7 +16,8 @@ import {
   type SessionMetadata,
   type SpeechSynthesizer,
   type SteerTextResult,
-  type WorkspaceTrustState,
+  type UndoTarget,
+  type UndoTurnEditsResult,
 } from "@herta/app-server";
 import { errorMessage } from "@herta/core";
 import {
@@ -44,6 +46,7 @@ import { slimAgentEventForRenderer } from "../shared/agent-event-wire.js";
 import { createLiveToolFeed } from "../shared/live-tool-feed.js";
 import type { VoiceEngine } from "./app-global-settings.js";
 import {
+  composerPredictionsEnabled,
   type InteractionLang,
   type Locale,
   osLocale,
@@ -188,14 +191,14 @@ const USER_ACTION_CHANNELS: ReadonlySet<string> = new Set([
   CMD.interrupt,
   CMD.steerText,
   CMD.rewindLastTurn,
+  CMD.undoLastTurnEdits,
   CMD.search,
   CMD.recordSlice,
   CMD.deleteSession,
   CMD.renameSession,
   CMD.saveSessionExport,
   CMD.resolveApproval,
-  CMD.removeCommandRule,
-  CMD.setWorkspaceTrust,
+  CMD.setAutoReview,
   CMD.pickWorkspace,
   CMD.setWorkspace,
   CMD.resetWorkspace,
@@ -397,6 +400,8 @@ export function snapshot(s: Session): SessionSnapshot {
       : {}),
     // The 继续 offer (ADR 0071 §1.4): a reloaded window's strip comes back.
     ...(s.resumable === true ? { resumable: true } : {}),
+    // The 撤销 chip (ADR 0074 §4): a reloaded window's card keeps it.
+    ...(s.undoable === true ? { undoable: true } : {}),
   };
 }
 
@@ -427,6 +432,35 @@ export async function handleSetWorkspace(
   // changes mid-turn rather than corrupting the record cursor.
   if (!r.ok) return { ok: false, message: "a turn is in progress" };
   return { ok: true };
+}
+
+/**
+ * Take a turn's edits back (ADR 0074 §4) — a destructive call, bound to the
+ * session the user clicked in like the rewind (a session switch can land
+ * between the click and the invoke), and to a target the session knows.
+ * Anything else answers that there is nothing to undo. Exported for testing.
+ */
+export async function handleUndoLastTurnEdits(
+  host: {
+    activeSession: {
+      sessionId: string;
+      undoLastTurnEdits?(target: UndoTarget): Promise<UndoTurnEditsResult>;
+    } | null;
+  },
+  sessionId: unknown,
+  target: unknown,
+): Promise<UndoTurnEditsResult> {
+  const nothing = { ok: false as const, reason: "nothing_to_undo" as const };
+  const s = host.activeSession;
+  if (
+    s === null ||
+    typeof sessionId !== "string" ||
+    s.sessionId !== sessionId
+  ) {
+    return nothing;
+  }
+  if (target !== "latest" && target !== "withdrawn") return nothing;
+  return (await s.undoLastTurnEdits?.(target)) ?? nothing;
 }
 
 /** Pipes a session's 8 subscriptions to `send`. Returns a stop fn. Exported for testing. */
@@ -479,6 +513,10 @@ export function startForwarders(session: Session, send: Send): () => void {
   // The 继续 offer (ADR 0071 §1.4); optional on the interface.
   if (session.subscribeResume !== undefined) {
     void pump(session.subscribeResume(), EVT.resume);
+  }
+  // The 撤销 chip (ADR 0074 §4); optional on the interface.
+  if (session.subscribeUndo !== undefined) {
+    void pump(session.subscribeUndo(), EVT.undo);
   }
   return () => {
     live = false;
@@ -791,6 +829,13 @@ export function createSessionService(
         }
       );
     });
+    handle(CMD.undoLastTurnEdits, (_e, sessionId?: unknown, target?: unknown) =>
+      handleUndoLastTurnEdits(
+        { activeSession: host?.activeSession ?? null },
+        sessionId,
+        target,
+      ),
+    );
     handle(CMD.maybePlayEasterEgg, () => {
       // Fire-and-forget GUI flourish: a successful 板砖-card lift may play the
       // easter-egg clip. The session owns the 50% roll + per-session hourly
@@ -891,30 +936,22 @@ export function createSessionService(
     handle(CMD.resolveApproval, (_e, opts) =>
       host?.activeSession?.resolveApproval(opts),
     );
-    // Project command allow rules (ADR 0030) — scoped to the ACTIVE session's
-    // effective workspace. No session → empty list / no-op remove.
-    handle(
-      CMD.listCommandRules,
-      async () => (await host?.activeSession?.listCommandRules?.()) ?? [],
-    );
-    handle(CMD.removeCommandRule, async (_e, display: string) => {
-      if (typeof display !== "string" || display.length === 0) return false;
-      return (await host?.activeSession?.removeCommandRule?.(display)) ?? false;
-    });
-    // Workspace trust (ADR 0064) — the ACTIVE session's effective workspace.
-    // No session → a real project that asks (the honest default).
-    const noTrust: WorkspaceTrustState = {
-      effective: "ask",
+    // Automatic review (ADR 0075, which replaced workspace trust) — the
+    // ACTIVE session's effective workspace. No session → a real project,
+    // off (the honest default).
+    const noReview: AutoReviewState = {
+      on: false,
       explicit: null,
       isDefaultWorkspace: false,
     };
     handle(
-      CMD.getWorkspaceTrust,
-      async () => (await host?.activeSession?.getWorkspaceTrust?.()) ?? noTrust,
+      CMD.getAutoReview,
+      async () => (await host?.activeSession?.getAutoReview?.()) ?? noReview,
     );
-    handle(CMD.setWorkspaceTrust, async (_e, value: unknown) => {
-      const v = value === "workspace" || value === "ask" ? value : null;
-      return (await host?.activeSession?.setWorkspaceTrust?.(v)) ?? noTrust;
+    // Only a literal boolean from the window is a choice; null clears it.
+    handle(CMD.setAutoReview, async (_e, on: unknown) => {
+      const v = typeof on === "boolean" ? on : null;
+      return (await host?.activeSession?.setAutoReview?.(v)) ?? noReview;
     });
     // Record heal after a record-channel overflow drop: the session re-emits
     // its live record as a `reset` through the record stream (FIFO with block
@@ -1427,6 +1464,8 @@ export function createSessionService(
       host.setPdfPictureTranscription(
         pdfPictureTranscriptsEnabled(startupSettings),
       );
+      // And the composer-prediction switch (2026-10-10), before any turn.
+      host.setComposerPredictions(composerPredictionsEnabled(startupSettings));
       // Launch lands on the connect screen (接入黑塔空间站) rather than
       // auto-resuming the latest session: the user explicitly opens one from the
       // sidebar or starts a new one from the connect button (user 2026-06-20).

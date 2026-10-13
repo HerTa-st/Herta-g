@@ -26,6 +26,11 @@ import {
   VIEWER_MIN_PX,
   type ViewerAnchor,
 } from "./file-viewer-context.js";
+import {
+  PieceQuoteIcon,
+  type PieceQuoting,
+  usePieceQuoting,
+} from "./PieceQuote.js";
 import { CodeView } from "./renderers/CodeView.js";
 import { CommitView } from "./renderers/CommitView.js";
 import { DiffView } from "./renderers/DiffView.js";
@@ -83,8 +88,10 @@ type LoadState =
   /** A diff tab (ADR 0059 §5): the path's working-tree change. */
   | { readonly kind: "diff"; readonly reply: ReadWorkspaceDiffReply };
 
-/** Markdown shows the page by default; a cite anchor forces the source
- *  (lines are a source concept). The header toggle overrides per tab. */
+/** Markdown shows the page by default, a cited open too: the band lands on
+ *  the blocks those lines render to (ADR 0054, amended 2026-10-13). Only a
+ *  page whose blocks cannot be matched to its lines shows that cite at the
+ *  source. The header toggle overrides per tab. */
 type ViewMode = "rendered" | "source";
 
 /** A tab's identity — the path AND the kind, the same rule the opener
@@ -124,8 +131,10 @@ function tabName(tab: FileViewerTarget): string {
 export function FileViewerPanel(): JSX.Element | null {
   const t = useT();
   const v = useFileViewerState();
-  const { bridge } = useHertaBridge();
+  const { bridge, sessionStore } = useHertaBridge();
   const sessionId = useSessionSelector((s) => s.sessionId);
+  const sessionLang = useSessionSelector((s) => s.lang);
+  const [pieceOn, togglePiece] = usePieceQuoting();
   const target = v?.target ?? null;
   const path = target?.path ?? null;
   const anchor = target?.anchor;
@@ -145,6 +154,11 @@ export function FileViewerPanel(): JSX.Element | null {
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   const [modes, setModes] = useState<Readonly<Record<string, ViewMode>>>({});
+  // Per tab, the cited target whose lines the rendered page could not place;
+  // a new cite tries the page again.
+  const [unplaced, setUnplaced] = useState<
+    Readonly<Record<string, FileViewerTarget>>
+  >({});
   const panelRef = useRef<HTMLElement | null>(null);
   // What the body currently shows, so a re-read of the same tab keeps it on
   // screen until the new read answers.
@@ -329,10 +343,32 @@ export function FileViewerPanel(): JSX.Element | null {
         : load.kind === "diff"
           ? load.reply.diff.path
           : load.reply.relative;
+  // Piece quoting (ADR 0078): the code layout and rendered markdown only.
+  const piece: PieceQuoting | undefined =
+    load.kind === "text" && load.reply.ok && kindInfo.kind !== "csv"
+      ? {
+          enabled: pieceOn,
+          path: relative,
+          lang: sessionLang,
+          onQuote: (quotes) => {
+            for (const q of quotes) sessionStore.addComposerQuote(q);
+          },
+        }
+      : undefined;
   const activeName = tabName(v.tabs[v.active] ?? { path });
   const modeKey = tabKey(target ?? { path });
   const mode: ViewMode =
-    modes[modeKey] ?? (anchor !== undefined ? "source" : "rendered");
+    modes[modeKey] ??
+    (anchor !== undefined && target !== null && unplaced[modeKey] === target
+      ? "source"
+      : "rendered");
+  const onAnchorUnmapped =
+    target === null
+      ? undefined
+      : (): void =>
+          setUnplaced((u) =>
+            u[modeKey] === target ? u : { ...u, [modeKey]: target },
+          );
   const isMarkdown = kindInfo.kind === "markdown";
 
   return (
@@ -407,6 +443,29 @@ export function FileViewerPanel(): JSX.Element | null {
           same OS-beige mismatch the attachment ✕ had), and PORTALED so the
           panel's overflow clip can't cut it. */}
         <span className="file-viewer__actions">
+          {piece !== undefined && (
+            <Tooltip
+              label={t(
+                pieceOn ? "viewer.piece.turnOff" : "viewer.piece.turnOn",
+              )}
+              placement="bottom"
+              align="center"
+              portal
+            >
+              <button
+                type="button"
+                className={`file-viewer__action${pieceOn ? " is-on" : ""}`}
+                data-testid="viewer-piece-switch"
+                aria-pressed={pieceOn}
+                aria-label={t(
+                  pieceOn ? "viewer.piece.turnOff" : "viewer.piece.turnOn",
+                )}
+                onClick={togglePiece}
+              >
+                <PieceQuoteIcon on={pieceOn} />
+              </button>
+            </Tooltip>
+          )}
           {isMarkdown && (
             <Tooltip
               label={
@@ -567,6 +626,8 @@ export function FileViewerPanel(): JSX.Element | null {
         kindInfo={kindInfo}
         mode={mode}
         anchor={anchor}
+        onAnchorUnmapped={onAnchorUnmapped}
+        piece={piece}
       />
     </section>
   );
@@ -586,12 +647,16 @@ function FileViewerBody({
   kindInfo,
   mode,
   anchor,
+  onAnchorUnmapped,
+  piece,
 }: {
   readonly path: string;
   readonly load: LoadState;
   readonly kindInfo: ViewerKindInfo;
   readonly mode: ViewMode;
   readonly anchor?: ViewerAnchor | undefined;
+  readonly onAnchorUnmapped?: (() => void) | undefined;
+  readonly piece?: PieceQuoting | undefined;
 }): JSX.Element {
   const t = useT();
   if (kindInfo.kind === "log") {
@@ -679,13 +744,20 @@ function FileViewerBody({
       case "markdown":
         body =
           mode === "rendered" ? (
-            <MarkdownView content={content} truncated={truncated} />
+            <MarkdownView
+              content={content}
+              truncated={truncated}
+              piece={piece}
+              anchor={anchor}
+              onAnchorUnmapped={onAnchorUnmapped}
+            />
           ) : (
             <CodeView
               content={content}
               truncated={truncated}
               language="markdown"
               anchor={anchor}
+              piece={piece}
             />
           );
         break;
@@ -699,6 +771,7 @@ function FileViewerBody({
             truncated={truncated}
             language={kindInfo.language}
             anchor={anchor}
+            piece={piece}
           />
         );
         break;

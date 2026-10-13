@@ -170,8 +170,40 @@ describe("CodingAgentRuntime.runBrief", () => {
             type: "tool-call-request",
             call: {
               id: "call-1",
+              tool: "command_stop",
+              input: { id: "bg-1" },
+            },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [{ type: "finish", reason: "stop" }],
+      ],
+    });
+    const { runtime, tools } = makeRuntime(provider);
+    tools.register({
+      name: "command_stop",
+      schema: () => ({
+        name: "command_stop",
+        description: "Stop a command",
+        inputSchema: { type: "object", properties: {} },
+      }),
+      run: async () => ({ ok: true, summary: "stopped bg-1" }),
+    });
+
+    const report = await runtime.runBrief(sampleBrief);
+    expect(report.status).toBe("completed");
+  });
+
+  it("a saved fact is not completion evidence: it changes the harness's store, not the task (ADR 0077)", async () => {
+    const provider = new FakeProvider({
+      turns: [
+        [
+          {
+            type: "tool-call-request",
+            call: {
+              id: "call-1",
               tool: "memory_save",
-              input: { text: "remember this" },
+              input: { kind: "repo_fact", text: "x", why: "y" },
             },
           },
           { type: "finish", reason: "tool_calls" },
@@ -187,11 +219,11 @@ describe("CodingAgentRuntime.runBrief", () => {
         description: "Save a memory",
         inputSchema: { type: "object", properties: {} },
       }),
-      run: async () => ({ ok: true, summary: "saved 1 note" }),
+      run: async () => ({ ok: true, summary: "remembered: repo_fact" }),
     });
 
     const report = await runtime.runBrief(sampleBrief);
-    expect(report.status).toBe("completed");
+    expect(report.status).toBe("partial");
   });
 
   describe("minimal-contract tools (ADR 0040)", () => {
@@ -526,7 +558,7 @@ describe("CodingAgentRuntime.runBrief", () => {
     expect(first).not.toBe(second);
   });
 
-  it("forwards scopedRepoInstructions and scopedMemory through the loop", async () => {
+  it("forwards scopedMemory through the loop", async () => {
     let capturedFrame: ProviderPromptFrame | undefined;
     const provider = new FakeProvider({
       turns: [
@@ -539,13 +571,11 @@ describe("CodingAgentRuntime.runBrief", () => {
     const { runtime } = makeRuntime(provider);
 
     await runtime.runBrief(sampleBrief, {
-      scopedRepoInstructions: "scoped-repo-text",
       scopedMemory: "scoped-memory-text",
     });
 
     expect(capturedFrame).toBeDefined();
     if (capturedFrame !== undefined && "backendSystem" in capturedFrame) {
-      expect(capturedFrame.scopedRepoInstructions).toBe("scoped-repo-text");
       expect(capturedFrame.scopedMemory).toBe("scoped-memory-text");
     }
   });
@@ -629,8 +659,8 @@ describe("CodingAgentRuntime.runBrief", () => {
         throw new Error("expected a backend frame");
       }
       expect(memory.recalls).toBe(1);
-      expect(captured.scopedMemory).toContain(
-        "- [test_command] pnpm vitest run --project core",
+      expect(captured.scopedMemory).toMatch(
+        /- \[test_command · (今天|\d+ 天前)\] pnpm vitest run --project core/,
       );
       // Chinese by default (no lang given), the header in the session's
       // language.

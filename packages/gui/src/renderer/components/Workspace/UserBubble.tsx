@@ -1,7 +1,9 @@
-import { memo, type Ref } from "react";
+import { memo, type Ref, useMemo } from "react";
 import { attachmentImageUrl } from "../../../shared/attachment-image.js";
 import { useT } from "../../i18n/LocaleProvider.js";
 import { renderBanzhuanText } from "../../lib/banzhuan-text.js";
+import { parseLeadingQuotes } from "../../lib/quote-format.js";
+import { useFileViewerOpen } from "../FileViewer/file-viewer-context.js";
 import { Tooltip } from "../Tooltip/Tooltip.js";
 import { BubbleTime } from "./BubbleTime.js";
 import type { SystemBlock } from "./group-record.js";
@@ -108,6 +110,13 @@ export const UserBubble = memo(function UserBubble(
   const lang = props.lang ?? "zh";
   const hasActions = props.onRewind !== undefined || props.at !== undefined;
   const images = props.images ?? [];
+  // Quotes from the viewer's page lead the message (ADR 0078 §7): a card
+  // each — the label opens the file at those lines — then what was said.
+  const { quotes, rest } = useMemo(
+    () => parseLeadingQuotes(props.text),
+    [props.text],
+  );
+  const openFile = useFileViewerOpen();
   return (
     <div
       className="message-row user-row"
@@ -145,9 +154,49 @@ export const UserBubble = memo(function UserBubble(
         </div>
       )}
       <div ref={props.bubbleRef} className="message-bubble user-bubble">
-        <div className="message-text">
-          {renderBanzhuanText(props.text, "bubble", lang)}
-        </div>
+        {quotes.map((q, i) => {
+          const preview = q.text.split("\n").slice(0, 3).join("\n");
+          const target = q.path;
+          return (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: quotes are positional in an immutable message
+              key={i}
+              className="message-quote"
+            >
+              {openFile !== null && target !== undefined ? (
+                <button
+                  type="button"
+                  className="message-quote__label"
+                  onClick={() =>
+                    openFile(target, {
+                      ...(q.from !== undefined
+                        ? { anchor: { from: q.from, to: q.to ?? q.from } }
+                        : {}),
+                    })
+                  }
+                >
+                  {q.label}
+                  {q.title !== undefined ? ` · ${q.title}` : ""}
+                </button>
+              ) : (
+                <span className="message-quote__label">
+                  {q.label}
+                  {q.title !== undefined ? ` · ${q.title}` : ""}
+                </span>
+              )}
+              <pre className="message-quote__text">{preview}</pre>
+            </div>
+          );
+        })}
+        {(quotes.length === 0 || rest.trim().length > 0) && (
+          <div className="message-text">
+            {renderBanzhuanText(
+              quotes.length > 0 ? rest : props.text,
+              "bubble",
+              lang,
+            )}
+          </div>
+        )}
       </div>
       {/* Hover-revealed action row BELOW the bubble (a sibling, not a child) —
           Codex/Claude-style: [rewind] … timestamp, shown only on bubble hover. */}

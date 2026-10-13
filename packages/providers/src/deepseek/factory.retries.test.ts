@@ -4,7 +4,6 @@ import { deepseekProvider } from "./factory.js";
 
 const frame = {
   stableSystem: "s",
-  repoInstructions: "",
   memoryContext: "",
   retrievedLore: "",
   messages: [{ role: "user" as const, text: "hi", ts: "2026-09-03T00:00:00Z" }],

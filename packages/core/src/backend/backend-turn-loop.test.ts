@@ -409,6 +409,97 @@ describe("runBackendTurnLoop", () => {
     expect(headers.get("glob")).toBe('"src/**"');
   });
 
+  it("a tool's `runsTests` hook marks its started event — on the serial path and in a read-only batch; a no, a throw or no hook leaves it unmarked (ADR 0073 amendment 2026-10-08)", async () => {
+    const tools = new InMemoryToolRegistry();
+    const schemaFor = (name: string) => () => ({
+      name,
+      description: name,
+      inputSchema: { type: "object", properties: {} },
+    });
+    const ok = { ok: true, data: {}, summary: "ok" };
+    tools.register({
+      name: "suite",
+      schema: schemaFor("suite"),
+      runsTests: (input) => (input as { t?: boolean }).t === true,
+      run: async () => ok,
+    });
+    tools.register({
+      name: "broken",
+      schema: schemaFor("broken"),
+      runsTests: () => {
+        throw new Error("boom");
+      },
+      run: async () => ok,
+    });
+    tools.register({
+      name: "plain",
+      schema: schemaFor("plain"),
+      run: async () => ok,
+    });
+    tools.register({
+      name: "ro_suite",
+      readOnly: true,
+      schema: schemaFor("ro_suite"),
+      runsTests: () => true,
+      run: async () => ok,
+    });
+    tools.register({
+      name: "ro_plain",
+      readOnly: true,
+      schema: schemaFor("ro_plain"),
+      run: async () => ok,
+    });
+    const call = (id: string, tool: string, input: unknown) => ({
+      type: "tool-call-request" as const,
+      call: { id, tool, input },
+    });
+    const provider = new FakeProvider({
+      turns: [
+        [
+          call("c1", "suite", { t: true }),
+          call("c2", "suite", { t: false }),
+          call("c3", "broken", {}),
+          call("c4", "plain", {}),
+          call("c5", "ro_suite", {}),
+          call("c6", "ro_plain", {}),
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [{ type: "finish", reason: "stop" }],
+      ],
+    });
+    const deps = {
+      sessionId: "s-1",
+      provider,
+      tools,
+      permissions: new NoopPermissionEngine(),
+      backendBuilder: new BackendContextBuilder({ tools }),
+      transcript: new TranscriptStore(),
+      bg: new BackgroundHost(),
+      bus: new InMemoryEventBus<AgentEvent>(),
+      clock: () => new Date("2026-05-07T00:00:00.000Z"),
+      workspaceRoot: "/repo",
+      reads: new ReadLedger(),
+      memory: new NoopMemoryManager(),
+    };
+    const marked = new Map<string, boolean>();
+    for await (const e of runBackendTurnLoop(deps, sampleBrief, {
+      signal: new AbortController().signal,
+      userMessages: sampleUserMessages,
+    })) {
+      if (e.type === "tool.call.started") {
+        marked.set(e.id, "runsTests" in e && e.runsTests === true);
+      }
+    }
+    expect(Object.fromEntries(marked)).toEqual({
+      c1: true,
+      c2: false,
+      c3: false,
+      c4: false,
+      c5: true,
+      c6: false,
+    });
+  });
+
   it("builds the base frame ONCE per turn; iterations only refresh messages (audit L2)", async () => {
     const tools = new InMemoryToolRegistry();
     tools.register({
@@ -553,7 +644,7 @@ describe("runBackendTurnLoop", () => {
     }
   });
 
-  it("threads scopedRepoInstructions and scopedMemory into the frame", async () => {
+  it("threads scopedMemory into the frame", async () => {
     let capturedFrame: ProviderPromptFrame | undefined;
     const provider = new FakeProvider({
       turns: [
@@ -568,7 +659,6 @@ describe("runBackendTurnLoop", () => {
     for await (const _ of runBackendTurnLoop(deps, sampleBrief, {
       signal: new AbortController().signal,
       userMessages: sampleUserMessages,
-      scopedRepoInstructions: "Prefer edit_file over write_new_file.",
       scopedMemory: "User dislikes long replies.",
     })) {
       // drain
@@ -576,9 +666,6 @@ describe("runBackendTurnLoop", () => {
 
     expect(capturedFrame).toBeDefined();
     if (capturedFrame !== undefined && "backendSystem" in capturedFrame) {
-      expect(capturedFrame.scopedRepoInstructions).toBe(
-        "Prefer edit_file over write_new_file.",
-      );
       expect(capturedFrame.scopedMemory).toBe("User dislikes long replies.");
     }
   });
@@ -1845,6 +1932,64 @@ describe("runBackendTurnLoop — provider error resilience", () => {
     }
     // No fabricated "User denied" tool result in the model-facing transcript.
     expect(deps.transcript.all().some((m) => m.role === "tool")).toBe(false);
+  });
+
+  it("a reviewer's denial reaches the model with its reason, not as the user's (ADR 0075)", async () => {
+    const tools = new InMemoryToolRegistry();
+    tools.register({
+      name: "run_command",
+      schema: () => ({
+        name: "run_command",
+        description: "runs a command",
+        inputSchema: { type: "object", properties: {} },
+      }),
+      run: async () => ({ ok: true, summary: "should never run" }),
+    });
+    const permissions = new RulePermissionEngine({
+      ask: {
+        present: async () => ({
+          decision: "deny" as const,
+          by: "reviewer" as const,
+          reason: "该命令把 .env 发送到用户未指定的地址。",
+        }),
+      },
+    });
+    permissions.registerRule("run_command", () => ({
+      kind: "ask",
+      reason: "network",
+      risk: "network",
+    }));
+    const provider = new FakeProvider({
+      turns: [
+        [
+          {
+            type: "tool-call-request",
+            call: { id: "call-1", tool: "run_command", input: {} },
+          },
+          { type: "finish", reason: "tool_calls" },
+        ],
+        [{ type: "finish", reason: "stop" }],
+      ],
+    });
+    const deps = { ...buildDeps(provider), tools, permissions };
+    const events: AgentEvent[] = [];
+    for await (const e of runBackendTurnLoop(deps, sampleBrief, {
+      signal: new AbortController().signal,
+      userMessages: sampleUserMessages,
+    })) {
+      events.push(e);
+    }
+    const resolved = events.find((e) => e.type === "permission.resolved");
+    expect(
+      resolved?.type === "permission.resolved" ? resolved.decision : null,
+    ).toBe("deny");
+    const fin = events.find((e) => e.type === "tool.call.finished");
+    if (fin?.type !== "tool.call.finished") throw new Error("no finish");
+    expect(fin.result.error?.code).toBe("permission_denied");
+    expect(fin.result.error?.message).toContain("automatic review");
+    expect(fin.result.error?.message).toContain(".env");
+    expect(fin.result.error?.message).not.toContain("User denied");
+    expect(fin.result.suggestion).toContain("same outcome another way");
   });
 
   it("finishReason 'length' surfaces turn.failed — truncated output never reads as a clean turn end", async () => {

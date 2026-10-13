@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useReducedMotion } from "../../hooks/useReducedMotion.js";
-import { useT } from "../../i18n/LocaleProvider.js";
+import { makeT } from "../../i18n/LocaleProvider.js";
 
 // Transient in-world status row shown while the long-session recap summarizer
 // is running (between the recap.compaction start/end bus events). Reuses the
@@ -9,10 +9,14 @@ import { useT } from "../../i18n/LocaleProvider.js";
 export interface RecapCompactRowProps {
   /** Quiet-hide exit fade — same contract as GalaxyTravelRow's. */
   readonly exiting?: boolean;
+  /** The active session's interaction language: an in-world line narrates
+   *  the session, so it reads in the session's language, like the pending
+   *  activity line (ADR 0019; release review 2026-10-13). */
+  readonly lang: "zh" | "en";
 }
 
 export function RecapCompactRow(props: RecapCompactRowProps): JSX.Element {
-  const t = useT();
+  const t = useMemo(() => makeT(props.lang), [props.lang]);
   const reduced = useReducedMotion();
   const [shown, setShown] = useState(reduced);
   useEffect(() => {

@@ -130,7 +130,6 @@ async function stoppedSession(
           frame: {
             userMessages: [{ text: "跑一下测试" }],
             omittedUserMessages: 0,
-            scopedRepoInstructions: "",
             scopedMemory: "",
             recentDialogue: "",
             workingHistory: "",
@@ -243,7 +242,6 @@ describe("继续 (ADR 0071 §1.4–§1.5)", () => {
           frame: {
             userMessages: [{ text: "跑一下测试" }],
             omittedUserMessages: 0,
-            scopedRepoInstructions: "",
             scopedMemory: "",
             recentDialogue: "",
             workingHistory: "",

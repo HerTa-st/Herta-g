@@ -1,8 +1,8 @@
-import type { WorkspaceTrustState } from "@herta/app-server";
-import type { WorkspaceTrust } from "@herta/core";
+import type { AutoReviewState } from "@herta/app-server";
 import {
   type CSSProperties,
   Fragment,
+  type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -11,6 +11,12 @@ import {
 import { createPortal } from "react-dom";
 import { useT } from "../../i18n/LocaleProvider.js";
 import { OVERLAY_Z, useModalOverlay } from "../../lib/overlay-stack.js";
+import {
+  getHoverTip,
+  hideHoverTip,
+  hoverTipProps,
+  showHoverTip,
+} from "../common/hover-tip.js";
 
 /** Only the device card remains — the voice card was retired when the tide
  *  wave moved above the composer (glass-wave merge, 2026-07-05). */
@@ -30,6 +36,80 @@ function breakablePath(path: string): JSX.Element[] {
   ));
 }
 
+/** How long the copy icon reads "copied" (or "failed") before it resets. */
+const COPIED_MS = 1500;
+
+/** Copy the workspace path (owner 2026-10-08). Its tip says what happened
+ *  — re-shown over the icon with the outcome, the icon turning to a check
+ *  — and a write the platform refuses is said, not swallowed. */
+function CopyPathButton(props: { readonly path: string }): JSX.Element {
+  const t = useT();
+  const [outcome, setOutcome] = useState<"idle" | "copied" | "failed">("idle");
+  const label = t(
+    outcome === "copied"
+      ? "card.pathCopied"
+      : outcome === "failed"
+        ? "card.copyFailed"
+        : "card.copyPath",
+  );
+  useEffect(() => {
+    if (outcome === "idle") return;
+    const id = window.setTimeout(() => {
+      setOutcome("idle");
+      // The outcome's tip goes with it; a tip some other element raised
+      // meanwhile stays.
+      if (getHoverTip()?.text === label) hideHoverTip();
+    }, COPIED_MS);
+    return () => window.clearTimeout(id);
+  }, [outcome, label]);
+  const say = (button: Element, next: "copied" | "failed"): void => {
+    setOutcome(next);
+    showHoverTip(
+      button,
+      t(next === "copied" ? "card.pathCopied" : "card.copyFailed"),
+    );
+  };
+  return (
+    <button
+      type="button"
+      className={`card-menu-copy${outcome === "copied" ? " is-copied" : ""}`}
+      aria-label={label}
+      {...hoverTipProps(label)}
+      onClick={(e) => {
+        const button = e.currentTarget;
+        const write = navigator.clipboard?.writeText(props.path);
+        if (write === undefined) {
+          say(button, "failed");
+          return;
+        }
+        void write.then(
+          () => say(button, "copied"),
+          () => say(button, "failed"),
+        );
+      }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {outcome === "copied" ? (
+          <path d="m5 12.5 4.5 4.5L19 7.5" />
+        ) : (
+          <>
+            <rect x="8.5" y="8.5" width="11" height="11" rx="2.5" />
+            <path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
+          </>
+        )}
+      </svg>
+    </button>
+  );
+}
+
 /** Leave-animation duration; keep in sync with the `cardMenuOut` keyframe in
  *  reference-ux.css. The menu stays mounted this long after closing so the exit
  *  animation can play, then unmounts. */
@@ -41,21 +121,20 @@ export interface CardMenuProps {
   readonly isDefault?: boolean;
   readonly onSetWorkspace?: () => void;
   readonly onResetWorkspace?: () => void;
+  /** Open the workspace folder in the OS file manager. `undefined` leaves
+   *  the path as plain text (the bridge cannot open it — the demo). */
+  readonly onOpenWorkspace?: () => void;
   readonly errorText?: string;
-  /** Project command allow rules (ADR 0030) as display strings. PRESENTATIONAL,
-   *  like everything else here: DeviceCard owns the bridge and passes these
-   *  down. `undefined` → the section is not rendered at all (the bridge lacks
-   *  the surface, or the parent doesn't manage rules) — that keeps this
-   *  component renderable with no HertaBridgeProvider, which its own test file
-   *  relies on and which a first cut broke (CI 2026-08-04). */
-  readonly rules?: readonly string[];
-  readonly onRemoveRule?: (display: string) => void;
-  /** Workspace trust (ADR 0064) — presentational like `rules`: `undefined`
-   *  hides the row (the bridge lacks the surface). */
-  readonly trust?: WorkspaceTrustState;
-  readonly onSetTrust?: (value: WorkspaceTrust | null) => void;
-  /** Fired when the menu OPENS — DeviceCard re-fetches rules on it, so a rule
-   *  granted mid-commission shows up without a remount. */
+  /** Automatic review (ADR 0075, which replaced workspace trust).
+   *  PRESENTATIONAL, like everything else here: DeviceCard owns the bridge
+   *  and passes it down. `undefined` hides the row (the bridge lacks the
+   *  surface) — that keeps this component renderable with no
+   *  HertaBridgeProvider, which its own test file relies on (CI 2026-08-04). */
+  readonly review?: AutoReviewState;
+  readonly onSetAutoReview?: (on: boolean) => void;
+  /** Fired when the menu OPENS — DeviceCard re-fetches the review state on
+   *  it, so a choice made on a card mid-commission shows up without a
+   *  remount. */
   readonly onOpen?: () => void;
 }
 
@@ -64,9 +143,11 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   // The menu itself lives OUTSIDE the card (2026-09-17): `.device-card`
-  // clips its overflow for the frost and the scene, and once the trust row
-  // joined the rules the menu ran past the card's bottom edge and was cut
+  // clips its overflow for the frost and the scene, and once a switch row
+  // and the then-rules list joined it, the menu ran past the card's bottom
+  // edge and was cut
   // off. It is rendered through a portal at the body, fixed at the ⋯
   // button's bottom-right corner, so the card's clip never reaches it.
   const menuRef = useRef<HTMLDivElement>(null);
@@ -88,11 +169,6 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
     return () => window.removeEventListener("resize", place);
   }, [mounted]);
 
-  // Project command allow rules (ADR 0030) live in THIS menu rather than
-  // Settings (owner 2026-08-04): they're session-workspace-scoped, and the
-  // workspace they bind to is displayed right above them. The DATA, though,
-  // belongs to DeviceCard — see CardMenuProps.rules.
-  const rules = props.rules;
   // Tell the parent to refresh on open. Deliberately keyed on `open` alone:
   // onOpen is called for the open EDGE, and a parent that re-creates the
   // callback each render must not re-trigger a fetch.
@@ -125,6 +201,7 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
       if (e.key === "Escape" && isTop) {
         e.preventDefault();
         setOpen(false);
+        buttonRef.current?.focus({ preventScroll: true });
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -145,6 +222,41 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
     const t = window.setTimeout(() => setMounted(false), MENU_EXIT_MS);
     return () => window.clearTimeout(t);
   }, [open]);
+  // The menu is a portal at the body, so Tab from ⋯ never reaches it: its
+  // first action takes focus on open, the arrows walk the enabled buttons,
+  // and a keyboard close (Escape above, Tab below) hands focus back to ⋯ —
+  // as the sidebar's SessionMenu does (UX review 2026-09-22, item 25).
+  // The first ITEM, not the first button: the path and its copy icon sit
+  // above the items, and a focus landing on them would raise their tip the
+  // moment the menu opened (the arrows still reach them).
+  useEffect(() => {
+    if (!open || !mounted) return;
+    menuRef.current
+      ?.querySelector<HTMLButtonElement>(".card-menu-item:not(:disabled)")
+      ?.focus({ preventScroll: true });
+  }, [open, mounted]);
+  const onMenuKey = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      setOpen(false);
+      buttonRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = [
+      ...(menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        "button:not(:disabled)",
+      ) ?? []),
+    ];
+    if (items.length === 0) return;
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      e.key === "ArrowDown"
+        ? (at + 1) % items.length
+        : (at - 1 + items.length) % items.length;
+    items[next]?.focus({ preventScroll: true });
+  };
   // The device card becomes an actionable workspace menu only when the
   // workspace handlers are wired (DeviceCard always passes them). Without
   // them it stays a static info tooltip.
@@ -153,6 +265,7 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
   return (
     <div className="card-menu" ref={rootRef}>
       <button
+        ref={buttonRef}
         type="button"
         className="card-menu-button"
         aria-label={t("card.deviceInfoAria")}
@@ -169,6 +282,7 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
               className={`card-menu-tooltip card-menu-tooltip--floating${open ? "" : " is-leaving"}`}
               style={floatStyle}
               role="menu"
+              onKeyDown={onMenuKey}
             >
               <div className="card-menu-current">
                 <span className="card-menu-label">
@@ -176,14 +290,32 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
                     ? t("card.workspaceDefault")
                     : t("card.workspace")}
                 </span>
-                <span
-                  className="card-menu-path"
-                  title={props.activeWorkspace ?? undefined}
-                >
-                  {props.activeWorkspace !== undefined
-                    ? breakablePath(props.activeWorkspace)
-                    : "—"}
-                </span>
+                {/* The path opens the folder, and the icon beside it copies
+                    it (owner 2026-10-08: it could be neither clicked nor
+                    copied). It wraps at its separators and is always shown
+                    whole, so its tip names the action, not the path. */}
+                {props.activeWorkspace !== undefined &&
+                props.onOpenWorkspace !== undefined ? (
+                  <button
+                    type="button"
+                    className="card-menu-path is-action"
+                    {...hoverTipProps(t("card.openFolder"))}
+                    // The menu stays: the folder opens in another window,
+                    // and a refusal is said here, in the error row.
+                    onClick={() => props.onOpenWorkspace?.()}
+                  >
+                    {breakablePath(props.activeWorkspace)}
+                  </button>
+                ) : (
+                  <span className="card-menu-path">
+                    {props.activeWorkspace !== undefined
+                      ? breakablePath(props.activeWorkspace)
+                      : "—"}
+                  </span>
+                )}
+                {props.activeWorkspace !== undefined && (
+                  <CopyPathButton path={props.activeWorkspace} />
+                )}
               </div>
               <div className="card-menu-divider" />
               <button
@@ -210,65 +342,29 @@ export function CardMenu(props: CardMenuProps): JSX.Element {
               >
                 {t("card.resetDefault")}
               </button>
-              {props.trust !== undefined && (
+              {props.review !== undefined && (
                 <>
                   <div className="card-menu-divider" />
-                  <div className="card-menu-trust">
-                    <span className="card-menu-label">{t("card.trust")}</span>
-                    <span className="card-menu-trust-state">
-                      {props.trust.effective === "workspace"
-                        ? props.trust.explicit === null &&
-                          props.trust.isDefaultWorkspace
-                          ? t("card.trustOnDefault")
-                          : t("card.trustOn")
-                        : t("card.trustOff")}
+                  <div className="card-menu-review">
+                    <span className="card-menu-label">
+                      {t("card.autoReview")}
+                    </span>
+                    <span className="card-menu-review-state">
+                      {props.review.on
+                        ? t("card.autoReviewOn")
+                        : t("card.autoReviewOff")}
                     </span>
                     <button
                       type="button"
-                      className="card-menu-item card-menu-trust-toggle"
+                      className="card-menu-item card-menu-review-toggle"
                       onClick={() =>
-                        props.onSetTrust?.(
-                          props.trust?.effective === "workspace"
-                            ? "ask"
-                            : "workspace",
-                        )
+                        props.onSetAutoReview?.(props.review?.on !== true)
                       }
                     >
-                      {props.trust.effective === "workspace"
-                        ? t("card.trustDisable")
-                        : t("card.trustEnable")}
+                      {props.review.on
+                        ? t("card.autoReviewDisable")
+                        : t("card.autoReviewEnable")}
                     </button>
-                  </div>
-                </>
-              )}
-              {rules !== undefined && (
-                <>
-                  <div className="card-menu-divider" />
-                  <div className="card-menu-rules">
-                    <span className="card-menu-label">{t("card.rules")}</span>
-                    {rules.length === 0 ? (
-                      <span className="card-menu-rules-empty">
-                        {t("card.rulesEmpty")}
-                      </span>
-                    ) : (
-                      <ul className="card-menu-rules-list">
-                        {rules.map((r) => (
-                          <li className="card-menu-rule" key={r}>
-                            <code className="card-menu-rule-text" title={r}>
-                              {r}
-                            </code>
-                            <button
-                              type="button"
-                              className="card-menu-rule-remove"
-                              aria-label={t("card.rulesRemove", { rule: r })}
-                              onClick={() => props.onRemoveRule?.(r)}
-                            >
-                              ✕
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
                   </div>
                 </>
               )}

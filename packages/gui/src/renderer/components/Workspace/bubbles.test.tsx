@@ -332,8 +332,8 @@ describe("bubbles render @板砖 as a chip", () => {
 });
 
 describe("GalaxyTravelRow", () => {
-  it("renders the Chinese transfer text", () => {
-    renderWithLocale(<GalaxyTravelRow />);
+  it("renders the transfer text in the session's language", () => {
+    renderWithLocale(<GalaxyTravelRow lang="en" />);
     expect(
       screen.getByText("Message is crossing the galaxy…"),
     ).toBeInTheDocument();
@@ -349,7 +349,7 @@ describe("GalaxyTravelRow", () => {
       cb(0);
       return 1;
     });
-    const { container } = renderWithLocale(<GalaxyTravelRow />);
+    const { container } = renderWithLocale(<GalaxyTravelRow lang="en" />);
     const row = container.querySelector(".status-row") as HTMLElement;
     expect(row.classList.contains("is-shown")).toBe(true);
     vi.restoreAllMocks();
@@ -362,7 +362,7 @@ describe("GalaxyTravelRow", () => {
       addEventListener() {},
       removeEventListener() {},
     }));
-    const { container } = renderWithLocale(<GalaxyTravelRow />);
+    const { container } = renderWithLocale(<GalaxyTravelRow lang="en" />);
     expect(
       (
         container.querySelector(".status-row") as HTMLElement

@@ -22,6 +22,8 @@ const bridge: HertaBridge = {
   continueInterrupted: () => ipcRenderer.invoke(CMD.continueInterrupted),
   rewindLastTurn: (sessionId) =>
     ipcRenderer.invoke(CMD.rewindLastTurn, sessionId),
+  undoLastTurnEdits: (sessionId, target) =>
+    ipcRenderer.invoke(CMD.undoLastTurnEdits, sessionId, target),
   maybePlayEasterEgg: () => ipcRenderer.invoke(CMD.maybePlayEasterEgg),
   listSessions: () => ipcRenderer.invoke(CMD.list),
   searchSessions: (query) => ipcRenderer.invoke(CMD.search, query),
@@ -37,12 +39,8 @@ const bridge: HertaBridge = {
   saveSessionExport: (fileName, markdown) =>
     ipcRenderer.invoke(CMD.saveSessionExport, fileName, markdown),
   resolveApproval: (opts) => ipcRenderer.invoke(CMD.resolveApproval, opts),
-  listCommandRules: () => ipcRenderer.invoke(CMD.listCommandRules),
-  removeCommandRule: (display) =>
-    ipcRenderer.invoke(CMD.removeCommandRule, display),
-  getWorkspaceTrust: () => ipcRenderer.invoke(CMD.getWorkspaceTrust),
-  setWorkspaceTrust: (value) =>
-    ipcRenderer.invoke(CMD.setWorkspaceTrust, value),
+  getAutoReview: () => ipcRenderer.invoke(CMD.getAutoReview),
+  setAutoReview: (on) => ipcRenderer.invoke(CMD.setAutoReview, on),
   resyncRecord: () => ipcRenderer.invoke(CMD.resyncRecord),
   requestSessionSync: () => ipcRenderer.invoke(CMD.requestSync),
   refreshRepo: () => ipcRenderer.invoke(CMD.refreshRepo),
@@ -112,6 +110,9 @@ const bridge: HertaBridge = {
     ipcRenderer.invoke(CMD.getPdfPictureTranscripts),
   setPdfPictureTranscripts: (enabled) =>
     ipcRenderer.invoke(CMD.setPdfPictureTranscripts, enabled),
+  getComposerPredictions: () => ipcRenderer.invoke(CMD.getComposerPredictions),
+  setComposerPredictions: (enabled) =>
+    ipcRenderer.invoke(CMD.setComposerPredictions, enabled),
   getRealtimeVoice: () => ipcRenderer.invoke(CMD.getRealtimeVoice),
   setRealtimeVoice: (enabled) =>
     ipcRenderer.invoke(CMD.setRealtimeVoice, enabled),
@@ -146,6 +147,7 @@ const bridge: HertaBridge = {
   onWorkspace: (cb) => subscribe(EVT.workspace, cb),
   onRepo: (cb) => subscribe(EVT.repo, cb),
   onResume: (cb) => subscribe(EVT.resume, cb),
+  onUndo: (cb) => subscribe(EVT.undo, cb),
   onLive: (cb) => subscribe(EVT.live, cb),
   onAttachProgress: (cb) => subscribe(EVT.attachProgress, cb),
   onRecord: (cb) => subscribe(EVT.record, cb),

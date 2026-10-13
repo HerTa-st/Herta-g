@@ -59,7 +59,6 @@ export function dispatchJournalDir(transcriptDir: string): string {
 export interface JournalFrameInputs {
   readonly userMessages: ReadonlyArray<{ text: string }>;
   readonly omittedUserMessages: number;
-  readonly scopedRepoInstructions: string;
   readonly scopedMemory: string;
   readonly recentDialogue: string;
   readonly workingHistory: string;

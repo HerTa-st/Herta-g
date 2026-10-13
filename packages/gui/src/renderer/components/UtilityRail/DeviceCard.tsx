@@ -1,5 +1,4 @@
-import type { WorkspaceTrustState } from "@herta/app-server";
-import type { WorkspaceTrust } from "@herta/core";
+import type { AutoReviewState } from "@herta/app-server";
 import { useCallback, useEffect, useRef, useState } from "react";
 import agentDevice from "../../assets/agent_device.png";
 import agentDeviceNight from "../../assets/agent_device_night.png";
@@ -229,57 +228,42 @@ export function DeviceCard(): JSX.Element {
       picking.current = false;
     }
   };
-  // Project command allow rules (ADR 0030). The DATA lives here — CardMenu is
-  // presentational (its own tests render it with no bridge provider) — and is
-  // refreshed on every menu OPEN so a rule granted mid-commission appears
-  // without a remount. `null` means "this bridge has no rule surface" (fakes /
-  // the website demo): the menu then omits the section entirely.
-  const rulesSupported = bridge.listCommandRules !== undefined;
-  const [rules, setRules] = useSessionScoped<readonly string[]>([]);
-  const refreshRules = (): void => {
-    if (!rulesSupported) return;
-    void bridge.listCommandRules?.().then(
-      (r) => setRules(r),
-      () => {
-        /* keep the last list — best-effort chrome */
-      },
-    );
-  };
-  const handleRemoveRule = (display: string): void => {
-    void bridge.removeCommandRule?.(display).then(
-      (ok) => {
-        if (ok) setRules((prev) => prev.filter((r) => r !== display));
-      },
-      () => {
-        /* row stays — nothing was deleted */
-      },
-    );
-  };
-  // Workspace trust (ADR 0064): same ownership as the rules — the data lives
-  // here, refreshed on every menu open, and the row is omitted when the
-  // bridge has no surface for it.
-  const trustSupported = bridge.getWorkspaceTrust !== undefined;
-  const [trust, setTrust] = useSessionScoped<WorkspaceTrustState | null>(null);
-  const refreshTrust = (): void => {
-    if (!trustSupported) return;
-    void bridge.getWorkspaceTrust?.().then(
-      (s) => setTrust(s),
+  // Automatic review (ADR 0075, which replaced workspace trust). The DATA
+  // lives here — CardMenu is presentational (its own tests render it with no
+  // bridge provider) — refreshed on every menu OPEN, and the row is omitted
+  // when the bridge has no surface for it (fakes / the website demo).
+  const reviewSupported = bridge.getAutoReview !== undefined;
+  const [review, setReview] = useSessionScoped<AutoReviewState | null>(null);
+  const refreshReview = (): void => {
+    if (!reviewSupported) return;
+    void bridge.getAutoReview?.().then(
+      (s) => setReview(s),
       () => {
         /* keep the last state — best-effort chrome */
       },
     );
   };
-  const handleSetTrust = (value: WorkspaceTrust | null): void => {
-    void bridge.setWorkspaceTrust?.(value).then(
-      (s) => setTrust(s),
+  const handleSetAutoReview = (on: boolean): void => {
+    void bridge.setAutoReview?.(on).then(
+      (s) => setReview(s),
       () => {
         /* unchanged — nothing was written */
       },
     );
   };
+  // The menu's path opens the folder in the OS file manager (owner
+  // 2026-10-08) — through the viewer's own jailed open, where `.` is the
+  // workspace itself. Without that surface (the demo) the path stays text.
+  const openSupported = bridge.openWorkspaceFile !== undefined;
+  const handleOpenFolder = (): void => {
+    if (snap.sessionId === null) return;
+    const fail = (): void => setWsError(t("card.openFolderError"));
+    void bridge.openWorkspaceFile?.(snap.sessionId, ".").then((ok) => {
+      if (!ok) fail();
+    }, fail);
+  };
   const refreshMenu = (): void => {
-    refreshRules();
-    refreshTrust();
+    refreshReview();
   };
   const handleReset = async () => {
     if (snap.sessionId === null) return;
@@ -323,8 +307,8 @@ export function DeviceCard(): JSX.Element {
       )}
       <CardMenu
         // One menu per session: a switch by keyboard or from the tray left
-        // an open menu showing the new session with an empty rules list and
-        // no trust row — the scoped data reset, and the refetch fires only
+        // an open menu showing the new session with no review row — the
+        // scoped data reset, and the refetch fires only
         // on the open edge (UX review 2026-09-22, item 11). The key closes
         // it with the session it described.
         key={snap.sessionId ?? "no-session"}
@@ -333,11 +317,14 @@ export function DeviceCard(): JSX.Element {
         isDefault={snap.backendWorkspaceIsDefault}
         onSetWorkspace={() => void handleSet()}
         onResetWorkspace={handleReset}
+        onOpenWorkspace={
+          openSupported && snap.sessionId !== null
+            ? handleOpenFolder
+            : undefined
+        }
         errorText={wsError ?? undefined}
-        rules={rulesSupported ? rules : undefined}
-        onRemoveRule={handleRemoveRule}
-        trust={trustSupported && trust !== null ? trust : undefined}
-        onSetTrust={handleSetTrust}
+        review={reviewSupported && review !== null ? review : undefined}
+        onSetAutoReview={handleSetAutoReview}
         onOpen={refreshMenu}
       />
       <button

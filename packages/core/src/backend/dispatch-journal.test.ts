@@ -43,7 +43,6 @@ function start(taskId = "task-1"): JournalStartEntry {
     frame: {
       userMessages: [{ text: "fix the parser" }],
       omittedUserMessages: 0,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       recentDialogue: "",
       workingHistory: "",

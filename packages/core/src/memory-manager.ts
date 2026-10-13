@@ -22,8 +22,13 @@ export interface MemoryItem {
   scope: "repo" | "user";
   kind: MemoryKind;
   text: string;
+  /** Why it holds — what the user said or what happened (ADR 0077). Items
+   *  saved before have none. */
+  why?: string;
   sourceSession: string;
   createdAt: string;
+  /** When it was last saved: a save of the same fact re-confirms it, and
+   *  recall shows the age from here (ADR 0077). */
   lastSeen: string;
   confidence: number;
 }

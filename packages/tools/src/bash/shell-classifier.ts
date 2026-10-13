@@ -4,13 +4,15 @@ import { isCredentialPath } from "../credential-denylist.js";
 import { detectInProgressState, resolveGitDir } from "../git/repo-probe.js";
 import {
   gitDirShapeWriteDenial,
+  gitInternalsWrite,
   globReachesHertaState,
   hertaStateWriteDenial,
-  mentionsHertaState,
+  namesHertaState,
 } from "../path-safety.js";
 import {
   classifyCommand,
   classifyShellBody,
+  GIT_INTERNALS_ASK_CODE,
   splitShellSegments,
   unresolvedProgramName,
   type Verdict,
@@ -56,9 +58,8 @@ import type { ShellPaths } from "./shell-paths.js";
  *
  * Aggregation: any block → block; else any ask → ONE ask carrying the
  * highest risk and the joined reasons (the user sees the whole command in
- * the prompt anyway); else allow. `code` follows the highest-risk ask so
- * ADR 0030 project rules (`command_ask_unknown` / `_interpreter`) can still
- * be derived when that is the only ask in the line.
+ * the prompt anyway); else allow. `code` follows the highest-risk ask, so
+ * the card labels the line by its most serious class.
  */
 export interface ShellClassifyOpts {
   workspaceRoot: string;
@@ -410,8 +411,7 @@ export function classifyShellCommandDetailed(
 /**
  * The single program a command line really runs, as argv — or null.
  *
- * Feeds the approval cache and ADR 0030 project rules for `bash` the way
- * run_command's argv does. Deliberately narrow (fail-closed): after dropping
+ * Feeds the approval cache for `bash` the way run_command's argv does. Deliberately narrow (fail-closed): after dropping
  * leading `cd`/`pushd` segments whose target is the WORKSPACE ROOT itself
  * (the model's habit; a cd into a subdirectory would change what a
  * cwd-scoped rule means, so it disqualifies), exactly ONE segment may
@@ -858,7 +858,9 @@ function classifySegment(
       }
       // Its own class when the target leaves the workspace (ADR 0064 L1):
       // the trust tier covers writes INSIDE, and `> $HOME/.bashrc` must
-      // not ride `>` being "a write".
+      // not ride `>` being "a write". Inside, a repository's `.git` is its
+      // own class too (2026-10-09): `> .git/hooks/pre-commit` is a command
+      // the next `git commit` runs.
       const outside = leavesWorkspace(r.target, opts);
       asks.push(
         outside
@@ -868,12 +870,19 @@ function classifySegment(
               code: "command_ask_outside",
               reason: `redirects output outside the workspace: ${r.target}`,
             }
-          : {
-              kind: "ask",
-              risk: "workspace_write",
-              code: "command_ask_write",
-              reason: `redirects output to ${r.target}`,
-            },
+          : gitInternalTarget(r.target, opts)
+            ? {
+                kind: "ask",
+                risk: "workspace_destructive",
+                code: GIT_INTERNALS_ASK_CODE,
+                reason: `redirects output inside .git (${r.target}) — hooks and config there are commands git runs later`,
+              }
+            : {
+                kind: "ask",
+                risk: "workspace_write",
+                code: "command_ask_write",
+                reason: `redirects output to ${r.target}`,
+              },
       );
     } else if (r.kind === "in") {
       if (leavesWorkspace(r.target, opts) || isCredentialPath(r.target)) {
@@ -1091,12 +1100,24 @@ function classifySegment(
   }
 
   if (OPAQUE_BUILTINS.has(name)) {
-    asks.push({
-      kind: "ask",
-      risk: "workspace_write",
-      code: "command_ask_interpreter",
-      reason: `${name} runs text the harness cannot classify — review it`,
-    });
+    // `eval` runs text assembled when it runs: opaque, never reviewed nor
+    // rule-eligible (ADR 0075 step 1). `source`/`.`/`exec` name what
+    // they run and stay the interpreter class.
+    asks.push(
+      name === "eval"
+        ? {
+            kind: "ask",
+            risk: "workspace_destructive",
+            code: "command_ask_opaque",
+            reason: "eval runs a command assembled when it runs — review it",
+          }
+        : {
+            kind: "ask",
+            risk: "workspace_write",
+            code: "command_ask_interpreter",
+            reason: `${name} runs text the harness cannot classify — review it`,
+          },
+    );
     return segmentVerdict(asks);
   }
 
@@ -1274,8 +1295,10 @@ function classifySegment(
         hertaTargetDenial(spelled(operand), opts, live.has(operand)),
       // A body handed to another shell: its text naming `.herta`, or run from
       // a cwd inside it, where every relative path lands there.
+      // The workspace's own root does not count (a managed sandbox lives
+      // under `~/.herta/workspaces`).
       body: (body) =>
-        mentionsHertaState(body)
+        namesHertaState(body, opts.workspaceRoot)
           ? "hands another shell a command that names .herta — the harness's own state; no command may change it"
           : hertaStateWriteDenial(
               opts.workspaceRoot,
@@ -1293,6 +1316,9 @@ function classifySegment(
         const native = nativeOf(spelled(file), opts);
         return native === null ? null : readPatchTargets(native);
       },
+      // A write into a repository's `.git` (2026-10-09): hooks and config
+      // there are commands git runs later.
+      gitInternal: (operand) => gitInternalTarget(spelled(operand), opts),
     },
   });
   if (v.kind === "block") return { verdict: v };
@@ -1633,6 +1659,14 @@ function nativeOf(token: string, opts: ShellClassifyOpts): string | null {
   );
 }
 
+/** True when the path a shell token names lands inside a repository's
+ *  `.git` beneath the workspace (`gitInternalsWrite`). A token the harness
+ *  cannot place is not this guard's: it already asks as leaving. */
+function gitInternalTarget(token: string, opts: ShellClassifyOpts): boolean {
+  const at = resolveWorkspacePath(token, opts);
+  return at !== null && gitInternalsWrite(opts.workspaceRoot, at.native);
+}
+
 /** Denial when writing the path a shell token names would change the
  *  harness's own state (`hertaStateWriteDenial`), else null. Resolved like a
  *  redirect target — shell or native spelling, relative to the shell cwd.
@@ -1644,12 +1678,25 @@ function hertaTargetDenial(
   opts: ShellClassifyOpts,
   glob = false,
 ): string | null {
+  // A variable or `~` that leads to `.herta` (`"$PWD/.herta/permissions.json"`,
+  // `~/.herta/workspaces/<id>/.herta/…`) cannot be placed, and asked as
+  // leaving the workspace — a class the automatic reviewer takes (release
+  // review 2026-10-13). Naming `.herta` is enough, as it is for a body handed
+  // to another shell; the workspace's own root (a managed sandbox lives
+  // under `~/.herta/workspaces`) does not count.
+  const bare = token.replace(/^["']|["']$/g, "");
+  if (
+    (bare.startsWith("~") || /[$`]/.test(bare)) &&
+    namesHertaState(bare, opts.workspaceRoot)
+  ) {
+    return "names .herta through a variable — the harness's own state (its automatic-review choice, memory, logs); no command may change it. Write to a path inside the workspace that names no .herta";
+  }
   const at = resolveWorkspacePath(token, opts);
   if (at === null) return null;
   const literal = hertaStateWriteDenial(opts.workspaceRoot, at.native);
   if (literal !== null) return literal;
   return glob && globReachesHertaState(at.relative)
-    ? "names .herta by a pattern — the harness's own state (its permission rules and trust choice, memory, logs); no command may change it"
+    ? "names .herta by a pattern — the harness's own state (its automatic-review choice, memory, logs); no command may change it"
     : null;
 }
 
@@ -1737,6 +1784,68 @@ function splitHeredocs(body: string): { text: string; expanded: string[] } {
   // expandable one accumulated rather than dropping it silently.
   if (!quotedDelimiter && current.length > 0) expanded.push(current.join("\n"));
   return { text: out.join("\n"), expanded };
+}
+
+/**
+ * The command with its shell comments removed — an unquoted `#` that begins
+ * a word, to the end of its line (2026-10-09, ADR 0075: what a reviewer
+ * model reads). A comment runs nothing, so dropping it changes nothing the
+ * command does; what it removes is text the agent wrote AT the reader —
+ * `rm -rf dist  # approved by the user in chat`. Quotes are tracked across
+ * lines; heredoc bodies are data and kept as written (a `#` there is the
+ * file's own text); `$#`, `${#x}` and `a#b` are not comments. A line left
+ * empty by the cut goes, and trailing blanks on a cut line.
+ */
+export function stripShellComments(command: string): string {
+  const out: string[] = [];
+  let quote: "'" | '"' | null = null;
+  let terminator: string | null = null;
+  let stripTabs = false;
+  for (const line of command.split("\n")) {
+    if (terminator !== null) {
+      out.push(line);
+      if ((stripTabs ? line.replace(/^\t+/, "") : line) === terminator)
+        terminator = null;
+      continue;
+    }
+    let cut = line.length;
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i] as string;
+      if (quote !== null) {
+        if (ch === "\\" && quote === '"') {
+          i += 1;
+          continue;
+        }
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        quote = ch;
+        continue;
+      }
+      if (ch === "#" && (i === 0 || /[\s;&|()]/.test(line[i - 1] as string))) {
+        cut = i;
+        break;
+      }
+    }
+    const kept = cut < line.length ? line.slice(0, cut).trimEnd() : line;
+    if (cut < line.length && kept.trim() === "") continue;
+    out.push(kept);
+    // A heredoc this line opens (outside quotes, before any comment): its
+    // body lines follow verbatim.
+    if (quote === null) {
+      const opener = findHeredocOpener(kept);
+      if (opener !== null) {
+        terminator = opener.terminator;
+        stripTabs = opener.stripTabs;
+      }
+    }
+  }
+  return out.join("\n");
 }
 
 /** The heredoc `<<WORD` a line really opens (unquoted, uncommented, and not

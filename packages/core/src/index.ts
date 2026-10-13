@@ -3,8 +3,6 @@ export {
   ApprovalPolicy,
   type ApprovalPolicyOpts,
   type ApprovalPreflight,
-  commandArgv,
-  commandCwd,
 } from "./approval-policy.js";
 export {
   type AtomicWriteOptions,
@@ -110,6 +108,23 @@ export {
   type PersistOutcome,
   persistOversizedResult,
 } from "./backend/tool-result-persistence.js";
+export {
+  restoreUndo,
+  type UndoOutcome,
+  undoSpan,
+} from "./backend/undo-restore.js";
+export {
+  readUndoIndex,
+  UNDO_SESSION_MAX_BYTES,
+  type UndoIndexEntry,
+  type UndoMark,
+  type UndoSegment,
+  type UndoSegmentView,
+  UndoStore,
+  undoBlobPath,
+  undoSegments,
+  undoStoreDir,
+} from "./backend/undo-store.js";
 export { ExecutionReportBuilder } from "./bridge/report-builder.js";
 export type * from "./bridge/types.js";
 export { abortError, errorMessage, isAbortError } from "./errors.js";
@@ -139,11 +154,13 @@ export {
   REFUSAL_DENY_CODES,
 } from "./permission-deny-codes.js";
 export type {
+  AskAnswer,
   AskResolver,
   CommandConsequence,
   PermissionDecision,
   PermissionEngine,
   PermissionRule,
+  ReviewerDenial,
   RiskLevel,
   RuleVerdict,
 } from "./permission-engine.js";
@@ -152,14 +169,11 @@ export {
   RulePermissionEngine,
 } from "./permission-engine.js";
 export {
-  deriveProjectCommandRule,
-  isRuleEligibleAskCode,
-  type ProjectCommandRule,
-  ProjectCommandRuleStore,
-  ruleDisplay,
+  binaryBasename,
+  pinnedScript,
+  RUNS_ITS_ARGUMENTS,
   SCRIPT_INTERPRETERS,
-  type WorkspaceTrust,
-} from "./project-command-rules.js";
+} from "./program-identity.js";
 export { ReadLedger, type ReadLedgerEntry } from "./read-ledger.js";
 export {
   isCacheableProgram,
@@ -204,6 +218,7 @@ export {
   narrativeDirFor,
   narrativeDirName,
   resolveEffectiveWorkspace,
+  trailblazerNotesFileName,
   workspacesBaseDir,
 } from "./session-io/workspace-paths.js";
 export {
@@ -253,16 +268,19 @@ export {
   type SystemBlockLabel,
   type TerminalRecord,
   type TerminalRecordBlock,
+  type UndoFileResult,
   type UserBlock,
 } from "./types/terminal-record.js";
 export type * from "./types/tool.js";
 export type * from "./types/transcript.js";
+export { UNDOABLE_WRITE_CODES, undoableWrite } from "./undoable-write.js";
 export {
   type ActorTurnNote,
   type BackendRunNote,
+  type ReviewNote,
   reportUsageNote,
   setUsageNoteSink,
   type UsageNote,
   type UsageNoteSink,
 } from "./usage-note.js";
-export { trustCovers, WORKSPACE_TRUST_CODES } from "./workspace-trust.js";
+export { WorkspacePermissions } from "./workspace-permissions.js";

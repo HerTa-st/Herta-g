@@ -21,6 +21,13 @@ export const memorySaveInputSchema = z
       .describe(
         "The fact itself, one sentence, at most 500 characters. Never a secret.",
       ),
+    why: z
+      .string()
+      .min(1)
+      .max(300)
+      .describe(
+        "Why it is true or worth keeping: what the user said, or what happened in this run. A later run reads it to judge whether the fact still applies. At most 300 characters.",
+      ),
   })
   .strict();
 

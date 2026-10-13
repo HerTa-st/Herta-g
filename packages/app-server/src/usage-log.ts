@@ -30,7 +30,10 @@ const ROTATE_AT_BYTES = 4 * 1024 * 1024;
  *
  * — how often the backend trim bites, and how far Herta's prompt grows
  * inside a turn. Sizes there are the harness's estimates, the unit its
- * budgets are kept in.
+ * budgets are kept in. And one line per automatic review (ADR 0075), its
+ * outcome and, for a card, why — the owner's screen is silent about it:
+ *
+ *   {"at":"…","note":"review","outcome":"card","why":"timeout","ms":20004}
  *
  * Installs the providers' and core's process-wide sinks, so one call covers
  * every provider and run the host builds. Writes are queued and

@@ -4,7 +4,6 @@ import { deepseekProvider } from "./factory.js";
 
 const userOnly: PromptFrame = {
   stableSystem: "",
-  repoInstructions: "",
   memoryContext: "",
   retrievedLore: "",
   messages: [{ role: "user", text: "hi", ts: "t" }],

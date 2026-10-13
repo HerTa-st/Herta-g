@@ -238,6 +238,7 @@ describe("MVP tools end-to-end with CodingAgentRuntime", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "bash",
       "digest_document",
+      "memory_save",
       "report_finding",
       "show_excerpt",
       "str_replace_editor",

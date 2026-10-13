@@ -30,7 +30,6 @@ function start(over: Partial<JournalStartEntry> = {}): JournalStartEntry {
     frame: {
       userMessages: [{ text: "fix it" }],
       omittedUserMessages: 0,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       recentDialogue: "",
       workingHistory: "",

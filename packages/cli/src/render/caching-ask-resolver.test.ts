@@ -1,14 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AutoReviewer } from "@herta/app-server/wiring";
 import {
   type AskResolver,
   type PermissionRequest,
-  ProjectCommandRuleStore,
-  ruleDisplay,
   SessionApprovalCache,
+  WorkspacePermissions,
 } from "@herta/core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { MockReadable, MockWritable } from "../testing/mock-streams.js";
 import { CachingAskResolver } from "./caching-ask-resolver.js";
 import {
@@ -278,110 +278,6 @@ describe("CachingAskResolver", () => {
       expect(cache.size()).toBe(0);
     });
 
-    it("project rules (ADR 0030): hit auto-allows with a marker; [p] persists; non-eligible codes never match", async () => {
-      const root = mkdtempSync(join(tmpdir(), "herta-cli-rules-"));
-      try {
-        const rules = new ProjectCommandRuleStore(() => root);
-        const nodeReq = (argv: string[], code?: string): PermissionRequest =>
-          mkReq({
-            call: { id: "c1", tool: "run_command", input: { argv } },
-            code: code ?? "command_ask_interpreter",
-          });
-
-        // 1) Derivable + eligible: the prompt carries the rule display;
-        //    allow_project persists it.
-        const first = mkInner();
-        first.inner.outcomes = ["allow_project"];
-        const w1 = new CachingAskResolver(
-          first.inner,
-          new SessionApprovalCache(),
-          first.stdout,
-          style,
-          rules,
-        );
-        const d1 = await w1.present(
-          nodeReq(["node", "src/index.mjs", "sample.txt"]),
-          new AbortController().signal,
-        );
-        expect(d1).toBe("allow");
-        // The pinned script also makes the task-remember available (the
-        // cache scopes by `node src/index.mjs`, 2026-08-17).
-        // …and the workspace-trust grant is offered too (ADR 0064): a
-        // workspace script is a class the tier covers, and this workspace
-        // has not chosen yet.
-        expect(first.inner.optionsLog).toEqual([
-          {
-            showRemember: true,
-            projectRule: "node src/index.mjs:*",
-            showTrust: true,
-          },
-        ]);
-        expect(rules.list().map(ruleDisplay)).toEqual(["node src/index.mjs:*"]);
-
-        // 2) Same script, different args: silent auto-allow, no prompt.
-        const second = mkInner();
-        const w2 = new CachingAskResolver(
-          second.inner,
-          new SessionApprovalCache(),
-          second.stdout,
-          style,
-          rules,
-        );
-        const d2 = await w2.present(
-          nodeReq(["node", "src/index.mjs", "other.txt"]),
-          new AbortController().signal,
-        );
-        expect(d2).toBe("allow");
-        expect(second.inner.optionsLog).toEqual([]);
-        expect(second.stdout.full()).toContain(
-          "auto-allow: project rule covers node src/index.mjs other.txt",
-        );
-
-        // 3) Matching argv but a NON-eligible ask class: prompts anyway, and
-        //    offers no [p] (the rule cannot cross tiers).
-        const third = mkInner();
-        third.inner.outcomes = ["allow"];
-        const w3 = new CachingAskResolver(
-          third.inner,
-          new SessionApprovalCache(),
-          third.stdout,
-          style,
-          rules,
-        );
-        await w3.present(
-          nodeReq(["node", "src/index.mjs"], "command_ask_destructive"),
-          new AbortController().signal,
-        );
-        // (showRemember follows the RISK, which this fixture leaves at
-        // workspace_write with a pinnable script — the point here is that no
-        // projectRule is offered for the non-eligible class.)
-        expect(third.inner.optionsLog).toEqual([{ showRemember: true }]);
-
-        // 4) Eligible but underivable (eval flag): no [p] offered.
-        const fourth = mkInner();
-        fourth.inner.outcomes = ["allow"];
-        const w4 = new CachingAskResolver(
-          fourth.inner,
-          new SessionApprovalCache(),
-          fourth.stdout,
-          style,
-          rules,
-        );
-        await w4.present(
-          nodeReq(["node", "-e", "x"]),
-          new AbortController().signal,
-        );
-        // (The fixture hand-sets the interpreter class, which the trust tier
-        // covers, so [t] is offered here — the real classifier would file
-        // `node -e` under the inline class and offer nothing.)
-        expect(fourth.inner.optionsLog).toEqual([
-          { showRemember: false, showTrust: true },
-        ]);
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    });
-
     it("missing/empty argv: falls through to non-cacheable behavior", async () => {
       const cache = new SessionApprovalCache();
       const { inner, stdout } = mkInner();
@@ -400,34 +296,33 @@ describe("CachingAskResolver", () => {
     });
   });
 
-  describe("workspace trust (ADR 0064)", () => {
-    it("[t] turns trust on for the workspace; covered asks then auto-allow with a marker", async () => {
-      const root = mkdtempSync(join(tmpdir(), "herta-cli-trust-"));
+  describe("automatic review replaces workspace trust (ADR 0064 amendment 2026-10-10)", () => {
+    it("[r] turns it on for the workspace; an undoable write then runs with a marker, and what trust covered still prompts", async () => {
+      const root = mkdtempSync(join(tmpdir(), "herta-cli-review-"));
       try {
-        const rules = new ProjectCommandRuleStore(() => root);
-        const vcs = (): PermissionRequest =>
+        const permissions = new WorkspacePermissions(() => root);
+        const write = (): PermissionRequest =>
           mkReq({
-            call: {
-              id: "c1",
-              tool: "run_command",
-              input: { argv: ["git", "commit", "-m", "x"] },
-            },
-            code: "command_ask_vcs",
+            call: { id: "c1", tool: "edit_file", input: { path: "a.txt" } },
+            code: "edit_file_ask",
+            undoable: true,
           });
         const first = mkInner();
-        first.inner.outcomes = ["allow_trust"];
+        first.inner.outcomes = ["allow_auto_review"];
         const w1 = new CachingAskResolver(
           first.inner,
           new SessionApprovalCache(),
           first.stdout,
           style,
-          rules,
+          permissions,
         );
         await expect(
-          w1.present(vcs(), new AbortController().signal),
+          w1.present(write(), new AbortController().signal),
         ).resolves.toBe("allow");
-        expect(first.inner.optionsLog[0]).toMatchObject({ showTrust: true });
-        expect(rules.trust()).toBe("workspace");
+        expect(first.inner.optionsLog[0]).toMatchObject({
+          showAutoReview: true,
+        });
+        expect(permissions.autoReview()).toBe(true);
 
         const second = mkInner();
         const w2 = new CachingAskResolver(
@@ -435,15 +330,17 @@ describe("CachingAskResolver", () => {
           new SessionApprovalCache(),
           second.stdout,
           style,
-          rules,
+          permissions,
         );
         await expect(
-          w2.present(vcs(), new AbortController().signal),
+          w2.present(write(), new AbortController().signal),
         ).resolves.toBe("allow");
         expect(second.inner.optionsLog).toEqual([]);
-        expect(second.stdout.full()).toContain("auto-allow:");
-        expect(second.stdout.full()).toContain("workspace trust");
-        // A network ask still prompts, and offers no [t] (already trusted).
+        expect(second.stdout.full()).toContain(
+          "auto-allow: edit_file workspace_write (a write undo can take back)",
+        );
+        // A git commit trust used to let through prompts (no reviewer here),
+        // and offers no [r] (already on).
         const third = mkInner();
         third.inner.outcomes = ["allow"];
         const w3 = new CachingAskResolver(
@@ -451,24 +348,110 @@ describe("CachingAskResolver", () => {
           new SessionApprovalCache(),
           third.stdout,
           style,
-          rules,
+          permissions,
         );
         await w3.present(
           mkReq({
             call: {
               id: "c2",
               tool: "run_command",
-              input: { argv: ["npm", "install", "x"] },
+              input: { argv: ["git", "commit", "-m", "x"] },
             },
-            risk: "network",
-            code: "command_ask_network",
+            code: "command_ask_vcs",
           }),
           new AbortController().signal,
         );
-        expect(third.inner.optionsLog).toEqual([{ showRemember: false }]);
+        expect(third.inner.optionsLog).toHaveLength(1);
+        expect(third.inner.optionsLog[0]?.showAutoReview).toBeUndefined();
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe("CachingAskResolver with the automatic reviewer (ADR 0075)", () => {
+  const reply = (risk: string, auth: string, outcome: string) =>
+    JSON.stringify({
+      risk_level: risk,
+      user_authorization: auth,
+      outcome,
+      rationale: "理由。",
+    });
+  const bash = (command: string): PermissionRequest =>
+    mkReq({
+      call: { id: "c1", tool: "bash", input: { command } },
+      reason: "unrecognized command — review carefully",
+      code: "command_ask_unknown",
+      files: undefined,
+    });
+
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const r of roots.splice(0))
+      rmSync(r, { recursive: true, force: true });
+  });
+  function setup(answers: Array<string | Error>, enabled = true) {
+    const sent: string[] = [];
+    // The CLI is off unless chosen: `enabled` is the owner's choice.
+    const root = mkdtempSync(join(tmpdir(), "herta-cli-review-"));
+    roots.push(root);
+    const permissions = new WorkspacePermissions(() => root);
+    if (enabled) permissions.setAutoReview(true);
+    const reviewer = new AutoReviewer(async ({ user }) => {
+      sent.push(user);
+      const next = answers.shift();
+      if (next instanceof Error) throw next;
+      return next ?? reply("low", "high", "allow");
+    });
+    const { inner, stdout } = mkInner();
+    const resolver = new CachingAskResolver(
+      inner,
+      new SessionApprovalCache(),
+      stdout,
+      style,
+      permissions,
+      {
+        reviewer,
+        userMessages: () => ["@板砖 跑一下测试。"],
+        workspace: () => "/w",
+      },
+    );
+    return { resolver, inner, stdout, sent };
+  }
+  const signal = () => new AbortController().signal;
+
+  it("an allow settles with no prompt, and prints nothing", async () => {
+    const { resolver, inner, stdout, sent } = setup([
+      reply("low", "high", "allow"),
+    ]);
+    expect(await resolver.present(bash("make test"), signal())).toBe("allow");
+    expect(inner.optionsLog).toHaveLength(0);
+    expect(stdout.full()).toBe("");
+    expect(sent[0]).toContain("跑一下测试");
+  });
+
+  it("a deny settles as the reviewer's, with its reason", async () => {
+    const { resolver, inner } = setup([reply("medium", "low", "deny")]);
+    expect(await resolver.present(bash("pnpm add left-pad"), signal())).toEqual(
+      { decision: "deny", by: "reviewer", reason: "理由。" },
+    );
+    expect(inner.optionsLog).toHaveLength(0);
+  });
+
+  it("a failure, or a workspace not opted in, prompts as before", async () => {
+    const failing = setup([new Error("down")]);
+    failing.inner.outcomes.push("allow");
+    expect(await failing.resolver.present(bash("make test"), signal())).toBe(
+      "allow",
+    );
+    expect(failing.inner.optionsLog).toHaveLength(1);
+
+    const off = setup([], false);
+    off.inner.outcomes.push("deny");
+    expect(await off.resolver.present(bash("make test"), signal())).toBe(
+      "deny",
+    );
+    expect(off.sent).toHaveLength(0);
   });
 });

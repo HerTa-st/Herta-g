@@ -254,7 +254,7 @@ function parseRouterOutput(raw: string): MoodState | "stay" | null {
 /**
  * Build a minimal `ActorPromptFrame` carrying just the router's system
  * message and a single user message. All other capsule slots
- * (repoInstructions, memoryContext, retrievedLore) are empty — the
+ * (memoryContext, retrievedLore) are empty — the
  * router does not need Herta's identity prefix or repo context, only
  * the classifier instructions and the conversation to classify.
  */
@@ -268,7 +268,6 @@ function buildRouterFrame(input: ClassifyIntentInput): {
   const userMessage = buildRouterUserMessage(input, lang);
   const frame: ActorPromptFrame = {
     stableSystem: systemPrompt,
-    repoInstructions: "",
     memoryContext: "",
     retrievedLore: "",
     messages: [

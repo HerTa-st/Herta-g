@@ -28,19 +28,15 @@ type StdinLike = Readable & {
 export type CliPromptOutcome =
   | "allow"
   | "allow_remember"
-  | "allow_project"
-  | "allow_trust"
+  | "allow_auto_review"
   | "deny";
 
 export interface PresentDetailedOptions {
   showRemember: boolean;
-  /** Display form of the project rule a [p] choice would persist (ADR 0030).
-   *  Absent → the [p] option is neither shown nor accepted — never offer a
-   *  choice that would silently no-op (the showRemember contract). */
-  projectRule?: string;
-  /** Offer [t] — trust this workspace (ADR 0064): the ask class is one the
-   *  tier covers and the workspace does not trust yet. Same contract. */
-  showTrust?: boolean;
+  /** Offer [r] — turn automatic review on for this workspace (ADR 0064
+   *  amendment 2026-10-10): it is off, and it would answer this request.
+   *  Same contract. */
+  showAutoReview?: boolean;
 }
 
 export class CliAskResolver implements AskResolver {
@@ -138,25 +134,16 @@ export class CliAskResolver implements AskResolver {
         this.style.dim(`  files: ${request.files.join(", ")}\n`),
       );
     }
-    if (opts.projectRule !== undefined) {
-      // Spell out the exact grant before offering [p] (ADR 0030) — same
-      // inspect-before-commit contract as the GUI's dim rule caption.
+    if (opts.showAutoReview === true) {
       this.stdout.write(
         this.style.dim(
-          `  [p] remembers in this project: ${opts.projectRule}\n`,
-        ),
-      );
-    }
-    if (opts.showTrust === true) {
-      this.stdout.write(
-        this.style.dim(
-          "  [t] trusts this workspace: file writes, filesystem operations, non-destructive git and workspace scripts no longer ask; network, destructive and out-of-workspace operations still do\n",
+          "  [r] turns on automatic review here: file writes undo can take back run, a review model answers the other requests, and what it cannot judge still asks\n",
         ),
       );
     }
     const keys = `y${opts.showRemember ? "/a" : ""}${
-      opts.projectRule !== undefined ? "/p" : ""
-    }${opts.showTrust === true ? "/t" : ""}/N`;
+      opts.showAutoReview === true ? "/r" : ""
+    }/N`;
     this.stdout.write(`  ${this.style.bold(`[${keys}]`)} `);
   }
 
@@ -183,13 +170,8 @@ export class CliAskResolver implements AskResolver {
           settle("allow", "y");
         } else if (opts.showRemember && (ch === "a" || ch === "A")) {
           settle("allow_remember", "a");
-        } else if (
-          opts.projectRule !== undefined &&
-          (ch === "p" || ch === "P")
-        ) {
-          settle("allow_project", "p");
-        } else if (opts.showTrust === true && (ch === "t" || ch === "T")) {
-          settle("allow_trust", "t");
+        } else if (opts.showAutoReview === true && (ch === "r" || ch === "R")) {
+          settle("allow_auto_review", "r");
         } else {
           settle("deny", "n");
         }

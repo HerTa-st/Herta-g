@@ -1,5 +1,6 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import {
   basename,
   dirname,
@@ -299,11 +300,12 @@ function realpathSyncViaExistingAncestor(candidate: string): string {
   }
 }
 
-/** True when a path RELATIVE to the workspace passes through `.herta`
- *  (the filesystem's case policy, Win32's trimmed spelling). */
-function relativeTouchesHerta(
+/** True when a path RELATIVE to the workspace passes through a directory
+ *  named `name` (the filesystem's case policy, Win32's trimmed spelling). */
+function relativeTouchesSegment(
   workspaceRoot: string,
   absolute: string,
+  name: string,
 ): boolean {
   if (!isPathInside(workspaceRoot, absolute)) return false;
   const rel = relativePath(workspaceRoot, absolute);
@@ -311,18 +313,52 @@ function relativeTouchesHerta(
   return rel
     .split(sep)
     .map(winCanonicalizeSegment)
-    .some((seg) => caseNormalize(seg) === caseNormalize(".herta"));
+    .some((seg) => caseNormalize(seg) === caseNormalize(name));
+}
+
+function relativeTouchesHerta(
+  workspaceRoot: string,
+  absolute: string,
+): boolean {
+  return relativeTouchesSegment(workspaceRoot, absolute, ".herta");
+}
+
+/**
+ * True when a COMMAND's write lands inside a repository's `.git` beneath the
+ * workspace — its config, hooks or internals (2026-10-09).
+ *
+ * The editors never write there (the structural `.git` denial in
+ * {@link resolveSafePath}); a shell could, as a plain write: `> .git/config`,
+ * `cp x .git/hooks/pre-commit`, `sed -i … .git/config`. Those were classes
+ * workspace trust answered with no card, and a hook or a config key there is
+ * a command git runs later — `git commit` runs `pre-commit`, `git status`
+ * runs `core.fsmonitor` — behind commands that are allowed or trusted
+ * themselves. Not a block: removing a stale `.git/index.lock` is an honest
+ * repair. The classifiers ask in a class trust never covers. Judged like
+ * {@link hertaStateWriteDenial}: as spelled and through links.
+ */
+export function gitInternalsWrite(
+  workspaceRoot: string,
+  absolute: string,
+): boolean {
+  const resolved = realpathSyncViaExistingAncestor(absolute);
+  const rootResolved = realpathSyncViaExistingAncestor(workspaceRoot);
+  return (
+    relativeTouchesSegment(workspaceRoot, absolute, ".git") ||
+    relativeTouchesSegment(workspaceRoot, resolved, ".git") ||
+    relativeTouchesSegment(rootResolved, resolved, ".git")
+  );
 }
 
 /**
  * Denial message when a COMMAND would write into the harness's own state —
  * `.herta` anywhere beneath the workspace — else null (2026-09-30).
  *
- * `.herta/permissions.json` holds the project's command allow rules AND the
- * workspace's trust choice (ADR 0030, ADR 0064); beside it sit memory, logs
+ * `.herta/permissions.json` holds the workspace's automatic-review choice
+ * (once also ADR 0030's command rules and ADR 0064's trust); beside it sit memory, logs
  * and attachments. The editors could never write there (the structural
  * denial in {@link resolveSafePath}), but a shell could: a redirect, `tee`,
- * `cp`, `rm` are classes the trust tier answers with no card, so one line in
+ * `cp`, `rm` were classes the trust tier answered with no card, so one line in
  * a trusted workspace — every managed one, by default — planted rules or trust
  * that outlived the session and a later switch back to 逐项确认. Codex keeps
  * `.codex`, Claude Code its settings, Cursor `.cursor` out of the agent's
@@ -352,7 +388,7 @@ export function hertaStateWriteDenial(
     relativeTouchesHerta(workspaceRoot, resolved) ||
     relativeTouchesHerta(rootResolved, resolved)
   ) {
-    return `writes into .herta — the harness's own state (its permission rules and trust choice, memory, logs); no command may change it`;
+    return `writes into .herta — the harness's own state (its automatic-review choice, memory, logs); no command may change it`;
   }
   return null;
 }
@@ -412,6 +448,56 @@ export function globSegmentMatches(pattern: string, name: string): boolean {
  *  text, and the fail-closed direction is the right one for it. */
 export function mentionsHertaState(text: string): boolean {
   return /(^|[\s'"=:/\\>|;&(`])\.herta(?=$|[\s'"/\\;&|)`])/i.test(text);
+}
+
+/**
+ * `mentionsHertaState`, with the workspace root's own spellings taken out
+ * first. A session's managed sandbox lives at `~/.herta/workspaces/<id>`,
+ * so `cd <workspace> && npm test` names `.herta` without reaching any
+ * harness state, while `<workspace>/.herta/…` still does. The root is
+ * matched as Windows, a POSIX shell on Windows (`/c/…`) and the home
+ * shorthands (`~`, `$HOME`) would spell it, case-folded.
+ */
+export function namesHertaState(
+  text: string,
+  workspaceRoot: string,
+  home: string = homedir(),
+): boolean {
+  return mentionsHertaState(withoutWorkspaceRoot(text, workspaceRoot, home));
+}
+
+function withoutWorkspaceRoot(
+  text: string,
+  workspaceRoot: string,
+  home: string,
+): string {
+  const fwd = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (fwd.length === 0) return text;
+  const spellings = new Set([fwd, fwd.replace(/\//g, "\\")]);
+  const drive = /^([A-Za-z]):\/(.*)$/.exec(fwd);
+  if (drive !== null) spellings.add(`/${drive[1]}/${drive[2]}`);
+  const homeFwd = home.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (
+    homeFwd.length > 0 &&
+    fwd.toLowerCase().startsWith(`${homeFwd.toLowerCase()}/`)
+  ) {
+    const rest = fwd.slice(homeFwd.length);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: bash's own ${HOME}
+    for (const h of ["~", "$HOME", "${HOME}"]) spellings.add(`${h}${rest}`);
+  }
+  let out = text;
+  // Longest first, so a spelling never leaves half of a longer one behind;
+  // and only where the root ends — `…/abc` is not the start of `…/abcd`.
+  for (const s of [...spellings].sort((a, b) => b.length - a.length)) {
+    out = out.replace(
+      new RegExp(
+        `${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[\\s'"/\\\\;&|)\`<>])`,
+        "gi",
+      ),
+      "<workspace>",
+    );
+  }
+  return out;
 }
 
 export interface ResolveSafePathOpts {

@@ -9,7 +9,6 @@ import type { Message } from "./transcript.js";
  */
 export interface PromptFrame {
   stableSystem: string;
-  repoInstructions: string;
   memoryContext: string;
   retrievedLore: string;
   messages: Message[];
@@ -31,7 +30,6 @@ export type ActorPromptFrame = PromptFrame;
  */
 export interface BackendPromptFrame {
   backendSystem: string;
-  scopedRepoInstructions: string;
   scopedMemory: string;
   toolSchemas: ToolSchema[];
   messages: Message[];

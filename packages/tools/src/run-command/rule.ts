@@ -10,8 +10,9 @@ import {
 import { detectInProgressState, resolveGitDir } from "../git/repo-probe.js";
 import { formatInputIssues } from "../input-issues.js";
 import {
+  gitInternalsWrite,
   hertaStateWriteDenial,
-  mentionsHertaState,
+  namesHertaState,
   resolveSafePath,
 } from "../path-safety.js";
 import { classifyCommand, type WriteGuard } from "./classifier.js";
@@ -37,13 +38,18 @@ export function runCommandWriteGuard(
   return {
     path: (operand) =>
       operand === "" ? null : hertaStateWriteDenial(workspaceRoot, at(operand)),
+    // The workspace's own root does not count: a managed sandbox lives
+    // under `~/.herta/workspaces`, and `cmd /c "cd <workspace> && …"` named
+    // `.herta` and was refused (release review 2026-10-13).
     body: (body) =>
-      mentionsHertaState(body)
+      namesHertaState(body, workspaceRoot)
         ? "hands a shell a command that names .herta — the harness's own state; no command may change it"
         : null,
     holds: (operand) =>
       operand !== "" && isPathInside(at(operand), resolve(workspaceRoot)),
     patch: (file) => (file === "" ? null : readPatchTargets(at(file))),
+    gitInternal: (operand) =>
+      operand !== "" && gitInternalsWrite(workspaceRoot, at(operand)),
   };
 }
 

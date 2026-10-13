@@ -42,8 +42,8 @@ export type RuleVerdict =
        *  model's `cd <workspace> &&` prefix) — `["git","commit","-m","x"]` —
        *  or nothing when the line runs several programs, an interpreter body
        *  or a redirect outside the workspace. The approval cache scopes by
-       *  its argv[0] and ADR 0030 project rules derive from it, exactly as
-       *  they do from run_command's argv. Absent for every other tool. */
+       *  its argv[0], exactly as it does from run_command's argv. Absent for
+       *  every other tool. */
       argv?: readonly string[];
       /** The distinct programs a multi-segment shell line runs (ADR 0040),
        *  readers/builtins excluded — for the task-scoped approval CACHE only
@@ -59,6 +59,14 @@ export type RuleVerdict =
       /** One-sentence consequence note for the card (ADR 0049 §5); see
        *  {@link CommandConsequence}. Display-only, absent for most asks. */
       consequence?: CommandConsequence;
+      /** Everything the request changes is a workspace file the harness
+       *  reads before the write and keeps for undo (ADR 0074): an editor's
+       *  write, or a shell line whose only writes are a printer's redirects
+       *  to such files, beside `mkdir -p` inside the workspace. The rule
+       *  decides it from the request's own text; with automatic review on,
+       *  such a request runs without a review (ADR 0064 amendment
+       *  2026-10-10). */
+      undoable?: true;
     }
   | {
       kind: "deny";
@@ -88,11 +96,24 @@ export type PermissionRule = (
   ctx: ToolContext,
 ) => RuleVerdict | Promise<RuleVerdict>;
 
+/**
+ * A denial an automatic reviewer gave in the owner's place (ADR 0075). The
+ * loop sends the agent its reason, not "User denied", and says not to reach
+ * the same outcome another way — an agent told no looks for a side door.
+ */
+export interface ReviewerDenial {
+  readonly decision: "deny";
+  readonly by: "reviewer";
+  /** One sentence, in the language the reviewer wrote it. */
+  readonly reason: string;
+}
+
+/** What an ask settles to: the owner's allow or deny, or a reviewer's
+ *  denial. A reviewer's allow is a plain "allow". */
+export type AskAnswer = "allow" | "deny" | ReviewerDenial;
+
 export interface AskResolver {
-  present(
-    request: PermissionRequest,
-    signal: AbortSignal,
-  ): Promise<"allow" | "deny">;
+  present(request: PermissionRequest, signal: AbortSignal): Promise<AskAnswer>;
 }
 
 export type PermissionDecision =
@@ -100,7 +121,7 @@ export type PermissionDecision =
   | {
       kind: "ask";
       request: PermissionRequest;
-      decision: Promise<"allow" | "deny">;
+      decision: Promise<AskAnswer>;
     }
   | {
       kind: "deny";
@@ -186,6 +207,7 @@ export class RulePermissionEngine implements PermissionEngine {
       ...(verdict.consequence !== undefined
         ? { consequence: verdict.consequence }
         : {}),
+      ...(verdict.undoable === true ? { undoable: true as const } : {}),
     };
     const decision = this.ask.present(request, ctx.signal);
     return { kind: "ask", request, decision };

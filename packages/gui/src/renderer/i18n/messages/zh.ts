@@ -50,6 +50,8 @@ export const zh = {
     "窗口不在前台时，有事项需要处理或较长的回复完成，会发出通知。",
   "window.keepAwake": "运行时保持唤醒",
   "window.keepAwakeDesc": "板砖运行期间阻止电脑睡眠；显示器仍可关闭。",
+  "window.predictions": "输入预测",
+  "window.predictionsDesc": "输入框里会给出你可能想说的下一句。",
   "window.minimize": "最小化",
   "window.maximize": "最大化",
   "window.restore": "还原",
@@ -253,8 +255,6 @@ export const zh = {
   "approval.title": "请求权限",
   "approval.allow": "同意",
   "approval.alwaysAllow": "任务内同意",
-  "approval.allowProject": "本项目允许",
-  "approval.projectRuleNote": "「本项目允许」会记住：{rule}",
   "approval.deny": "拒绝",
   "approval.risk.read": "读取工作区",
   "approval.risk.write": "写入工作区",
@@ -277,6 +277,19 @@ export const zh = {
   "approval.reason.commandSystem": "会改动系统设置或操控其他应用，每次都需确认",
   "approval.reason.commandHarnessState":
     "该命令可能触及 .herta（本程序自身的状态），且无法从命令本身判定，每次都需确认",
+  "approval.reason.commandDownloadExec":
+    "该命令会下载软件包并运行，每次都需确认",
+  "approval.reason.commandOpaque":
+    "命令实际执行的内容无法从文本判定（经编码、运行时生成或由输入提供），每次都需确认",
+  "approval.reason.commandGitInternals":
+    "该命令会改动 .git 内部（钩子或配置），git 之后会据此运行命令，每次都需确认",
+  "approval.reason.commandOutside": "该命令会访问工作区之外的路径，请核对路径",
+  "approval.reason.commandLocalExec": "运行工作区内的程序，请核对程序与参数",
+  "approval.reason.commandInterpreterInline":
+    "解释器执行未在记录中出现的内联代码，请仔细核对",
+  "approval.reason.commandScript": "运行项目脚本，请核对脚本内容",
+  "approval.reason.commandEnv":
+    "该命令会改变后续命令所用的环境变量或命令路径，请核对",
   // A chained line with more than one ask class: the other classes, named.
   "approval.alsoClasses": "另含：{list}",
   // Consequence notes (ADR 0049 §5) — one sentence on what the command will
@@ -301,11 +314,17 @@ export const zh = {
   // A heredoc body folded out of the command well (the content is in the
   // diff below) — 2026-08-17.
   "approval.heredocFolded": "    ⋯ 已折叠 {n} 行，内容见下方差异 ⋯",
-  // Workspace trust (ADR 0064): the button, and the one-line scope above it.
-  "approval.trustWorkspace": "信任此工作区",
-  "approval.trustNote":
-    "选择「信任此工作区」后，工作区内的文件修改、目录创建、非破坏性 git 操作与工作区脚本的执行将不再请求确认；网络访问、破坏性操作及工作区之外的操作仍会请求确认。可在设备卡片菜单中撤销。",
+  // Automatic review (ADR 0075, which replaced workspace trust): the button,
+  // and the one-line scope above it.
+  "approval.autoReviewEnable": "开启自动审核",
+  "approval.autoReviewNote":
+    "开启后，此工作区里撤销能还原的文件写入直接执行，其余操作先由审核模型对照你的要求放行或拒绝；它判断不了的仍会请你确认。可在设备卡片菜单中关闭。",
   "composer.placeholder": "给黑塔发消息…",
+  "composer.predictionAria": "建议的下一句，按 Tab 填入",
+  "composer.quote.remove": "移除这条引用",
+  "quote.header": "引用",
+  "quote.truncated": "……（另有 {n} 行未引用）",
+  "composer.quote.placeholder": "讲讲这段…",
   "composer.aria": "消息输入框",
   "composer.send": "发送消息",
   "composer.stop": "打断当前回合",
@@ -353,8 +372,11 @@ export const zh = {
   "composer.hold.discard": "撤回",
   // 继续 (ADR 0071 §1.4): 板砖's last run was interrupted — the app exited
   // under it, or the user pressed Stop — and can be continued where it stood.
-  // @-file mentions (ADR 0072 §2): the matching workspace files.
-  "composer.mentions.aria": "工作区文件",
+  // @ mentions (ADR 0072 §2): @板砖 first while the query can still become
+  // it, then the matching workspace files.
+  "composer.mentions.aria": "提及",
+  "composer.mentions.brick": "委派给差分协处理器",
+  "composer.mentions.files": "工作区文件",
   "composer.resume.text": "板砖的上一次运行已中断。",
   "composer.resume.action": "继续",
   "composer.resume.aria": "继续被中断的运行",
@@ -378,6 +400,28 @@ export const zh = {
   "workspace.copyFailed": "复制失败",
   "workspace.editsNotReverted": "改动的文件未撤销",
   "workspace.rewindFailed": "撤回失败",
+  "workspace.undoEdits": "撤销改动",
+  "workspace.editsUndone": "改动已撤销",
+  "workspace.editsUndoneLeftAlone": "改动已撤销；以下文件未还原：{files}",
+  "workspace.undoFailed": "撤销失败",
+  "workspace.listJoin": "、",
+  "activity.thinking": "思考中…",
+  "activity.undo.chip": "撤销",
+  "activity.undo.chipTitle": "撤销本轮板砖的文件改动",
+  "activity.undo.chipDone": "已撤销",
+  "activity.undo.summary": "本轮改动已撤销",
+  "activity.undo.count.restored": "还原 {n} 个文件",
+  "activity.undo.count.deleted": "删除 {n} 个文件",
+  "activity.undo.count.left": "{n} 个文件未还原",
+  "activity.undo.result.restored": "已还原",
+  "activity.undo.result.deleted": "已删除（本轮新建）",
+  "activity.undo.result.unchanged": "无需还原",
+  "activity.undo.result.changed_since": "此后已修改，未还原",
+  "activity.undo.result.not_kept": "无原内容备份，未还原",
+  "activity.undo.result.outside_workspace": "不在工作区内，未还原",
+  "activity.undo.result.failed": "写回失败，未还原",
+  "activity.undo.commands": "由命令修改，未还原",
+  "activity.undo.commandsUnknown": "本轮执行过命令，其改动（如有）未还原",
   "workspace.processing": "处理中…",
   "workspace.took": "用时",
   "workspace.recapping": "终端正在归整历史消息…",
@@ -484,6 +528,11 @@ export const zh = {
   "viewer.renderFailed": "无法渲染该文件——用系统应用打开查看",
   "viewer.showSource": "查看源码",
   "viewer.showRendered": "查看渲染",
+  "viewer.piece.turnOn": "开启切块引用",
+  "viewer.piece.turnOff": "关闭切块引用",
+  "viewer.piece.selected": "已选 {n} 块",
+  "viewer.piece.quote": "引用",
+  "viewer.piece.clear": "取消选择",
   "viewer.rendering": "正在渲染…",
   "viewer.diagramFailed": "图表未能渲染，下面是它的源码",
   "viewer.imageFit": "适应面板",
@@ -519,7 +568,9 @@ export const zh = {
   "viewer.log.noMatch": "没有匹配的提交",
   // 操作轨迹 rail card (2026-08-17; phases and the live pane, ADR 0073).
   "trace.card.title": "操作轨迹",
+  "trace.card.stepOne": "1 步",
   "trace.card.steps": "{n} 步",
+  "trace.card.fileOne": "1 文件",
   "trace.card.files": "{n} 文件",
   "trace.phase.explore": "探索",
   "trace.phase.modify": "修改",
@@ -645,16 +696,20 @@ export const zh = {
   "card.setWorkspace": "设置工作区…",
   "card.resetDefault": "恢复默认",
   "card.workspaceSetError": "无法设置工作区",
-  "card.rules": "已记住的命令",
-  "card.rulesEmpty": "暂无已记住的命令",
-  "card.rulesRemove": "删除规则 {rule}",
-  // Workspace trust (ADR 0064) — the row in the device card's menu.
-  "card.trust": "工作区信任",
-  "card.trustOn": "已信任：工作区内的写入、git 操作与脚本执行不再请求确认",
-  "card.trustOnDefault": "沙盒工作区，默认信任",
-  "card.trustOff": "逐项确认",
-  "card.trustEnable": "信任此工作区",
-  "card.trustDisable": "改为逐项确认",
+  // The menu's path (owner 2026-10-08): it opens the folder, and the icon
+  // beside it copies the path.
+  "card.openFolder": "打开工作区文件夹",
+  "card.openFolderError": "无法打开工作区文件夹",
+  "card.copyPath": "复制路径",
+  "card.pathCopied": "已复制",
+  "card.copyFailed": "复制失败",
+  // ADR 0075: the automatic review of approval requests — the row in the
+  // device card's menu (it replaced workspace trust, 2026-10-10).
+  "card.autoReview": "自动审核",
+  "card.autoReviewOn": "开启",
+  "card.autoReviewOff": "关闭",
+  "card.autoReviewEnable": "开启自动审核",
+  "card.autoReviewDisable": "关闭自动审核",
   "card.deviceInfoAria": "设备卡片信息",
   "card.deviceInfo":
     "设备卡片代表板砖（差分协处理器）——黑塔的编码执行后端。光环颜色与呼吸节奏反映后端当前状态（空闲、读取、写入、运行、等待批准等）。",

@@ -33,7 +33,6 @@ describe("estimate memoization (2026-09-03)", () => {
   it("the frame's invariant part is memoized per frame object; only the state trailer is walked per call", () => {
     const frame = {
       backendSystem: "x".repeat(400),
-      scopedRepoInstructions: "",
       scopedMemory: "",
       toolSchemas: [],
     };

@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -122,6 +125,97 @@ d("bash tool (real bash)", () => {
     await ctx.bg.stopAll();
   });
 
+  it("says whether the command was of a class that changes nothing — what undo leaves out of its note (ADR 0074 §2)", async () => {
+    ws = await mkTmpWorkspace({ "a.txt": "x\n" });
+    const ctx = ctxFor(ws.root);
+    const tool = bashTool({ bashPath: BASH as string });
+    const readOnly = async (command: string, id: string) =>
+      (
+        (await tool.run(call(command, id), ctx, noopProgress)).data as
+          | RunCommandData
+          | undefined
+      )?.readOnly;
+    expect(await readOnly("cat a.txt", "c1")).toBe(true);
+    expect(await readOnly("git status", "c2")).toBe(true);
+    expect(await readOnly("mkdir made-here", "c3")).toBe(false);
+    await ctx.bg.stopAll();
+  });
+
+  it("a redirected write is captured for undo, named in the result, and a command that is nothing else says so (ADR 0074 amendment, 2026-10-08)", async () => {
+    // 板砖 on this contract writes files with `cat > f <<'EOF'` and
+    // `printf … > f`, never through an editor: undo saw none of it, so the
+    // 撤销 chip never came.
+    ws = await mkTmpWorkspace({ "notes.md": "one\n" });
+    const captured: { path: string; before: Buffer | null; after: string }[] =
+      [];
+    const ctx = {
+      ...ctxFor(ws.root),
+      undo: {
+        captureWrite: async (w: {
+          path: string;
+          before: Buffer | null;
+          after: string;
+        }) => {
+          captured.push(w);
+        },
+      },
+    };
+    const tool = bashTool({ bashPath: BASH as string });
+    const run = async (command: string, id: string) =>
+      (await tool.run(call(command, id), ctx, noopProgress))
+        .data as RunCommandData;
+    const sha = (t: string) => createHash("sha256").update(t).digest("hex");
+
+    const over = await run("cat > notes.md <<'EOF'\nONE\nEOF", "c1");
+    expect(over.redirectWrites).toEqual([
+      { relPath: "notes.md", created: false, added: 1, removed: 1 },
+    ]);
+    expect(over.writesAccounted).toBe(true);
+    expect(captured).toEqual([
+      {
+        path: realpathSync(join(ws.root, "notes.md")),
+        before: Buffer.from("one\n"),
+        after: sha("ONE\n"),
+      },
+    ]);
+
+    const made = await run(
+      "mkdir -p src && cat > src/new.mjs <<'EOF'\nexport const n = 1;\nEOF",
+      "c2",
+    );
+    expect(made.redirectWrites).toEqual([
+      { relPath: "src/new.mjs", created: true, added: 1, removed: 0 },
+    ]);
+    expect(made.writesAccounted).toBe(true);
+    expect(captured[1]?.before).toBeNull();
+    expect(readFileSync(join(ws.root, "src", "new.mjs"), "utf8")).toBe(
+      "export const n = 1;\n",
+    );
+
+    // Something else that writes rides along: the write is still captured,
+    // but the command is not only that.
+    const mixed = await run("cat > a.txt <<'EOF'\nx\nEOF\ntouch b.txt", "c3");
+    expect(mixed.redirectWrites?.map((w) => w.relPath)).toEqual(["a.txt"]);
+    expect(mixed.writesAccounted).toBe(false);
+
+    // A write that never happened is no write.
+    const none = await run("false && cat > c.txt <<'EOF'\nx\nEOF", "c4");
+    expect(none.redirectWrites).toBeUndefined();
+    expect(captured).toHaveLength(3);
+
+    // The live check's line (2026-10-08): no heredoc at all.
+    const printed = await run("printf 'alpha\\nbeta\\n' > notes.md", "c5");
+    expect(printed.redirectWrites).toEqual([
+      { relPath: "notes.md", created: false, added: 2, removed: 1 },
+    ]);
+    expect(printed.writesAccounted).toBe(true);
+    expect(captured[3]?.before?.toString()).toBe("ONE\n");
+    expect(readFileSync(join(ws.root, "notes.md"), "utf8")).toBe(
+      "alpha\nbeta\n",
+    );
+    await ctx.bg.stopAll();
+  });
+
   it("non-zero exit is appended the trained way; state persists across calls in one brief", async () => {
     ws = await mkTmpWorkspace({});
     const ctx = ctxFor(ws.root);
@@ -166,8 +260,8 @@ d("bash tool (real bash)", () => {
     registerBashRule(engine, { bashPath: BASH });
     expect((await engine.check(call("cat a.txt"), ctx)).kind).toBe("allow");
     expect((await engine.check(call("echo x > a.txt"), ctx)).kind).toBe("ask");
-    // The ask carries the effective argv (approval cache scope + ADR 0030
-    // rules) when the line runs ONE program — even behind the model's
+    // The ask carries the effective argv (the approval cache scope) when
+    // the line runs ONE program — even behind the model's
     // `cd <workspace> &&` prefix — and nothing otherwise.
     const wsShell = new PersistentShell({
       bashPath: BASH as string,
@@ -192,8 +286,8 @@ d("bash tool (real bash)", () => {
       // … but the task cache can still scope it by its one program.
       expect(multi.request.programs).toEqual(["git"]);
     }
-    // An interpreter line still carries argv (ADR 0030 rules accept the
-    // script-pinned shape); the CACHE excludes it separately.
+    // An interpreter line still carries argv; the cache keys only its
+    // script-pinned shape.
     const interp = await engine.check(call("node scripts/x.mjs"), ctx);
     expect(interp.kind).toBe("ask");
     if (interp.kind === "ask") {
@@ -371,6 +465,46 @@ d("bash tool (real bash)", () => {
     await ctx.bg.stopAll();
   });
 
+  it("the rule marks a line undoable only when everything it changes is a file undo keeps, or a folder (ADR 0064 amendment 2026-10-10)", async () => {
+    ws = await mkTmpWorkspace({ "notes.md": "one\n" });
+    const ctx = ctxFor(ws.root);
+    const engine = new RulePermissionEngine({
+      ask: { present: async () => "allow" },
+    });
+    registerBashRule(engine, { bashPath: BASH, bus: ctx.bus });
+    const undoable = async (cmd: string): Promise<boolean | undefined> => {
+      const d = await engine.check(call(cmd), ctx);
+      expect(d.kind, cmd).toBe("ask");
+      return d.kind === "ask" ? d.request.undoable : undefined;
+    };
+    // The contract's file writes, and a folder made for them.
+    for (const cmd of [
+      "mkdir -p src && cat > src/server.mjs <<'EOF'\nx\nEOF",
+      "cat >> notes.md <<'EOF'\ntwo\nEOF",
+      "echo hi > notes.md",
+      "printf 'a\\nb\\n' > notes.md && cat notes.md",
+      "mkdir -p build/out",
+    ]) {
+      expect(await undoable(cmd), cmd).toBe(true);
+    }
+    // Everything trust let through that undo cannot put back, or that runs
+    // a program: the reviewer's now.
+    for (const cmd of [
+      "rm notes.md",
+      "cp notes.md b.md",
+      "mv notes.md b.md",
+      "sed -i 's/one/two/' notes.md",
+      "find src -name '*.md' -exec wc -l {} +",
+      "node gen.mjs > out.txt",
+      "cat > notes.md <<EOF\n$(rm b.txt)\nEOF",
+      "git add -A && git commit -m x",
+      "echo x > notes.md && rm notes.md",
+    ]) {
+      expect(await undoable(cmd), cmd).toBeUndefined();
+    }
+    await ctx.bg.stopAll();
+  });
+
   it("summarize: the record header drops the model's `cd <workspace> &&` in the SHELL's own spelling (MSYS `/tmp/…` under %TEMP%), which the loop cannot derive", async () => {
     ws = await mkTmpWorkspace({});
     const tool = bashTool({ bashPath: BASH as string });
@@ -409,5 +543,28 @@ d("bash tool (real bash)", () => {
     expect(r.ok).toBe(false);
     expect(r.modelText).toContain("Parameter `command` is required");
     expect(ctx.bg.getInternal(SHELL_BG_ID)).toBeUndefined();
+  });
+});
+
+describe("bash runsTests (ADR 0073 amendment 2026-10-08)", () => {
+  // No shell: the hook reads the input, never runs it.
+  const tool = bashTool({ bashPath: "bash" });
+
+  it("recognises a test run anywhere in the line — past the 80-char record header too", () => {
+    // The live lab's line: the test run sat beyond the header's cap, so the
+    // trace card read it as 修改 until its test row landed.
+    const long =
+      "mkdir -p /tmp/negcheck && cp test_hello.py /tmp/negcheck/ && cd /tmp/negcheck && sed -i 's/hello/bye/' hello.py && python -m unittest test_hello";
+    expect(long.length).toBeGreaterThan(80);
+    expect(tool.runsTests?.({ command: long })).toBe(true);
+    expect(tool.runsTests?.({ command: "cd sub && npm test" })).toBe(true);
+  });
+
+  it("says no to what the result's test row would not name", () => {
+    expect(tool.runsTests?.({ command: "ls -la && cat a.txt" })).toBe(false);
+    // Structural only: a script named like a test is just a script.
+    expect(tool.runsTests?.({ command: "node test-server.mjs" })).toBe(false);
+    expect(tool.runsTests?.({ nope: 1 })).toBe(false);
+    expect(tool.runsTests?.(null)).toBe(false);
   });
 });

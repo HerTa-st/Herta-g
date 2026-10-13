@@ -53,6 +53,8 @@ export const en = {
   "window.keepAwake": "Keep awake during runs",
   "window.keepAwakeDesc":
     "Keeps the computer from sleeping while Brick runs; the display may still turn off.",
+  "window.predictions": "Composer predictions",
+  "window.predictionsDesc": "The message box suggests what you might say next.",
   "window.minimize": "Minimize",
   "window.maximize": "Maximize",
   "window.restore": "Restore",
@@ -275,8 +277,6 @@ export const en = {
   "approval.title": "Permission request",
   "approval.allow": "Allow",
   "approval.alwaysAllow": "Allow for this task",
-  "approval.allowProject": "Allow in project",
-  "approval.projectRuleNote": "“Allow in project” remembers: {rule}",
   "approval.deny": "Deny",
   "approval.risk.read": "Read workspace",
   "approval.risk.write": "Write workspace",
@@ -308,6 +308,21 @@ export const en = {
     "Changes system settings or drives other apps — asked every time",
   "approval.reason.commandHarnessState":
     "May reach .herta, the application's own state, in a way the line does not show — asked every time",
+  "approval.reason.commandDownloadExec":
+    "Downloads a package and runs it — asked every time",
+  "approval.reason.commandOpaque":
+    "What this runs cannot be read from the command (encoded, computed, or fed on input) — asked every time",
+  "approval.reason.commandGitInternals":
+    "Changes .git internals (hooks or config) that git later runs as commands — asked every time",
+  "approval.reason.commandOutside":
+    "Touches a path outside the workspace — check the path",
+  "approval.reason.commandLocalExec":
+    "Runs a program from the workspace — review it and its arguments",
+  "approval.reason.commandInterpreterInline":
+    "Interpreter runs inline code the record never showed — review it",
+  "approval.reason.commandScript": "Runs a project script — review the script",
+  "approval.reason.commandEnv":
+    "Changes the environment or command paths later commands use — review it",
   "approval.alsoClasses": "Also: {list}",
   "approval.consequence.discardsUncommitted":
     "Note: discards uncommitted changes — they cannot be recovered.",
@@ -330,10 +345,15 @@ export const en = {
   "approval.reason.editFile": "Edits an existing file",
   "approval.reason.strReplaceEditor": "Writes a file",
   "approval.heredocFolded": "    ⋯ {n} lines folded — see the diff below ⋯",
-  "approval.trustWorkspace": "Trust this workspace",
-  "approval.trustNote":
-    "Once this workspace is trusted, file edits, directory creation, non-destructive git operations and workspace scripts within it no longer request confirmation; network access, destructive operations and anything outside the workspace still do. This can be revoked from the device card's menu.",
+  "approval.autoReviewEnable": "Turn on auto-review",
+  "approval.autoReviewNote":
+    "Once on, file writes in this workspace that undo can take back run directly, and a review model allows or denies everything else against what you asked; what it cannot judge still asks you. It can be turned off from the device card's menu.",
   "composer.placeholder": "Message Herta…",
+  "composer.quote.remove": "Remove this quote",
+  "quote.header": "Quote",
+  "quote.truncated": "… ({n} more line(s) not quoted)",
+  "composer.quote.placeholder": "Ask about this…",
+  "composer.predictionAria": "Suggested next message — press Tab to fill it in",
   "composer.aria": "Message composer",
   "composer.send": "Send message",
   "composer.stop": "Interrupt the current turn",
@@ -371,8 +391,11 @@ export const en = {
   "composer.hold.discard": "Withdraw",
   // 继续 (ADR 0071 §1.4): Brick's last run was interrupted — the app exited
   // under it, or the user pressed Stop — and can be continued where it stood.
-  // @-file mentions (ADR 0072 §2): the matching workspace files.
-  "composer.mentions.aria": "Workspace files",
+  // @ mentions (ADR 0072 §2): @brick first while the query can still become
+  // it, then the matching workspace files.
+  "composer.mentions.aria": "Mentions",
+  "composer.mentions.brick": "Delegate to the coprocessor",
+  "composer.mentions.files": "Workspace files",
   "composer.resume.text": "Brick's last run was interrupted.",
   "composer.resume.action": "Continue",
   "composer.resume.aria": "Continue the interrupted run",
@@ -396,6 +419,30 @@ export const en = {
   "workspace.copyFailed": "Copy failed",
   "workspace.editsNotReverted": "Edited files were not reverted",
   "workspace.rewindFailed": "Rewind failed",
+  "workspace.undoEdits": "Undo changes",
+  "workspace.editsUndone": "Changes undone",
+  "workspace.editsUndoneLeftAlone": "Changes undone; not restored: {files}",
+  "workspace.undoFailed": "Undo failed",
+  "workspace.listJoin": ", ",
+  "activity.thinking": "Thinking…",
+  "activity.undo.chip": "Undo",
+  "activity.undo.chipTitle": "Undo Brick's file changes from this turn",
+  "activity.undo.chipDone": "Undone",
+  "activity.undo.summary": "Changes from this turn undone",
+  "activity.undo.count.restored": "{n} restored",
+  "activity.undo.count.deleted": "{n} deleted",
+  "activity.undo.count.left": "{n} not restored",
+  "activity.undo.result.restored": "restored",
+  "activity.undo.result.deleted": "deleted (created this turn)",
+  "activity.undo.result.unchanged": "no restore needed",
+  "activity.undo.result.changed_since": "modified since; not restored",
+  "activity.undo.result.not_kept": "no backup kept; not restored",
+  "activity.undo.result.outside_workspace":
+    "outside the workspace; not restored",
+  "activity.undo.result.failed": "write failed; not restored",
+  "activity.undo.commands": "modified by a command; not restored",
+  "activity.undo.commandsUnknown":
+    "Commands ran this turn; any changes they made were not restored",
   "workspace.processing": "Working…",
   "workspace.took": "Took",
   "workspace.recapping": "Tidying conversation history…",
@@ -500,6 +547,11 @@ export const en = {
   "viewer.renderFailed":
     "Could not render this file — open with the default app",
   "viewer.showSource": "View source",
+  "viewer.piece.turnOn": "Turn on piece quoting",
+  "viewer.piece.turnOff": "Turn off piece quoting",
+  "viewer.piece.selected": "{n} selected",
+  "viewer.piece.quote": "Quote",
+  "viewer.piece.clear": "Clear selection",
   "viewer.showRendered": "View rendered",
   "viewer.rendering": "Rendering…",
   "viewer.diagramFailed": "The diagram did not render — its source is below",
@@ -535,7 +587,9 @@ export const en = {
   "viewer.log.search": "Search commit messages",
   "viewer.log.noMatch": "No matching commits",
   "trace.card.title": "Operation trace",
+  "trace.card.stepOne": "1 step",
   "trace.card.steps": "{n} steps",
+  "trace.card.fileOne": "1 file",
   "trace.card.files": "{n} files",
   "trace.phase.explore": "Explore",
   "trace.phase.modify": "Edit",
@@ -651,16 +705,16 @@ export const en = {
   "card.setWorkspace": "Set workspace…",
   "card.resetDefault": "Reset to default",
   "card.workspaceSetError": "could not set workspace",
-  "card.rules": "Remembered commands",
-  "card.rulesEmpty": "No commands remembered",
-  "card.rulesRemove": "Remove rule {rule}",
-  "card.trust": "Workspace trust",
-  "card.trustOn":
-    "Trusted: writes, git operations and scripts within it no longer request confirmation",
-  "card.trustOnDefault": "Sandbox workspace, trusted by default",
-  "card.trustOff": "Confirms each operation",
-  "card.trustEnable": "Trust this workspace",
-  "card.trustDisable": "Confirm each operation instead",
+  "card.openFolder": "Open the workspace folder",
+  "card.openFolderError": "could not open the workspace folder",
+  "card.copyPath": "Copy path",
+  "card.pathCopied": "Copied",
+  "card.copyFailed": "Copy failed",
+  "card.autoReview": "Auto-review",
+  "card.autoReviewOn": "On",
+  "card.autoReviewOff": "Off",
+  "card.autoReviewEnable": "Turn on auto-review",
+  "card.autoReviewDisable": "Turn off auto-review",
   "card.deviceInfoAria": "device card info",
   "card.deviceInfo":
     "The device card represents Brick (the differential coprocessor) — " +

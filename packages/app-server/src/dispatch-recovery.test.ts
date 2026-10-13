@@ -135,7 +135,6 @@ function start(ws: string, over: Partial<JournalStartEntry> = {}) {
     frame: {
       userMessages: [{ text: "fix a.ts" }],
       omittedUserMessages: 0,
-      scopedRepoInstructions: "",
       scopedMemory: "",
       recentDialogue: "",
       workingHistory: "",

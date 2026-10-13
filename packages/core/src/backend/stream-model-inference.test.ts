@@ -13,7 +13,6 @@ function fakeFrame(): ProviderPromptFrame {
   // BackendPromptFrame is fine for the helper — it's frame-shape agnostic.
   return {
     backendSystem: "x",
-    scopedRepoInstructions: "",
     scopedMemory: "",
     toolSchemas: [],
     messages: [],

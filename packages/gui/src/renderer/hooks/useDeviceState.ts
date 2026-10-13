@@ -1,5 +1,6 @@
 import type { TerminalRecord } from "@herta/app-server";
 import { useEffect } from "react";
+import { useBackendThinking } from "./useBackendThinking.js";
 import {
   useSessionScoped,
   useSessionScopedRef,
@@ -98,6 +99,7 @@ export function useDeviceState(): BanzhuanDeviceState {
       }),
       shallowEqualObjects,
     );
+  const thinking = useBackendThinking();
 
   // Session-scoped (audit 2026-07-24, M7 — the same class as the 回到底部 pill
   // surviving a delete). DeviceCard is mounted for the app's lifetime, so
@@ -122,6 +124,9 @@ export function useDeviceState(): BanzhuanDeviceState {
   }, [backendSucceededSeq, seenSucceeded, setFlashing, flashTimer]);
 
   if (overlay?.kind === "pending-permission") return "waitingApproval";
+  // Thinking between steps: the newest op would read as still under way
+  // (「执行命令中」 for a command long finished) — the coarse working state.
+  if (backendActive && thinking) return "delegated";
   if (backendActive) return fineWorkingState(record);
   if (backendError) return "failed";
   if (flashing) return "succeeded";

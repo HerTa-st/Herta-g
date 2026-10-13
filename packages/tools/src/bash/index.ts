@@ -15,10 +15,19 @@ import { LiveOutput } from "../run-command/live-output.js";
 import { writeRunLog } from "../run-command/logger.js";
 import { checkReaderArgvPaths } from "../run-command/reader-guard.js";
 import { redactSecrets } from "../run-command/redactor.js";
-import { detectTestRun } from "../run-command/test-detector.js";
+import { detectTestRun, isTestCommand } from "../run-command/test-detector.js";
 import { PersistentShell, SHELL_BG_ID } from "./persistent-shell.js";
+import {
+  readRedirectTargets,
+  settleRedirectTargets,
+  writesAccounted,
+} from "./redirect-writes.js";
 import { bashInputSchema, bashJsonSchema } from "./schema.js";
-import { peelReaderHead, tokenize } from "./shell-classifier.js";
+import {
+  classifyShellCommandDetailed,
+  peelReaderHead,
+  tokenize,
+} from "./shell-classifier.js";
 import { shellPathsFor } from "./shell-paths.js";
 
 export { findBash } from "./find-bash.js";
@@ -39,6 +48,7 @@ export type { BashInput } from "./schema.js";
 export {
   classifyShellCommand,
   classifyShellCommandDetailed,
+  stripShellComments,
 } from "./shell-classifier.js";
 export {
   makeMsysPaths,
@@ -114,6 +124,17 @@ export function shellWorkspaceHint(
  * harness gets RunCommandData (exit, duration, tail, testRun) so the record
  * shows the same rows a run_command would.
  */
+/** The first part of a shell line that IS a test runner (`cd x && npm
+ *  test` → `npm test`), or null. One walk for both readers — the result's
+ *  test row and `runsTests` at dispatch — so the two cannot disagree. */
+function testSegment(command: string): string[] | null {
+  for (const segment of splitShellSegments(command)) {
+    const { words } = tokenize(segment);
+    if (words.length > 0 && isTestCommand(words)) return words;
+  }
+  return null;
+}
+
 export function bashTool(opts: BashToolOpts): HertaTool {
   return {
     name: "bash",
@@ -137,6 +158,13 @@ export function bashTool(opts: BashToolOpts): HertaTool {
       if (typeof command !== "string" || command.length === 0) return undefined;
       const shellForm = shellPathsFor(opts.bashPath).toShell(ctx.workspaceRoot);
       return summarizeShellCommand(command, ctx.workspaceRoot, [shellForm]);
+    },
+    runsTests(input: unknown): boolean {
+      const command =
+        typeof input === "object" && input !== null
+          ? (input as { command?: unknown }).command
+          : undefined;
+      return typeof command === "string" && testSegment(command) !== null;
     },
     async run(
       call: ToolCallRequest,
@@ -188,6 +216,25 @@ export function bashTool(opts: BashToolOpts): HertaTool {
         ctx.bg.register(shell);
       }
       const sh = shell as PersistentShell;
+      // The rule's own verdict, taken again before the line runs (its `cd`
+      // would move the cwd the rule read): `allow` is a class that changes
+      // nothing a user would take back, and undo leaves it out of what it
+      // names (ADR 0074 §2).
+      const classifyOpts = {
+        workspaceRoot: ctx.workspaceRoot,
+        paths: shellPathsFor(opts.bashPath),
+        cwd: sh.cwd,
+      };
+      const readOnly =
+        classifyShellCommandDetailed(command, classifyOpts).verdict.kind ===
+        "allow";
+      // What the line's redirections are about to overwrite, read while it
+      // is still there (ADR 0074 amendment, 2026-10-08): this contract
+      // writes its files with `cat > f <<'EOF'` and `printf … > f`, and undo
+      // saw none of them.
+      const redirectTargets = readOnly
+        ? []
+        : await readRedirectTargets(command, classifyOpts);
 
       // Execution-time reader realpath backstop (TOCTOU, mirrors run_command).
       // Peeled exactly as the RULE peels (`rule.ts`): the rule learned on
@@ -228,6 +275,12 @@ export function bashTool(opts: BashToolOpts): HertaTool {
           : {}),
       });
       live?.flush();
+      // What they became — before an abort is answered too: a write that
+      // landed is on disk whether or not the run goes on.
+      const redirectWrites = await settleRedirectTargets(
+        redirectTargets,
+        ctx.undo,
+      );
       if (ctx.signal.aborted) {
         const err = new Error("aborted");
         (err as Error & { name: string }).name = "AbortError";
@@ -303,22 +356,29 @@ export function bashTool(opts: BashToolOpts): HertaTool {
         stderrBytes: 0,
         logPath,
         timedOut: r.timedOut,
+        readOnly,
+        ...(redirectWrites.length > 0
+          ? {
+              redirectWrites,
+              writesAccounted: writesAccounted(
+                command,
+                classifyOpts,
+                redirectTargets,
+              ),
+            }
+          : {}),
       };
       // Test evidence: the first segment that IS a test runner names the run
       // (`cd x && npm test` → npm test); the shell's exit is the pipeline's.
-      for (const segment of splitShellSegments(command)) {
-        const { words } = tokenize(segment);
-        if (words.length === 0) continue;
+      const testWords = testSegment(command);
+      if (testWords !== null) {
         const testRun = detectTestRun({
-          argv: words,
+          argv: testWords,
           exitCode: r.exitCode,
           durationMs: r.durationMs,
           timedOut: r.timedOut,
         });
-        if (testRun !== null) {
-          data.testRun = testRun;
-          break;
-        }
+        if (testRun !== null) data.testRun = testRun;
       }
 
       if (r.timedOut) {

@@ -1884,27 +1884,200 @@ describe("Composer — @-file mentions (ADR 0072 §2)", () => {
     expect(mock.calls.submitText).toEqual(["fix @parse"]);
   });
 
-  it("leaves @板砖 / @brick completion alone while the query can still become it", async () => {
+  it("a bare @ opens the list at once: @板砖 first and highlighted, then the files under their label (owner 2026-10-08)", async () => {
+    // It used to wait for a query past what could still be @板砖, so a bare
+    // @ showed the ghost alone and the files went unnoticed.
+    const { input, type, options, mock } = mentionComposer();
+    type("整理 @");
+    await waitFor(() =>
+      expect(options()).toEqual([
+        "@板砖Delegate to the coprocessor",
+        "README.md",
+        "parser.tssrc",
+        "parsers.mddocs",
+        "build.ts",
+      ]),
+    );
+    expect(
+      document.querySelector(".composer-mentions__section")?.textContent,
+    ).toBe("Workspace files");
+    expect(
+      document.querySelector(".composer-mentions__item.is-active")?.textContent,
+    ).toBe("@板砖Delegate to the coprocessor");
+    // The ghost previews the highlighted token.
+    expect(document.querySelector(".composer-ghost")?.textContent).toBe("板砖");
+    // Enter takes the token — as Tab on the ghost always has — and sends
+    // nothing.
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("整理 @板砖");
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    expect(mock.calls.submitText).toHaveLength(0);
+  });
+
+  it("a highlight moved onto a file hides the ghost, and Tab takes the file", async () => {
+    const { input, type, options } = mentionComposer();
+    type("@");
+    await waitFor(() => expect(options().length).toBe(5));
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(document.querySelector(".composer-ghost")).toBeNull();
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input.value).toBe("README.md ");
+  });
+
+  it("Esc at a bare @ dismisses the list and the ghost together", async () => {
+    const { input, type, options } = mentionComposer();
+    type("hi @");
+    await waitFor(() => expect(options().length).toBe(5));
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    expect(document.querySelector(".composer-ghost")).toBeNull();
+    // What a real key-up re-reports changes nothing.
+    fireEvent.select(input);
+    expect(document.querySelector(".composer-mentions")).toBeNull();
+    expect(document.querySelector(".composer-ghost")).toBeNull();
+    expect(input.value).toBe("hi @");
+  });
+
+  it("a bare @ offers the files being worked on first, in the workspace's own spelling", async () => {
+    const { type, options, mock } = mentionComposer();
+    act(() =>
+      mock.emitRepo({
+        kind: "repo",
+        workspace: "/r",
+        repo: {
+          root: "/repo",
+          // The workspace is a folder inside the repository: git's paths
+          // are rebased onto it, and one outside it is not offered.
+          prefix: "app/",
+          gitDir: null,
+          branch: "main",
+          detached: false,
+          headShort: "a1b2c3d",
+          upstream: null,
+          upstreamGone: false,
+          ahead: 0,
+          behind: 0,
+          defaultBranch: null,
+          inProgress: null,
+          conflicted: [],
+          dirty: [
+            { x: " ", y: "M", path: "app/build.ts" },
+            { x: " ", y: "M", path: "lib/elsewhere.ts" },
+          ],
+          dirtyTotal: 2,
+          recentSubjects: [],
+          recentCommits: [],
+        },
+      }),
+    );
+    type("@");
+    await waitFor(() => expect(options().length).toBe(5));
+    expect(options().slice(1, 3)).toEqual(["build.ts", "README.md"]);
+  });
+
+  it("a query that can still be @板砖 / @brick offers the token first, then its files; typed out, nothing", async () => {
     const zh = mentionComposer("zh");
     zh.type("@板");
-    await Promise.resolve();
+    await waitFor(() =>
+      expect(zh.options()).toEqual(["@板砖Delegate to the coprocessor"]),
+    );
+    fireEvent.keyDown(zh.input, { key: "Tab" });
+    expect(zh.input.value).toBe("@板砖");
+    zh.type("@板砖");
     expect(document.querySelector(".composer-mentions")).toBeNull();
     zh.unmount();
 
     const en = mentionComposer("en");
     en.type("@b");
-    await Promise.resolve();
-    expect(document.querySelector(".composer-mentions")).toBeNull();
-    // "bu" can no longer be @brick: files now.
+    await waitFor(() =>
+      expect(en.options()).toEqual([
+        "@brickDelegate to the coprocessor",
+        "build.ts",
+      ]),
+    );
+    // "bu" can no longer be @brick: files only.
     en.type("@bu");
     await waitFor(() => expect(en.options()).toEqual(["build.ts"]));
   });
 
-  it("without a file listing on the bridge, @ completes only @板砖", async () => {
-    const { type, mock } = mentionComposer("zh", { listing: false });
+  it("an IME's pre-edit keeps its keys: the arrows walk its candidates, not the list", async () => {
+    const { input, type, options } = mentionComposer();
+    type("@");
+    await waitFor(() => expect(options().length).toBe(5));
+    fireEvent.keyDown(input, { key: "ArrowDown", keyCode: 229 });
+    expect(
+      document.querySelector(".composer-mentions__item.is-active")?.textContent,
+    ).toBe("@板砖Delegate to the coprocessor");
+  });
+
+  it("without a file listing on the bridge, @ offers @板砖 alone", async () => {
+    const { type, options, mock } = mentionComposer("zh", { listing: false });
+    type("@");
+    expect(options()).toEqual(["@板砖Delegate to the coprocessor"]);
     type("@src");
     await Promise.resolve();
     expect(document.querySelector(".composer-mentions")).toBeNull();
     expect(mock.calls.listWorkspaceFiles).toBe(0);
+  });
+});
+
+describe("Composer — predictions (owner 2026-10-10)", () => {
+  function open(
+    mock: ReturnType<typeof createMockHertaBridge>,
+    lang: "zh" | "en" = "en",
+  ): void {
+    act(() =>
+      mock.emitReset({
+        sessionId: "s-pred",
+        workspaceRoot: "/mock",
+        record: [],
+        overlay: null,
+        backendWorkspace: "/mock",
+        backendWorkspaceIsDefault: true,
+        lang,
+      }),
+    );
+  }
+  const predict = (
+    mock: ReturnType<typeof createMockHertaBridge>,
+    text: string,
+  ): void =>
+    act(() => mock.emitTurn({ kind: "predicted", turnId: "t1", text }));
+
+  it("shows the suggestion in the empty box; Tab takes it in and sends nothing", () => {
+    const { mock } = renderComposer();
+    open(mock);
+    predict(mock, "@板砖 add an undo test");
+    // An EN composer spells the trigger its own way.
+    const input = screen.getByPlaceholderText(
+      "@brick add an undo test",
+    ) as HTMLTextAreaElement;
+    expect(document.querySelector(".composer-prediction-key")).not.toBeNull();
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input.value).toBe("@brick add an undo test");
+    expect(mock.calls.submitText).toEqual([]);
+    // With text in the box, the suggestion and its key are gone.
+    expect(document.querySelector(".composer-prediction-key")).toBeNull();
+  });
+
+  it("typing replaces it, and Tab then does nothing of the kind", () => {
+    const { mock } = renderComposer();
+    open(mock, "zh");
+    predict(mock, "再跑一遍测试");
+    const input = screen.getByPlaceholderText(
+      "再跑一遍测试",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "不用了" } });
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input.value).toBe("不用了");
+  });
+
+  it("a new turn clears it", () => {
+    const { mock } = renderComposer();
+    open(mock);
+    predict(mock, "run the tests again");
+    act(() => mock.emitTurn({ kind: "started", turnId: "t2" }));
+    act(() => mock.emitTurn({ kind: "finished", turnId: "t2" }));
+    expect(screen.getByPlaceholderText("Message Herta…")).toBeInTheDocument();
   });
 });

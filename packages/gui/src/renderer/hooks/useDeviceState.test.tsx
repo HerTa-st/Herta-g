@@ -7,6 +7,7 @@ import {
   type MockHertaBridge,
 } from "../ipc/mock-bridge.js";
 import { renderWithSession } from "../testing/renderWithSession.js";
+import { THINKING_AFTER_MS } from "./useBackendThinking.js";
 import { useDeviceState } from "./useDeviceState.js";
 
 function setup(): { mock: MockHertaBridge; result: { current: string } } {
@@ -329,5 +330,42 @@ describe("useDeviceState — lifecycle boundaries (audit 2026-07-24)", () => {
     expect(stateOf()).toBe("idle");
     act(() => vi.advanceTimersByTime(2000));
     expect(stateOf()).toBe("idle");
+  });
+});
+
+describe("useDeviceState: thinking between steps (owner 2026-10-12)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const running = {
+    kind: "block" as const,
+    blockId: "r1",
+    block: {
+      kind: "system" as const,
+      label: "差分协处理器" as const,
+      body: "Running git status",
+      digest: {
+        kind: "op" as const,
+        verb: "Running" as const,
+        arg: "git status",
+      },
+    },
+  };
+
+  it("a finished command no longer reads as running once 板砖 has been quiet a while", () => {
+    vi.useFakeTimers();
+    const { mock, result } = setup();
+    act(() => mock.emitAgent(backendStart));
+    act(() => mock.emitRecord(running));
+    expect(result.current).toBe("runningCommand");
+    act(() =>
+      mock.emitLive({ views: [], startedOps: 1, quietSince: Date.now() }),
+    );
+    // A quick hand-off between steps does not flicker.
+    expect(result.current).toBe("runningCommand");
+    act(() => vi.advanceTimersByTime(THINKING_AFTER_MS));
+    expect(result.current).toBe("delegated");
+    // The next call begins: the step it is on shows again.
+    act(() => mock.emitLive({ views: [], startedOps: 1 }));
+    expect(result.current).toBe("runningCommand");
   });
 });

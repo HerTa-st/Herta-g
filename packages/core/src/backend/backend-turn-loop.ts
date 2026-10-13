@@ -3,7 +3,7 @@ import { abortError, errorMessage, isAbortError } from "../errors.js";
 import type { EventBus } from "../event-bus.js";
 import { type FindingsLedger, MAX_FINDINGS } from "../findings-ledger.js";
 import type { MemoryManager } from "../memory-manager.js";
-import type { PermissionEngine } from "../permission-engine.js";
+import type { AskAnswer, PermissionEngine } from "../permission-engine.js";
 import type { ReadLedger } from "../read-ledger.js";
 import type { ToolRegistry } from "../tool-registry.js";
 import type { TranscriptStore } from "../transcript-store.js";
@@ -12,6 +12,7 @@ import type { AgentEvent, TurnSummary } from "../types/events.js";
 import type { ProviderAdapter } from "../types/provider.js";
 import type {
   ToolCallRequest,
+  ToolCallUndo,
   ToolContext,
   ToolResult,
 } from "../types/tool.js";
@@ -85,6 +86,12 @@ export interface BackendTurnDeps {
    */
   journal?: DispatchJournal;
   /**
+   * This segment's view of the undo store (ADR 0074 §1): every tool gets it,
+   * and the editors leave what they replace there. Absent (the CLI, tests):
+   * nothing is kept.
+   */
+  undo?: ToolCallUndo;
+  /**
    * The working state the harness keeps (working-state.ts), read when old
    * iterations have been dropped from the transcript. Absent (tests, the
    * CLI's bare runtime): the trim marker's count is all the model gets.
@@ -120,11 +127,6 @@ export interface BackendTurnHandle {
   userMessages: ReadonlyArray<{ text: string }>;
   /** Elided older user messages (ADR 0025 slice 2); defaults to 0. */
   omittedUserMessages?: number;
-  /**
-   * Optional scoped repo instructions selected by the actor for this dispatch.
-   * Threaded into `BackendPromptFrame.scopedRepoInstructions`. Defaults to `""`.
-   */
-  scopedRepoInstructions?: string;
   /**
    * The rendered project memory for this dispatch — `CodingAgentRuntime`
    * recalls and renders it at brief start (ADR 0060). Threaded into
@@ -162,6 +164,11 @@ type GateOutcome =
 
 const PERMISSION_DENIED_SUGGESTION =
   "Choose a read-only inspection path or ask the user.";
+
+/** After a reviewer's denial (ADR 0075): what Codex and Claude Code both
+ *  tell their agent with theirs. */
+const REVIEWER_DENIED_SUGGESTION =
+  "Do not reach the same outcome another way. Take an approach the user's request covers, or ask the user.";
 
 /** The model-facing hint for a rule-deny, by code. `invalid_input` surfaces
  *  through the same deny path as real permission denials (rules validate
@@ -255,7 +262,7 @@ export async function* runBackendTurnLoop(
         type: "permission.requested",
         request: decision.request,
       });
-      let resolved: "allow" | "deny";
+      let resolved: AskAnswer;
       try {
         resolved = await decision.decision;
       } catch (err) {
@@ -276,8 +283,26 @@ export async function* runBackendTurnLoop(
       yield* emit({
         type: "permission.resolved",
         id: decision.request.id,
-        decision: resolved,
+        decision: resolved === "allow" ? "allow" : "deny",
       });
+      // A reviewer's denial (ADR 0075): its reason, and the instruction both
+      // reference agents give with theirs — the outcome, not the command, is
+      // what was refused.
+      if (typeof resolved === "object") {
+        return {
+          kind: "result",
+          result: {
+            ok: false,
+            error: {
+              code: "permission_denied",
+              message: `An automatic review denied ${call.tool}: ${resolved.reason}`,
+              retryable: false,
+            },
+            suggestion: REVIEWER_DENIED_SUGGESTION,
+            summary: "denied",
+          },
+        };
+      }
       if (resolved === "deny") {
         return {
           kind: "result",
@@ -333,7 +358,6 @@ export async function* runBackendTurnLoop(
       brief,
       userMessages: handle.userMessages,
       omittedUserMessages: handle.omittedUserMessages ?? 0,
-      scopedRepoInstructions: handle.scopedRepoInstructions ?? "",
       scopedMemory: handle.scopedMemory ?? "",
       messages: [],
       recentDialogue: handle.recentDialogue,
@@ -541,6 +565,7 @@ export async function* runBackendTurnLoop(
         bus: deps.bus,
         memory: deps.memory,
         ...(deps.findings !== undefined ? { findings: deps.findings } : {}),
+        ...(deps.undo !== undefined ? { undo: deps.undo } : {}),
       };
       // Each call records through its own view of the journal (ADR 0071
       // §1.1): a writer's `write`, a command's `spawn`, stamped with the call.
@@ -653,6 +678,7 @@ export async function* runBackendTurnLoop(
               id: call.id,
               tool: call.tool,
               inputSummary: headerFor(deps, call),
+              ...runsTestsFor(deps, call),
             });
           }
           // A read-only batch: recorded as dispatched, not synced — a read
@@ -748,6 +774,7 @@ export async function* runBackendTurnLoop(
           id: call.id,
           tool: call.tool,
           inputSummary: headerFor(deps, call),
+          ...runsTestsFor(deps, call),
         });
 
         // Recorded as dispatched BEFORE it runs (ADR 0071 §1.1): durably for
@@ -1001,6 +1028,22 @@ const SUMMARY_CAP = 80;
  * `summarizeInput`. Same single-line cap either way; a hook that throws or
  * returns nothing is simply not consulted for that call.
  */
+/** The tool's own test-run recognition, spread into `tool.call.started`
+ *  (ADR 0073 amendment 2026-10-08): `runsTests: true`, or nothing — an absent
+ *  hook, a "no" and a throw alike. */
+function runsTestsFor(
+  deps: BackendTurnDeps,
+  call: ToolCallRequest,
+): { runsTests?: true } {
+  const tool = deps.tools.get(call.tool);
+  if (tool?.runsTests === undefined) return {};
+  try {
+    return tool.runsTests(call.input) ? { runsTests: true } : {};
+  } catch {
+    return {};
+  }
+}
+
 function headerFor(deps: BackendTurnDeps, call: ToolCallRequest): string {
   const tool = deps.tools.get(call.tool);
   if (tool?.summarize !== undefined) {

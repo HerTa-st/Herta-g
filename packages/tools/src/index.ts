@@ -48,6 +48,7 @@ export {
   type ShellRunResult,
   shellPathsFor,
   shellWorkspaceHint,
+  stripShellComments,
 } from "./bash/index.js";
 export {
   listMsysProcesses,
@@ -154,7 +155,7 @@ export type { MemorySaveInput } from "./memory-save/schema.js";
 // it — the two halves living in different packages is exactly why that needs
 // a test rather than a shared assumption.
 export type { ResolveSafePathOpts, SafePathResult } from "./path-safety.js";
-export { resolveSafePath } from "./path-safety.js";
+export { namesHertaState, resolveSafePath } from "./path-safety.js";
 export {
   killProcesses,
   listProcesses,
@@ -188,6 +189,14 @@ export {
 // the same class of untrusted text reaching the record and a provider — one
 // definition of "secret-shaped", or none.
 export { redactSecrets } from "./run-command/redactor.js";
+// ADR 0075's reviewer: the risk a command carries whatever the model says.
+export {
+  bodyUnreadable,
+  maxReviewRisk,
+  type ReviewFloor,
+  type ReviewRisk,
+  reviewRiskFloor,
+} from "./run-command/review-floor.js";
 export type { RunCommandInput } from "./run-command/schema.js";
 export type { SearchMatch, SearchTextData } from "./search-text/index.js";
 export {
@@ -328,6 +337,9 @@ export function createMinimalTools(opts: MinimalToolsOpts): HertaTool[] {
       ...(opts.lang !== undefined ? { lang: opts.lang } : {}),
     }),
     showExcerptTool({ mapPath }),
+    // Project memory on the default contract too (ADR 0077): ADR 0060's
+    // recall had nothing to read on a default install.
+    memorySaveTool(),
     ...(opts.digest !== false
       ? [
           digestDocumentTool({

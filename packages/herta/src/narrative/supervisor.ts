@@ -230,7 +230,6 @@ export function buildSupervisorPrompt(
   const prompt = `${systemMessage}${USER_MESSAGE_SEPARATOR}${userMessage}`;
   const frame: ActorPromptFrame = {
     stableSystem: systemMessage,
-    repoInstructions: "",
     memoryContext: "",
     retrievedLore: "",
     messages: [
@@ -316,7 +315,6 @@ export function buildTriggerRecheckPrompt(
   const prompt = `${systemMessage}${USER_MESSAGE_SEPARATOR}${userMessage}`;
   const frame: ActorPromptFrame = {
     stableSystem: systemMessage,
-    repoInstructions: "",
     memoryContext: "",
     retrievedLore: "",
     messages: [
@@ -351,7 +349,6 @@ export function buildMissingDispatchPrompt(
   const prompt = `${systemMessage}${USER_MESSAGE_SEPARATOR}${userMessage}`;
   const frame: ActorPromptFrame = {
     stableSystem: systemMessage,
-    repoInstructions: "",
     memoryContext: "",
     retrievedLore: "",
     messages: [
