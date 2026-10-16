@@ -6,6 +6,7 @@ import {
   foldedRunLine,
   foldedStepLines,
   receiptForHerta,
+  shownExcerptLine,
   systemRowForHerta,
 } from "./record-voice.js";
 
@@ -207,6 +208,10 @@ describe("板砖's other rows", () => {
       "没成，退出码 2\n输出：\nboom\n……（后面还有，没贴全）",
     );
     expect(read(result(0))).toBeNull();
+    // A line of its own opens with a capital in English.
+    expect(read(result(2, "boom"), "en")).toBe(
+      "Failed, exit code 2\nOutput:\nboom\n…(more, not shown)",
+    );
   });
 
   it("a test run, a change, a finding, a remembered fact, a failure, a background command", () => {
@@ -339,6 +344,15 @@ describe("folded lines: what was done, never how", () => {
       "运行 `git status`（退出码 128）",
     );
     expect(foldedRunLine(fail, "zh")).toBe("没成，退出码 128");
+    // In English the line opens with a capital; the same receipt after
+    // `Based on: ` keeps its lower case.
+    expect(foldedRunLine(fail, "en", "git status")).toBe(
+      "Ran `git status` (exit code 128)",
+    );
+    expect(foldedRunLine(fail, "en")).toBe("Failed, exit code 128");
+    expect(receiptForHerta("ran `git status` (exit 128, 0.10s)", "en")).toBe(
+      "ran `git status` (exit code 128)",
+    );
   });
 
   it("a failure folds to its cause in plain words, not the tool's message", () => {
@@ -382,6 +396,21 @@ describe("folded lines: what was done, never how", () => {
         "en",
       ),
     ).toBe("Searched /x/: 3 matches in 2 files (not at hand)");
+  });
+
+  it("an excerpt the marker in front of her shows folds to the read", () => {
+    const excerpt = (from: number, to: number) =>
+      row({ body: "", digest: { kind: "excerpt", path: "a.ts", from, to } });
+    expect(shownExcerptLine(excerpt(1, 2), "zh")).toBe("读 a.ts 第 1–2 行");
+    expect(shownExcerptLine(excerpt(5, 5), "zh")).toBe("读 a.ts 第 5 行");
+    expect(shownExcerptLine(excerpt(1, 2), "en")).toBe("Read a.ts lines 1–2");
+    expect(shownExcerptLine(excerpt(5, 5), "en")).toBe("Read a.ts line 5");
+    expect(
+      shownExcerptLine(
+        row({ body: "", digest: { kind: "op", verb: "Reading", arg: "a.ts" } }),
+        "zh",
+      ),
+    ).toBeNull();
   });
 
   it("a run with no outcome folds to its steps, a kind's consecutive ones on one line", () => {

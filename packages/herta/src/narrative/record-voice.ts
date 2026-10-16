@@ -35,6 +35,7 @@ type Texts = {
   readonly tests: Record<"passed" | "failed" | "skipped" | "not_run", string>;
   readonly change: (files: string, add?: number, del?: number) => string;
   readonly excerpt: (path: string, from: number, to: number) => string;
+  readonly readExcerpt: (path: string, from: number, to: number) => string;
   readonly finding: (claim: string, cites: readonly string[]) => string;
   readonly search: (pattern: string, matches: number, files: number) => string;
   readonly toolFail: (tool: string, message: string) => string;
@@ -99,6 +100,8 @@ const TEXTS: Record<PromptLang, Texts> = {
         : `改动 ${files}（+${add} −${del}）`,
     excerpt: (path, from, to) =>
       `摘录 ${path} ${from === to ? `第 ${from} 行` : `第 ${from}–${to} 行`}：`,
+    readExcerpt: (path, from, to) =>
+      `读 ${path} ${from === to ? `第 ${from} 行` : `第 ${from}–${to} 行`}`,
     finding: (claim, cites) =>
       `结论：${claim}${cites.length > 0 ? `（${cites.join("，")}）` : ""}`,
     search: (pattern, matches, files) =>
@@ -172,7 +175,7 @@ const TEXTS: Record<PromptLang, Texts> = {
     lines: (from, to) => (from === to ? `line ${from}` : `lines ${from}–${to}`),
     cite: (path, from, to) =>
       `${path} ${from === to ? `line ${from}` : `lines ${from}–${to}`}`,
-    exitCode: (code) => `failed, exit code ${code}`,
+    exitCode: (code) => `Failed, exit code ${code}`,
     output: "Output:",
     moreNotShown: "…(more, not shown)",
     remembered: "Remembered: ",
@@ -188,6 +191,8 @@ const TEXTS: Record<PromptLang, Texts> = {
         : `Changed ${files} (+${add} −${del})`,
     excerpt: (path, from, to) =>
       `Excerpt of ${path} ${from === to ? `line ${from}` : `lines ${from}–${to}`}:`,
+    readExcerpt: (path, from, to) =>
+      `Read ${path} ${from === to ? `line ${from}` : `lines ${from}–${to}`}`,
     finding: (claim, cites) =>
       `Finding: ${claim}${cites.length > 0 ? ` (${cites.join(", ")})` : ""}`,
     search: (pattern, matches, files) =>
@@ -560,8 +565,10 @@ export function foldedRunLine(
       }
       if (d.exitCode !== undefined) {
         if (d.exitCode === 0) return null;
+        // The receipt's own form, as a line of its own: `Ran …`, where
+        // `Based on: ran …` keeps it in lower case.
         return lastCommand !== undefined
-          ? t.ran(lastCommand, String(d.exitCode))
+          ? opening(t.ran(lastCommand, String(d.exitCode)))
           : t.exitCode(String(d.exitCode));
       }
       return firstLine(d.text.replace(/^↳ /u, ""));
@@ -632,6 +639,29 @@ export function foldedRunLine(
     default:
       return null;
   }
+}
+
+/** A phrase as the opening of a line: its first letter a capital. */
+function opening(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+/**
+ * An excerpt folded while its lines are still in front of her — the
+ * done-marker passed through in her verdict turn shows them
+ * (`compactRecordForPrompt`): the read, `读 a.ts 第 5–6 行`, never
+ * 「原文不在手边」 directly above the lines it says are not at hand. The lab
+ * found that pairing teaches her to recite what a fold says she cannot see
+ * (ADR 0079 §3). Null for any other row.
+ */
+export function shownExcerptLine(
+  block: SystemBlock,
+  lang: PromptLang,
+): string | null {
+  const d = block.digest;
+  return d?.kind === "excerpt"
+    ? TEXTS[lang].readExcerpt(d.path, d.from, d.to)
+    : null;
 }
 
 /**

@@ -6,7 +6,11 @@ import type {
 } from "@herta/core";
 import { COMPACTION_TEXT } from "./compaction-text.js";
 import type { PromptLang } from "./prompt-lang.js";
-import { foldedRunLine, foldedStepLines } from "./record-voice.js";
+import {
+  foldedRunLine,
+  foldedStepLines,
+  shownExcerptLine,
+} from "./record-voice.js";
 
 /**
  * Render a single system block into one digest line per the
@@ -191,6 +195,9 @@ function renderStructuredDigest(
 export function buildCompactionBody(
   blocks: readonly SystemBlock[],
   lang: PromptLang = "zh",
+  /** The done-marker passed through after this run in her verdict turn
+   *  (State 1): an excerpt whose lines it shows folds to the read. */
+  shownBy?: SystemBlock,
 ): string {
   // 1. Each row as a line of what was done (ADR 0079 §2); a failed command
   //    names the command its result row answers. Rows written before the
@@ -206,9 +213,11 @@ export function buildCompactionBody(
       block.markerSummary !== undefined ||
       block.role === "noop-marker";
     const line =
-      structured && block.digest?.kind !== "attachment"
-        ? foldedRunLine(block, lang, lastCommand)
-        : digestSystemBlock(block, lang);
+      shownBy !== undefined && markerShows(shownBy, block)
+        ? shownExcerptLine(block, lang)
+        : structured && block.digest?.kind !== "attachment"
+          ? foldedRunLine(block, lang, lastCommand)
+          : digestSystemBlock(block, lang);
     if (line !== null) lines.push(line);
   }
   // A run with no outcome to report (板砖 only looked around) says what it
@@ -250,6 +259,24 @@ export function buildCompactionBody(
   // 2. Assemble with header.
   const header = COMPACTION_TEXT[lang].header;
   return `${header}\n${kept.map((l) => `- ${l}`).join("\n")}`;
+}
+
+/**
+ * Whether `marker` shows this excerpt row's lines: its detail opens with the
+ * row's own, which is how the bridge builds it when the excerpt was the run's
+ * last row with a detail (`lastCommandTail`, `backend-bridge.ts`). The text,
+ * not the range: the same lines shown before an edit are not what it shows.
+ */
+function markerShows(marker: SystemBlock, block: SystemBlock): boolean {
+  const own = block.evidenceDetail;
+  const tail = marker.evidenceDetail;
+  return (
+    block.digest?.kind === "excerpt" &&
+    own !== undefined &&
+    own.length > 0 &&
+    tail !== undefined &&
+    (tail === own || tail.startsWith(`${own}\n`))
+  );
 }
 
 /**
@@ -827,6 +854,23 @@ export function compactRecordForPrompt(
       break;
     }
   }
+  // The pass-through marker's tail is the run's last detail (`backend-
+  // bridge.ts`), so it can show an excerpt the run before it folds — and a
+  // fold saying 「原文不在手边」 right above those lines is false (ADR 0079
+  // §2). An excerpt it shows folds to the read, in the runs of the dispatch
+  // it closes (after the message it answers — a steer is not one; a beat
+  // splits them): only there, so no older run's text changes with the
+  // verdict turn.
+  const passThrough =
+    passThroughIdx === -1 ? undefined : (record[passThroughIdx] as SystemBlock);
+  let dispatchStart = -1;
+  for (let k = passThroughIdx - 1; k >= 0; k--) {
+    const b = record[k];
+    if (b?.kind === "user" && b.steer !== true) {
+      dispatchStart = k;
+      break;
+    }
+  }
 
   // Diff re-read hint (E2E lab 2026-08-11). Patch previews are prompt-SKIPPED
   // once their run compacts, so "改了哪几行?" one turn after a dispatch found
@@ -895,7 +939,11 @@ export function compactRecordForPrompt(
       const hintInRun = diffHintIdx >= i && diffHintIdx < compactEnd;
       if (runLength >= minRunSize) {
         const runBlocks = record.slice(i, compactEnd) as readonly SystemBlock[];
-        const body = buildCompactionBody(runBlocks, lang);
+        const body = buildCompactionBody(
+          runBlocks,
+          lang,
+          i > dispatchStart && i < passThroughIdx ? passThrough : undefined,
+        );
         if (body.length > 0) {
           output.push({
             kind: "system",

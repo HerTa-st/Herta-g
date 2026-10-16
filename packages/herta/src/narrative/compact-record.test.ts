@@ -2024,3 +2024,171 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     );
   });
 });
+
+describe("the verdict turn: an excerpt the marker shows folds to the read (ADR 0079 §2)", () => {
+  // The bridge's shape: the marker's tail is the run's last 差分协处理器 row
+  // with a detail (`lastCommandTail`), here the excerpt — a patch preview is
+  // a 系统 row and does not replace it.
+  const lines =
+    "30\tclass TestSieveFast(unittest.TestCase):\n31\t    LIMITS = [0, 1, 2, 3, 997]";
+  const shown = `↳ 摘录 test_primes.py:30-31\n${lines}`;
+  const op = (verb: "Reading" | "Writing" | "Running", arg: string) =>
+    ({
+      kind: "system",
+      label: "差分协处理器",
+      body: `${verb} ${arg}`,
+      digest: { kind: "op", verb, arg },
+    }) satisfies SystemBlock;
+  const excerpt = (detail = shown, path = "test_primes.py"): SystemBlock => ({
+    kind: "system",
+    label: "差分协处理器",
+    body: `↳ excerpt ${path}:30-31`,
+    digest: { kind: "excerpt", path, from: 30, to: 31 },
+    evidenceDetail: detail,
+  });
+  const patch: SystemBlock = {
+    kind: "system",
+    label: "系统",
+    body: "patch preview: primes.py (+3 -1)\n\n```diff\n+x\n```",
+    digest: { kind: "patch", files: ["primes.py"], add: 3, del: 1 },
+  };
+  const marker = (tail: string): SystemBlock => ({
+    kind: "system",
+    label: "差分协处理器",
+    body: "完成 · 1 个文件 · +3 −1 · 测试 1/1",
+    role: "done-marker",
+    markerSummary: {
+      kind: "done",
+      state: "completed",
+      fileCount: 1,
+      lines: { add: 3, del: 1 },
+      tests: { passed: 1, failed: 0 },
+      riskCount: 0,
+    },
+    evidenceDetail: `${tail}\n↳ 改动文件: primes.py`,
+  });
+  const dispatch = (...rows: TerminalRecordBlock[]): TerminalRecord => [
+    { kind: "user", text: "TestSieveFast 拿哪些 limit 比对？" },
+    { kind: "herta", surface: "speech", text: "@板砖 去看。" },
+    ...rows,
+  ];
+  /** The compaction summaries' bodies, in order. */
+  const summaries = (out: TerminalRecord): string[] =>
+    out
+      .filter(
+        (b): b is SystemBlock =>
+          b.kind === "system" &&
+          b.role === undefined &&
+          b.digest === undefined &&
+          b.evidenceDetail === undefined,
+      )
+      .map((b) => b.body);
+
+  it("the excerpt the marker ends on reads as the read, not 「原文不在手边」 above its own lines", () => {
+    const out = compactRecordForPrompt(
+      dispatch(
+        op("Reading", "test_primes.py:30-31"),
+        excerpt(),
+        patch,
+        op("Writing", "primes.py"),
+        marker(shown),
+      ),
+    );
+    expect(summaries(out)).toEqual([
+      "板砖之前做过的事（细节不在手边）：\n- 读 test_primes.py 第 30–31 行\n- 改动 primes.py（+3 −1）",
+    ]);
+    // The marker passes through with the lines.
+    const dm = out.find(
+      (b): b is SystemBlock => b.kind === "system" && b.role === "done-marker",
+    );
+    expect(dm?.evidenceDetail).toContain(lines);
+    expect(JSON.stringify(out)).not.toContain("原文不在手边");
+  });
+
+  it("in an English session too", () => {
+    const out = compactRecordForPrompt(
+      dispatch(excerpt(), patch, marker(shown)),
+      { lang: "en" },
+    );
+    expect(summaries(out)).toEqual([
+      "What 板砖 did before (details not at hand):\n- Read test_primes.py lines 30–31\n- Changed primes.py (+3 −1)",
+    ]);
+  });
+
+  it("once she has spoken her verdict, the fold says the lines are not at hand again", () => {
+    const out = compactRecordForPrompt([
+      ...dispatch(excerpt(), patch, marker(shown)),
+      { kind: "herta", surface: "speech", text: "五个 limit。" },
+    ]);
+    expect(summaries(out)[0]).toContain(
+      "- 看过 test_primes.py 第 30–31 行（原文不在手边）",
+    );
+    expect(JSON.stringify(out)).not.toContain("LIMITS");
+  });
+
+  it("an excerpt the marker does not show keeps 「原文不在手边」: other lines, the same lines before an edit, a tail that is a command's output", () => {
+    const before = `↳ 摘录 test_primes.py:30-31\n30\tclass TestSieveFast(unittest.TestCase):\n31\t    LIMITS = [0, 1]`;
+    const out = compactRecordForPrompt(
+      dispatch(
+        excerpt("↳ 摘录 bench.py:30-31\n30\tx\n31\ty", "bench.py"),
+        excerpt(before),
+        patch,
+        excerpt(),
+        marker(shown),
+      ),
+    );
+    expect(summaries(out)).toEqual([
+      [
+        "板砖之前做过的事（细节不在手边）：",
+        "- 看过 bench.py 第 30–31 行（原文不在手边）",
+        "- 看过 test_primes.py 第 30–31 行（原文不在手边）",
+        "- 改动 primes.py（+3 −1）",
+        "- 读 test_primes.py 第 30–31 行",
+      ].join("\n"),
+    ]);
+
+    const output: SystemBlock = {
+      kind: "system",
+      label: "差分协处理器",
+      body: "↳ exit 0 · 1 lines",
+      digest: { kind: "text", text: "↳ exit 0 · 1 lines", exitCode: 0 },
+      evidenceDetail: "↳ 输出:\nOK",
+    };
+    const tailIsOutput = compactRecordForPrompt(
+      dispatch(
+        excerpt(),
+        op("Running", "pytest"),
+        output,
+        marker("↳ 输出:\nOK"),
+      ),
+    );
+    expect(summaries(tailIsOutput)[0]).toContain(
+      "- 看过 test_primes.py 第 30–31 行（原文不在手边）",
+    );
+  });
+
+  it("only the dispatch the marker closes: a run split by a beat or a steer reads the read, an earlier dispatch's same excerpt does not", () => {
+    const earlier = dispatch(excerpt(), patch, marker(shown));
+    const out = compactRecordForPrompt([
+      ...earlier,
+      { kind: "herta", surface: "speech", text: "五个 limit。" },
+      ...dispatch(
+        op("Reading", "test_primes.py:30-31"),
+        excerpt(),
+        patch,
+        // A beat splits the run, and a steer is not a new message to answer;
+        // the marker after them still shows the lines.
+        { kind: "herta", surface: "speech", text: "改得不错。" },
+        { kind: "user", text: "顺便跑下测试", steer: true },
+        op("Writing", "primes.py"),
+        op("Running", "pytest"),
+        marker(shown),
+      ),
+    ]);
+    const [old, beforeBeat] = summaries(out);
+    expect(old).toContain("- 看过 test_primes.py 第 30–31 行（原文不在手边）");
+    expect(beforeBeat).toBe(
+      "板砖之前做过的事（细节不在手边）：\n- 读 test_primes.py 第 30–31 行\n- 改动 primes.py（+3 −1）",
+    );
+  });
+});
