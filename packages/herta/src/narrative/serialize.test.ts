@@ -645,7 +645,7 @@ describe("serializeTerminalRecord — the attachment fold reaches the beat's fre
     const out = beat(record);
     // The main turn folded it four user turns ago…
     expect(main).not.toContain("CONFIDENTIAL-HEAD-LINE");
-    expect(attachmentLine(main)).toContain("内容已不在眼前");
+    expect(attachmentLine(main)).toContain("读过，原文不在手边");
     // …and the beat agrees, line for line.
     expect(out).not.toContain("CONFIDENTIAL-HEAD-LINE");
     expect(attachmentLine(out)).toBe(attachmentLine(main));
@@ -667,7 +667,7 @@ describe("serializeTerminalRecord — the attachment fold reaches the beat's fre
     ];
     const out = beat(record);
     expect(out).toContain("CONFIDENTIAL-HEAD-LINE");
-    expect(out).not.toContain("内容已不在眼前");
+    expect(out).not.toContain("读过，原文不在手边");
     expect(attachmentLine(out)).toBe(
       attachmentLine(serializeTerminalRecord(record)),
     );

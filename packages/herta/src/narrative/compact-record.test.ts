@@ -1294,7 +1294,7 @@ describe("decideAttachmentFolds / foldAttachments — the fold lane on its own (
       undefined,
     );
     expect(folded?.kind === "system" ? folded.body : "").toContain(
-      "内容已不在眼前",
+      "读过，原文不在手边",
     );
     // The system run beside it is neither compacted nor touched: the same
     // block objects come back, uncompacted.
@@ -1413,6 +1413,68 @@ describe("an attachment as Herta reads it (ADR 0079, owner 2026-10-16)", () => {
     );
   });
 
+  it("folded, a document she saw only the opening of says so — 「读过」 alone would claim more", () => {
+    const out = compactRecordForPrompt([
+      pdf,
+      { kind: "user", text: "看看" },
+      { kind: "herta", surface: "speech", text: "看了。" },
+      { kind: "user", text: "嗯" },
+      { kind: "herta", surface: "speech", text: "。" },
+      { kind: "user", text: "换个话题" },
+    ]);
+    const folded = out.find((b) => b.kind === "system");
+    expect(folded?.kind === "system" ? folded.body : "").toBe(
+      "附件 hw3.pdf（读过开头，原文不在手边）",
+    );
+    expect(digestSystemBlock(pdf, "en")).toBe(
+      "附件 hw3.pdf (read the opening; the original isn't at hand)",
+    );
+  });
+
+  it("a document too long to take keeps its outline preview while fresh, and says why in every state", () => {
+    const book: SystemBlock = {
+      kind: "system",
+      label: "系统",
+      body: "附件 book.pdf · PDF · 516 页 · 文件过大，未取正文 · 目录 124 条 · .herta/attachments/s1/book.pdf.txt",
+      evidence: [
+        {
+          kind: "outline",
+          name: "book.pdf",
+          path: ".herta/attachments/s1/book.pdf.outline.txt",
+          items: ["第一章 · 第 1 页"],
+          total: 124,
+        },
+      ],
+      digest: {
+        kind: "attachment",
+        name: "book.pdf",
+        path: ".herta/attachments/s1/book.pdf.txt",
+        lines: 14603,
+        chars: 318437,
+        format: "pdf",
+        pages: 516,
+        unreadable: "too_large",
+      },
+    };
+    const fresh = foldAttachments([book], new Map())[0];
+    expect(fresh?.kind === "system" ? fresh.body : "").toBe(
+      "附件 book.pdf（文件过大，未取正文）",
+    );
+    expect(fresh?.kind === "system" ? fresh.evidenceDetail : "").toBe(
+      "目录（共 124 条，这里是前 1 条）：\n第一章 · 第 1 页",
+    );
+    const folded = foldAttachments(
+      [book],
+      new Map([[book, "citation" as const]]),
+    )[0];
+    expect(folded?.kind === "system" ? folded.body : "").toBe(
+      "附件 book.pdf（文件过大，未取正文）",
+    );
+    expect(
+      folded?.kind === "system" ? folded.evidenceDetail : "",
+    ).toBeUndefined();
+  });
+
   it("a picture's line is projected only in a PDF's text — a text file keeps its own lines", () => {
     const md: SystemBlock = {
       ...pdf,
@@ -1500,7 +1562,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     const folded = sys(exhausted)[0];
     expect(folded?.evidenceDetail).toBeUndefined();
-    expect(folded?.body).toContain("内容已不在眼前");
+    expect(folded?.body).toContain("读过，原文不在手边");
     // She still knows what it was; where it is stays 板砖's (ADR 0079).
     expect(folded?.body).toContain("spec.md");
     expect(folded?.body).not.toContain(".herta/attachments/s1/spec.md");
@@ -1523,10 +1585,9 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     expect(sys(out)[0]?.evidenceDetail).toContain("CONFIDENTIAL-HEAD-LINE");
   });
 
-  it("a fresh fold carries the re-read hint; the hint expires after N more turns (§6g)", () => {
-    // The follow-up that needs the body back may not name the file, and
-    // Herta's only route to it is a 板砖 dispatch — so the citation says so
-    // for a few turns (owner 2026-08-11), then stops nudging.
+  it("folded, every turn reads 「读过，原文不在手边」 — the hinted turns and the later ones alike (ADR 0079)", () => {
+    // The re-read hint (owner 2026-08-11) read wrong in her 自传 (owner
+    // 2026-10-16); "not at hand" already says the text can be fetched.
     const exchanges = (n: number): TerminalRecordBlock[] =>
       Array.from({ length: n }, (_, k) => [
         { kind: "user", text: `第 ${k} 句` } as TerminalRecordBlock,
@@ -1540,17 +1601,17 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     // 3 user turns past the block — just folded, hint attached.
     const fresh = compactRecordForPrompt([attachment, ...exchanges(3)]);
     const freshBody = sys(fresh)[0]?.body ?? "";
-    expect(freshBody).toBe("附件 spec.md（内容已不在眼前，需要时让板砖重读）");
+    expect(freshBody).toBe("附件 spec.md（读过，原文不在手边）");
     expect(sys(fresh)[0]?.evidenceDetail).toBeUndefined();
 
     // 5 user turns — last hinted prompt.
     const lastHinted = compactRecordForPrompt([attachment, ...exchanges(5)]);
-    expect(sys(lastHinted)[0]?.body).toContain("需要时让板砖重读");
+    expect(sys(lastHinted)[0]?.body).toBe(freshBody);
 
     // 6 user turns — the hint expires; the bare citation remains.
     const expired = compactRecordForPrompt([attachment, ...exchanges(6)]);
     const expiredBody = sys(expired)[0]?.body ?? "";
-    expect(expiredBody).toBe("附件 spec.md（内容已不在眼前）");
+    expect(expiredBody).toBe(freshBody);
   });
 
   it("naming the file re-opens the window, which can expire again (§6g re-inflate)", () => {
@@ -1937,7 +1998,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     // The dispatch pair still compacts; the attachment folded on its own.
     expect(s).toContain("历史已压缩");
     expect(s).not.toContain("CONFIDENTIAL-HEAD-LINE");
-    expect(s).toContain("内容已不在眼前");
+    expect(s).toContain("读过，原文不在手边");
   });
 
   it("localizes the elision note by session language", () => {
@@ -1955,7 +2016,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     // The aside localizes; 附件 is the record's own word and does not, and
     // 板砖 stays literal per ADR 0015 (display alias only).
     expect(sys(out)[0]?.body).toBe(
-      "附件 spec.md (no longer in view — have 板砖 re-read it if needed)",
+      "附件 spec.md (read it; the original isn't at hand)",
     );
   });
 });

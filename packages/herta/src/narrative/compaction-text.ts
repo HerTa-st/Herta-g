@@ -53,12 +53,13 @@ export const COMPACTION_TEXT = {
     },
     /** An attachment as Herta reads it (ADR 0079): the notes a projected row
      *  carries in place of the store's bookkeeping. Each sits in an aside
-     *  after the name — `附件 hw.pdf（内容已不在眼前）`. The hinted form is
-     *  the freshly folded one (ADR 0033 §6g): the user's follow-up may not
-     *  name the file, so for a few turns she is reminded that 板砖 can read
-     *  it again; it expires so an old attachment carries no standing nudge. */
-    attachmentNotInView: "内容已不在眼前",
-    attachmentNotInViewHint: "内容已不在眼前，需要时让板砖重读",
+     *  after the name — `附件 hw.pdf（读过，原文不在手边）` once the text is
+     *  no longer in front of her (owner, 2026-10-16: the first wording,
+     *  「内容已不在眼前，需要时让板砖重读」, read wrong in her 自传). "Not at
+     *  hand" already says it can be fetched; no separate reminder. The
+     *  opening-only form is for a document that ran past what she was shown. */
+    attachmentNotAtHand: "读过，原文不在手边",
+    attachmentOpeningNotAtHand: "读过开头，原文不在手边",
     /** After a head the document runs past. */
     attachmentHeadOnly: "仅开头部分，正文更长",
     /** Above an outline preview. */
@@ -97,9 +98,8 @@ export const COMPACTION_TEXT = {
       unsupported: "unsupported document format, no body taken",
       no_caption: "image stored, not read",
     },
-    attachmentNotInView: "no longer in view",
-    attachmentNotInViewHint:
-      "no longer in view — have 板砖 re-read it if needed",
+    attachmentNotAtHand: "read it; the original isn't at hand",
+    attachmentOpeningNotAtHand: "read the opening; the original isn't at hand",
     attachmentHeadOnly: "only the opening; the document runs longer",
     attachmentContents: (total: number, shown: number) =>
       shown < total

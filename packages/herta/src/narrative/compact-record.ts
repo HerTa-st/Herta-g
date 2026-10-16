@@ -38,7 +38,7 @@ export function digestSystemBlock(
   lang: PromptLang = "zh",
 ): string | null {
   if (block.digest !== undefined)
-    return renderStructuredDigest(block.digest, lang);
+    return renderStructuredDigest(block.digest, lang, block);
   const body = block.body;
 
   if (block.label === "差分协处理器") {
@@ -124,6 +124,9 @@ function fallbackDigest(body: string): string {
 function renderStructuredDigest(
   d: SystemBlockDigest,
   lang: PromptLang,
+  /** The row itself, for what its digest does not carry (an attachment's
+   *  head ran past what she was shown). */
+  block: SystemBlock,
 ): string | null {
   switch (d.kind) {
     case "op": {
@@ -213,9 +216,11 @@ function renderStructuredDigest(
         return `附件 ${d.name}${lang === "en" ? ": " : "："}${d.caption}`;
       }
       const note =
-        d.unreadable === undefined
-          ? text.attachmentNotInView
-          : text.attachmentUnreadable[d.unreadable];
+        d.unreadable !== undefined
+          ? text.attachmentUnreadable[d.unreadable]
+          : sawOpeningOnly(block)
+            ? text.attachmentOpeningNotAtHand
+            : text.attachmentNotAtHand;
       return `附件 ${d.name}${lang === "en" ? ` (${note})` : `（${note}）`}`;
     }
     case "digest":
@@ -382,12 +387,12 @@ function isAttachmentBlock(b: TerminalRecordBlock): b is SystemBlock {
 export const ATTACHMENT_VERBATIM_USER_TURNS = 3;
 
 /**
- * How many further user turns a freshly folded citation carries the re-read
- * hint (`attachmentNotInViewHint`). The user's follow-up may not name the file,
- * and Herta's only route back to the body is a 板砖 dispatch — for a few
- * turns after the fold the harness says so under the citation, then the
- * hint expires and the bare citation remains (owner 2026-08-11: "like the
- * meta-think parts — and completely remove the hint after N turns").
+ * How many further user turns a freshly folded citation stays in the
+ * `citation-hint` state. It carried a re-read hint (owner 2026-08-11: the
+ * user's follow-up may not name the file, and her route back to the body is
+ * a 板砖 dispatch); since ADR 0079 both folded states read
+ * 「读过，原文不在手边」 — "not at hand" says it can be fetched — and the
+ * state is kept for the fold's own bookkeeping.
  */
 export const ATTACHMENT_HINT_USER_TURNS = 3;
 
@@ -492,25 +497,39 @@ function foldAttachmentForPrompt(
       body: `${named}${lang === "en" ? ": " : "："}${d.caption}`,
     };
   }
-  if (d.unreadable !== undefined) {
-    return {
-      ...rest,
-      body: `${named}${aside(text.attachmentUnreadable[d.unreadable])}`,
-    };
-  }
   const detail = attachmentDetailForHerta(block, d, lang);
+  if (d.unreadable !== undefined) {
+    // A document too long to take keeps its outline preview while fresh —
+    // for it, the one thing the row can say about what is inside.
+    const body = `${named}${aside(text.attachmentUnreadable[d.unreadable])}`;
+    return state === "verbatim" && detail !== null
+      ? { ...rest, body, evidenceDetail: detail }
+      : { ...rest, body };
+  }
   if (detail === null) return { ...rest, body: named };
   if (state === "verbatim") {
     return { ...rest, body: named, evidenceDetail: detail };
   }
+  // Folded, the hinted turns and the later ones read the same (owner,
+  // 2026-10-16: 「读过，原文不在手边」 — "not at hand" already says it can
+  // be fetched, and she knows 板砖 reads files). What she read was the
+  // opening only, when the document ran on: "读过" alone would claim more.
   return {
     ...rest,
     body: `${named}${aside(
-      state === "citation-hint"
-        ? text.attachmentNotInViewHint
-        : text.attachmentNotInView,
+      sawOpeningOnly(block)
+        ? text.attachmentOpeningNotAtHand
+        : text.attachmentNotAtHand,
     )}`,
   };
+}
+
+/** Whether the head she was shown stopped before the document did. */
+function sawOpeningOnly(block: SystemBlock): boolean {
+  const head = block.evidence?.find((e) => e.kind === "attachment");
+  if (head?.kind === "attachment") return head.clipped;
+  // A row written before its evidence was structured carries the note.
+  return block.evidenceDetail?.includes("（仅开头部分，正文更长）") === true;
 }
 
 /** A transcribed picture's line in a PDF's text (`storePictures`): its
