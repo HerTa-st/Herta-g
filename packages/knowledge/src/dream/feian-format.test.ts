@@ -1,8 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { TerminalRecordBlock } from "@herta/core";
-import { promptAssetsFor } from "@herta/herta";
+import type { SystemBlock, TerminalRecordBlock } from "@herta/core";
+import {
+  promptAssetsFor,
+  serializeBlock,
+  systemRowForHerta,
+} from "@herta/herta";
 import { describe, expect, it } from "vitest";
 import { buildEpisodeDigest, DIGEST_MAX_SYSTEM_ROWS } from "./digest.js";
 import {
@@ -273,6 +277,39 @@ describe("validateFeian — the session digest's notation is not record grammar 
       ].join("\n"),
     );
     expect(validateFeian(withRows)).toEqual({ ok: true });
+  });
+
+  // A seed or a dream retells 板砖's rows in the grammar her prompt reads
+  // them in (ADR 0079 §3). Its English labels once read `Changed:` /
+  // `Risks:` / `Evidence:` — the report D3 forbids, which LEAK_MARKERS
+  // rejects — so no English page could carry a done-marker's detail.
+  it("accepts a done-marker in the grammar her prompt reads, in both languages (ADR 0079 §3)", () => {
+    const marker: SystemBlock = {
+      kind: "system",
+      label: "差分协处理器",
+      body: "部分完成 · 1 个文件 · +2 −1 · 1 风险",
+      role: "done-marker",
+      markerSummary: {
+        kind: "done",
+        state: "partial",
+        fileCount: 1,
+        lines: { add: 2, del: 1 },
+        riskCount: 1,
+      },
+      evidenceDetail: [
+        "↳ 改动文件: a.ts",
+        "↳ 风险: ranks 缺 debug",
+        "↳ 结论: 少了一项（a.ts:3）",
+        "↳ 依据: ran `pnpm test` (exit 1, 1.00s) — log at .herta/logs/a.log",
+      ].join("\n"),
+    };
+    for (const lang of ["zh", "en"] as const) {
+      const row = systemRowForHerta(marker, lang);
+      if (row === null) throw new Error("fixture");
+      const page = inDialogue(serializeBlock(row, { lang }));
+      expect(page).toContain(lang === "en" ? "Based on: " : "依据：");
+      expect(validateFeian(page), lang).toEqual({ ok: true });
+    }
   });
 
   it("accepts a self-correction told in her own words, the way the prompt asks", () => {

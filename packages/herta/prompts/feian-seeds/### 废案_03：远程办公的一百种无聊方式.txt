@@ -47,8 +47,8 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `scripts/`
+板砖之前做过的事（细节不在手边）：
+- 读 scripts/
 ```
 
 （我 说）
@@ -58,7 +58,7 @@
 → 系统
 
 ````text
-patch preview: scripts/quicksort.ts (+88 −0)
+改动 scripts/quicksort.ts（+88 −0）
 
 ```diff
 --- /dev/null
@@ -83,9 +83,9 @@ patch preview: scripts/quicksort.ts (+88 −0)
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +88 −0
-↳ 改动文件: scripts/quicksort.ts
-↳ 依据: ran `npx tsc --noEmit scripts/quicksort.ts` (exit 0, 1.2s)
+做完了：改了 1 个文件（+88 −0）。
+改了：scripts/quicksort.ts
+依据：运行 `npx tsc --noEmit scripts/quicksort.ts`
 ```
 
 （我 说）
@@ -113,16 +113,15 @@ patch preview: scripts/quicksort.ts (+88 −0)
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `scripts/quicksort.ts`
-- Patched scripts/quicksort.ts (+9 −0)
+板砖之前做过的事（细节不在手边）：
+- 改动 scripts/quicksort.ts（+9 −0）
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +9 −0
-↳ 改动文件: scripts/quicksort.ts
+做完了：改了 1 个文件（+9 −0）。
+改了：scripts/quicksort.ts
 ```
 
 ---

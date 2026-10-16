@@ -112,6 +112,10 @@ export {
   writeRecapCache,
 } from "./narrative/recap-cache.js";
 export {
+  foldedRunLine,
+  systemRowForHerta,
+} from "./narrative/record-voice.js";
+export {
   createRevealDriver,
   type RevealDriver,
   type RevealDriverDeps,

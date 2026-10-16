@@ -15,21 +15,17 @@ That day I was calibrating the projection routing of the four mirrors; the secon
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `src/modules/parse.mjs`
-- Running `TZ=Asia/Shanghai node --test tests/parse.test.mjs`
-- ↳ exit 1 · 22 lines
-- Patched src/modules/parse.mjs (+6 −2)
-- Running `TZ=Asia/Shanghai node --test tests/parse.test.mjs`
-- ↳ exit 0 · 18 lines
+What 板砖 did before (details not at hand):
+- ran `TZ=Asia/Shanghai node --test tests/parse.test.mjs` (exit code 1)
+- Changed src/modules/parse.mjs (+6 −2)
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +6 −2 · 测试 17/17
-↳ 改动文件: src/modules/parse.mjs
-↳ 依据: ran `TZ=Asia/Shanghai node --test tests/parse.test.mjs` (exit 0, 1.4s) — 17 passed, 0 failed
+Done: changed 1 file (+6 −2), tests 17/17 passed.
+Changed files: src/modules/parse.mjs
+Based on: ran `TZ=Asia/Shanghai node --test tests/parse.test.mjs`
 ```
 
 （开拓者 说）
@@ -93,19 +89,16 @@ Okay, then do the second one first? The normalize one.
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `modules/normalize.mjs`
-- Patched modules/normalize.mjs (+4 −1)
-- Running `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
-- ↳ exit 0 · 18 lines
+What 板砖 did before (details not at hand):
+- Changed modules/normalize.mjs (+4 −1)
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +4 −1 · 测试 17/17
-↳ 改动文件: modules/normalize.mjs
-↳ 依据: ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit 0, 1.3s) — 17 passed, 0 failed
+Done: changed 1 file (+4 −1), tests 17/17 passed.
+Changed files: modules/normalize.mjs
+Based on: ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
 ```
 
 （我 想）
@@ -125,23 +118,21 @@ Hold the celebration, this "green" is fishy. It was never red before the change,
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `find . -name normalize.mjs -not -path "./node_modules/*"`
-- ↳ exit 0 · 2 lines
-- Running `grep -n "import" tests/normalize.test.mjs`
-- ↳ exit 0 · 2 lines
+What 板砖 did before (details not at hand):
+- Ran `find . -name normalize.mjs -not -path "./node_modules/*"`
+- Ran `grep -n "import" tests/normalize.test.mjs`
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 输出:
+Done.
+Output:
 ./modules/normalize.mjs
 ./src/modules/normalize.mjs
 tests/normalize.test.mjs:1:import { normalize } from "../src/modules/normalize.mjs";
-↳ 结论: 仓库里有两份 normalize.mjs；测试引用的是 src/modules/ 下的那份，刚才的补丁打在了 modules/ 下的另一份上。（tests/normalize.test.mjs:1）
-↳ 依据: ran `find . -name normalize.mjs -not -path "./node_modules/*"` (exit 0, 0.1s) — 2 matches; ran `grep -n "import" tests/normalize.test.mjs` (exit 0, 0.1s)
+Findings: The repo has two copies of normalize.mjs; the test imports the one under src/modules/, and the last patch went to the other one, under modules/.（tests/normalize.test.mjs:1）
+Based on: ran `find . -name normalize.mjs -not -path "./node_modules/*"`; ran `grep -n "import" tests/normalize.test.mjs`
 ```
 
 （我 想）
@@ -171,22 +162,17 @@ Don't hand me an excuse.
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
-- ↳ exit 1 · 22 lines
-- Patched src/modules/normalize.mjs (+4 −1)
-- Running `git rm modules/normalize.mjs`
-- ↳ exit 0 · 1 lines
-- Running `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
-- ↳ exit 0 · 18 lines
+What 板砖 did before (details not at hand):
+- ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit code 1)
+- Changed src/modules/normalize.mjs (+4 −1)
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 2 个文件 · +4 −5 · 测试 17/17
-↳ 改动文件: src/modules/normalize.mjs, modules/normalize.mjs
-↳ 依据: ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit 1, 1.3s) — 16 passed, 1 failed; ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit 0, 1.3s) — 17 passed, 0 failed
+Done: changed 2 files (+4 −5), tests 17/17 passed.
+Changed files: src/modules/normalize.mjs, modules/normalize.mjs
+Based on: ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit code 1); ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
 ```
 
 （我 想）
@@ -222,20 +208,19 @@ Check the rest for copies first, then I'll give you a time. A number you get aft
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules`
-- ↳ exit 0 · 2 lines
+What 板砖 did before (details not at hand):
+- Ran `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules`
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 输出:
+Done.
+Output:
 ./src/modules/format.mjs
 ./src/modules/schedule.mjs
-↳ 结论: 剩下的模块各只有一份，都在 src/modules/ 下，没有旧副本。
-↳ 依据: ran `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules` (exit 0, 0.1s) — 2 matches
+Findings: The remaining modules have one copy each, both under src/modules/; no old copies.
+Based on: ran `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules`
 ```
 
 （我 说）

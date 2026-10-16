@@ -103,6 +103,32 @@ describe("the done-marker reads as a sentence", () => {
     );
   });
 
+  it("in English its labels are plain words, never the report D3 names (ADR 0079 §3)", () => {
+    const out = read(
+      {
+        ...marker("completed"),
+        evidenceDetail: [
+          "↳ 改动文件: a.py, b.py",
+          "↳ 风险: ranks has no debug entry",
+          "↳ 依据: ran `pytest` (exit 0, 1.00s) — log at .herta/logs/x.log",
+        ].join("\n"),
+      },
+      "en",
+    );
+    expect(out).toBe(
+      [
+        "Done: changed 2 files (+196 −0), tests 6/6 passed.",
+        "Changed files: a.py, b.py",
+        "Risks left: ranks has no debug entry",
+        "Based on: ran `pytest`",
+      ].join("\n"),
+    );
+    // The 废案 gate's LEAK_MARKERS (knowledge/dream/feian-format.ts).
+    expect(out).not.toMatch(
+      /\b(Verdict|Changed|Evidence|Summary|Risks?|Plan)\s*[:：]/i,
+    );
+  });
+
   it("a hint line the compaction added stays under the sentence", () => {
     const hinted = {
       ...marker("completed"),

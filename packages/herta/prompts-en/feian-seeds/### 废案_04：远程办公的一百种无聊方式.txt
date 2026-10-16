@@ -129,24 +129,23 @@ How did you know?
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `grep -n "外发\|仙舟" logs/personal/ruan-mei/配方外发记录.log`
-- ↳ exit 0 · 2 lines
-- ↳ 摘录 logs/personal/ruan-mei/配方外发记录.log:142-146
+What 板砖 did before (details not at hand):
+- Ran `grep -n "外发\|仙舟" logs/personal/ruan-mei/配方外发记录.log`
+- Read logs/personal/ruan-mei/配方外发记录.log lines 142–146
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 输出:
+Done.
+Output:
 [日期 T-43]：仙舟市集，糕点摊主"老周"，配方编号 RM-PSTR-0014
 未公开成分：轻度生物碱衍生物（剂量：安全阈值的 0.3%）
 试验目的：观察人类消费者"愉悦-警觉"双重反应曲线
 预期：风味温和，伴短暂性认知敏锐度提升
 回收方式：摊主每周末通过暗格补给上传销售数据
-↳ 结论: 最近三个月阮·梅有一次对外部商户的样品外发：仙舟市集摊主"老周"，配方 RM-PSTR-0014，未公开成分为安全阈值 0.3% 的生物碱衍生物。（logs/personal/ruan-mei/配方外发记录.log:142-146）
-↳ 依据: ran `grep -n "外发\|仙舟" logs/personal/ruan-mei/配方外发记录.log` (exit 0, 0.1s); logs/personal/ruan-mei/配方外发记录.log:142-146
+Findings: In the last three months Ruan Mei sent a sample to an outside vendor once: "老周", a pastry stall owner at the Xianzhou market, recipe RM-PSTR-0014; the undisclosed ingredient is an alkaloid derivative at 0.3% of the safety threshold.（logs/personal/ruan-mei/配方外发记录.log:142-146）
+Based on: ran `grep -n "外发\|仙舟" logs/personal/ruan-mei/配方外发记录.log`; logs/personal/ruan-mei/配方外发记录.log:142-146
 ```
 
 （我 想）

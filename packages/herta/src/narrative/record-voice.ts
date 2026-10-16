@@ -230,11 +230,14 @@ const TEXTS: Record<PromptLang, Texts> = {
       const state = EN_STATE[m.state] ?? m.state;
       return parts.length > 0 ? `${state}: ${parts.join(", ")}.` : `${state}.`;
     },
+    // Never `Changed:` / `Risks:` / `Evidence:` — the robotic report D3
+    // names, which the 废案 gate rejects (`LEAK_MARKERS`), so a seed or a
+    // dream that retells the record could not carry them (ADR 0079 §3).
     labels: {
-      改动文件: "Changed: ",
-      风险: "Risks: ",
+      改动文件: "Changed files: ",
+      风险: "Risks left: ",
       结论: "Findings: ",
-      依据: "Evidence: ",
+      依据: "Based on: ",
       提示: "Hint: ",
       错误: "Error: ",
       中断时: "When it stopped: ",

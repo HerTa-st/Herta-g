@@ -31,17 +31,16 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `grep -rn "耐受阈值\|阈值" notes/`
-- ↳ exit 1 · 0 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `grep -rn "耐受阈值\|阈值" notes/`（退出码 1）
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 结论: notes/ 下没有任何包含"耐受阈值"或"阈值"的行——检索为空。（notes/:0）
-↳ 依据: ran `grep -rn "耐受阈值\|阈值" notes/` (exit 1, 0.2s) — 0 matches
+做完了。
+结论：notes/ 下没有任何包含"耐受阈值"或"阈值"的行——检索为空。（notes/:0）
+依据：运行 `grep -rn "耐受阈值\|阈值" notes/`（退出码 1）
 ```
 
 （我 想）
@@ -211,7 +210,7 @@
 → 差分协处理器
 
 ```text
-无产出 — 这次没有触发任何文件、目录或命令操作。
+板砖这次什么也没动。
 ```
 
 （我 想）
@@ -233,21 +232,20 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `awk -F'\t' '{print $1}' catalog/index.tsv | sort | uniq -d`
-- ↳ exit 0 · 3 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `awk -F'\t' '{print $1}' catalog/index.tsv | sort | uniq -d`
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 输出:
+做完了。
+输出：
 4471
 4620
 4998
-↳ 结论: catalog/index.tsv 中有三个编号各出现两次：4471、4620、4998。（catalog/index.tsv:1）
-↳ 依据: ran `awk -F'\t' '{print $1}' catalog/index.tsv | sort | uniq -d` (exit 0, 0.2s) — 3 duplicates
+结论：catalog/index.tsv 中有三个编号各出现两次：4471、4620、4998。（catalog/index.tsv:1）
+依据：运行 `awk -F'\t' '{print $1}' catalog/index.tsv | sort | uniq -d`
 ```
 
 （我 想）

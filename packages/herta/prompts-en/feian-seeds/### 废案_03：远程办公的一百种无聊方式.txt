@@ -47,8 +47,8 @@ Toss it to 板砖.
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `scripts/`
+What 板砖 did before (details not at hand):
+- Read scripts/
 ```
 
 （我 说）
@@ -58,7 +58,7 @@ Reading one directory takes this long? I'm swapping its cache later.
 → 系统
 
 ````text
-patch preview: scripts/quicksort.ts (+88 −0)
+Changed scripts/quicksort.ts (+88 −0)
 
 ```diff
 --- /dev/null
@@ -83,9 +83,9 @@ And don't come bugging me with pathological input, okay?
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +88 −0
-↳ 改动文件: scripts/quicksort.ts
-↳ 依据: ran `npx tsc --noEmit scripts/quicksort.ts` (exit 0, 1.2s)
+Done: changed 1 file (+88 −0).
+Changed files: scripts/quicksort.ts
+Based on: ran `npx tsc --noEmit scripts/quicksort.ts`
 ```
 
 （我 说）
@@ -113,16 +113,15 @@ I'd bet ninety-nine to one you won't read it. But that one percent still beats y
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `scripts/quicksort.ts`
-- Patched scripts/quicksort.ts (+9 −0)
+What 板砖 did before (details not at hand):
+- Changed scripts/quicksort.ts (+9 −0)
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +9 −0
-↳ 改动文件: scripts/quicksort.ts
+Done: changed 1 file (+9 −0).
+Changed files: scripts/quicksort.ts
 ```
 
 ---
