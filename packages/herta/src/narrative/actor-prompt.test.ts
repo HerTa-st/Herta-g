@@ -412,7 +412,7 @@ describe("serializeActorPrompt — compactBridgeOutput threading (compaction, 20
       openTag: "（我 说）",
     };
     const out = serializeActorPrompt(prompt);
-    expect(out).toContain("[历史已压缩 · 板砖]");
+    expect(out).toContain("板砖之前做过的事（细节不在手边）：");
     expect(out).toContain("- Reading a.ts, b.ts");
     expect(out).not.toContain('Reading {"path":"a.ts"}');
   });
@@ -426,7 +426,7 @@ describe("serializeActorPrompt — compactBridgeOutput threading (compaction, 20
       compactBridgeOutput: false,
     };
     const out = serializeActorPrompt(prompt);
-    expect(out).not.toContain("[历史已压缩 · 板砖]");
+    expect(out).not.toContain("板砖之前做过的事（细节不在手边）：");
     expect(out).toContain('Reading {"path":"a.ts"}');
     expect(out).toContain('Reading {"path":"b.ts"}');
   });
@@ -458,12 +458,12 @@ describe("serializeActorPrompt — compactBridgeOutput threading (compaction, 20
     };
     const out = serializeActorPrompt(prompt);
     // The run compacts as ONE summary, same as the unspliced projection.
-    expect(out).toContain("[历史已压缩 · 板砖]");
+    expect(out).toContain("板砖之前做过的事（细节不在手边）：");
     expect(out).toContain("- Reading a.ts, b.ts");
     expect(out).not.toContain('Reading {"path":"a.ts"}');
     // The section lands before the (whole) run.
     expect(out.indexOf("SPEAK_TXT")).toBeLessThan(
-      out.indexOf("[历史已压缩 · 板砖]"),
+      out.indexOf("板砖之前做过的事（细节不在手边）："),
     );
   });
 });

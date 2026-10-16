@@ -10,6 +10,7 @@ import {
   DIFF_REREAD_HINT_USER_TURNS,
 } from "./compact-record.js";
 import { COMPACTION_TEXT } from "./compaction-text.js";
+import { systemRowForHerta } from "./record-voice.js";
 import { serializeBlock, serializeTerminalRecord } from "./serialize.js";
 
 const ZWSP = "​";
@@ -174,7 +175,7 @@ describe("serializeBlock — system blocks", () => {
     const block: TerminalRecordBlock = { kind: "system", label: "系统", body };
     const out = serializeBlock(block);
     // The serialized output must contain the suppression footer.
-    expect(out).toContain("行已略去 — 完整 diff 在证据里");
+    expect(out).toContain("行没贴出来");
     // The serialized output must NOT contain the last few diff lines
     // (they should be suppressed).
     expect(out).not.toContain("+line 49");
@@ -209,7 +210,7 @@ describe("serializeBlock — system blocks", () => {
     const block: TerminalRecordBlock = { kind: "system", label: "系统", body };
     const out = serializeBlock(block, { compressDiffs: false });
     // No suppression footer — full diff retained.
-    expect(out).not.toContain("行已略去");
+    expect(out).not.toContain("行没贴出来");
     // Tail lines that WOULD be suppressed in the default-cap case
     // are present here. Loop builds 48 lines (`+line 0` through
     // `+line 47`); the last few would be cut in the default path.
@@ -303,7 +304,7 @@ describe("serializeBlock — system blocks", () => {
     const block: TerminalRecordBlock = { kind: "system", label: "系统", body };
     const out = serializeBlock(block);
     // No suppression footer for short diffs.
-    expect(out).not.toContain("行已略去");
+    expect(out).not.toContain("行没贴出来");
     // All diff lines preserved.
     for (const line of diffLines) {
       expect(out).toContain(line);
@@ -377,7 +378,7 @@ describe("serializeTerminalRecord", () => {
       → 系统
 
       \`\`\`text
-      [历史已压缩 · 板砖]
+      板砖之前做过的事（细节不在手边）：
       - accepted
       - [目录内容：packages/core/src]
       \`\`\`"
@@ -403,7 +404,7 @@ describe("serializeTerminalRecord — compactBridgeOutput (N7+compaction, 2026-0
     ];
     const out = serializeTerminalRecord(record);
     // The two Reading blocks are replaced by one [历史已压缩 · 板砖] block.
-    expect(out).toContain("[历史已压缩 · 板砖]");
+    expect(out).toContain("板砖之前做过的事（细节不在手边）：");
     expect(out).toContain("- Reading a.ts, b.ts");
     // The raw Reading JSON should NOT be in the serialized output.
     expect(out).not.toContain('Reading {"path":"a.ts"}');
@@ -419,7 +420,7 @@ describe("serializeTerminalRecord — compactBridgeOutput (N7+compaction, 2026-0
     ];
     const out = serializeTerminalRecord(record, { compactBridgeOutput: false });
     // Header NOT present; raw blocks present.
-    expect(out).not.toContain("[历史已压缩 · 板砖]");
+    expect(out).not.toContain("板砖之前做过的事（细节不在手边）：");
     expect(out).toContain('Reading {"path":"a.ts"}');
     expect(out).toContain('Reading {"path":"b.ts"}');
   });
@@ -440,14 +441,14 @@ describe("serializeTerminalRecord — compactBridgeOutput (N7+compaction, 2026-0
 
     // Default: compaction off (singleton run), but compressDiffs on.
     const withCompress = serializeTerminalRecord(record);
-    expect(withCompress).toContain("行已略去");
+    expect(withCompress).toContain("行没贴出来");
 
     // Beat path: both opts off — full diff retained.
     const beatPath = serializeTerminalRecord(record, {
       compactBridgeOutput: false,
       compressDiffs: false,
     });
-    expect(beatPath).not.toContain("行已略去");
+    expect(beatPath).not.toContain("行没贴出来");
     expect(beatPath).toContain("+line 49");
   });
 });
@@ -469,15 +470,15 @@ describe("serializeTerminalRecord — elision markers follow the session languag
 
   it("renders zh markers by default", () => {
     const out = serializeTerminalRecord(record);
-    expect(out).toContain("[历史已压缩 · 板砖]");
-    expect(out).toContain("Excerpt src/a.ts:120-140 · 正文已略去");
+    expect(out).toContain("板砖之前做过的事（细节不在手边）：");
+    expect(out).toContain("看过 src/a.ts 第 120–140 行（原文不在手边）");
   });
 
   it("renders en markers for an en session", () => {
     const out = serializeTerminalRecord(record, { lang: "en" });
-    expect(out).toContain("[history compacted · 板砖]");
-    expect(out).toContain("Excerpt src/a.ts:120-140 · body elided");
-    expect(out).not.toContain("历史已压缩");
+    expect(out).toContain("What 板砖 did before (details not at hand):");
+    expect(out).toContain("Was shown src/a.ts lines 120–140 (not at hand)");
+    expect(out).not.toContain("板砖之前做过的事");
   });
 
   it("leaves the narrative grammar canonical in both", () => {
@@ -540,9 +541,9 @@ describe("serializeTerminalRecord — verbatimSinceLastDispatch (beat mode, M-pr
       verbatimSinceLastDispatch: true,
     });
     // Old side: diff collapsed, board run compacted — exactly the main-turn view.
-    expect(out).toContain("行已略去");
+    expect(out).toContain("行没贴出来");
     expect(out).not.toContain("+old 49");
-    expect(out).toContain("[历史已压缩 · 板砖]");
+    expect(out).toContain("板砖之前做过的事（细节不在手边）：");
     expect(out).not.toContain('Reading {"path":"a.ts"}');
     // The boundary marker itself stays legible.
     expect(out).toContain("完成：修好了");
@@ -576,7 +577,7 @@ describe("serializeTerminalRecord — verbatimSinceLastDispatch (beat mode, M-pr
       compactBridgeOutput: true,
     });
     expect(out).toContain("+fresh 49");
-    expect(out).not.toContain("行已略去");
+    expect(out).not.toContain("行没贴出来");
     expect(out).not.toContain("[历史已压缩");
     expect(out).toContain('Reading {"path":"a.ts"}');
   });
@@ -699,7 +700,7 @@ describe("serializeTerminalRecord — the attachment fold reaches the beat's fre
     expect(attachmentLine(out)).toBe(attachmentLine(main));
     // The beat treatment of the halves is unchanged around it: the old run
     // compacted, the boundary marker legible, the current run raw.
-    expect(out).toContain("[历史已压缩 · 板砖]");
+    expect(out).toContain("板砖之前做过的事（细节不在手边）：");
     expect(out).toContain("完成：读完了");
     expect(out).toContain('Reading {"path":"foo.ts"}');
   });
@@ -864,9 +865,18 @@ describe("serializeTerminalRecord — long-record equivalence vs naive reference
     treatment: { compress: boolean; compact: boolean },
   ): string {
     const projected = treatment.compact ? referenceCompact(blocks) : blocks;
-    return projected
-      .map((b) => serializeBlock(b, { compressDiffs: treatment.compress }))
-      .join("\n\n");
+    return (
+      projected
+        // The rows-as-her-notes stage (ADR 0079 §2) runs after compaction,
+        // the same in both paths.
+        .flatMap((b): TerminalRecordBlock[] => {
+          if (b.kind !== "system") return [b];
+          const row = systemRowForHerta(b, "zh");
+          return row === null ? [] : [row];
+        })
+        .map((b) => serializeBlock(b, { compressDiffs: treatment.compress }))
+        .join("\n\n")
+    );
   }
 
   function referenceSerialize(

@@ -881,7 +881,7 @@ describe("runActorCompletionTurn — in-turn beats", () => {
     // The beat prompt (prompts[1]) should include the projected backend
     // SystemBlock so Herta sees what she's reacting to.
     expect(prompts[1]).toContain("系统");
-    expect(prompts[1]).toContain("patch preview"); // body from projector
+    expect(prompts[1]).toContain("改动 foo.ts"); // the patch row, as she reads it (ADR 0079)
     expect(prompts[1]).toContain("foo.ts");
     expect(prompts[1]).toMatch(/（我 说）\n$/); // beat prompt ends with forced-speech open tag
   });
@@ -1561,7 +1561,7 @@ describe("runActorCompletionTurn — onPrompt callback (prompt dump)", () => {
     ]);
     // The beat prompt should be the one that ends with the open tag and
     // contains the projected backend system block.
-    expect(requests[2]?.prompt).toContain("patch preview");
+    expect(requests[2]?.prompt).toContain("改动 foo.ts");
     expect(requests[2]?.prompt).toMatch(/（我 说）\n$/);
   });
 
@@ -6550,9 +6550,10 @@ describe("runActorCompletionTurn — compaction (2026-05-24)", () => {
     expect(thoughtPrompts).toHaveLength(2);
     expect(prompts).toHaveLength(2);
     for (const iter2Prompt of [thoughtPrompts[1] ?? "", prompts[1] ?? ""]) {
-      expect(iter2Prompt).toContain("[历史已压缩 · 板砖]");
-      expect(iter2Prompt).toContain("Reading a.ts");
-      expect(iter2Prompt).toContain("Writing a.ts");
+      expect(iter2Prompt).toContain("板砖之前做过的事（细节不在手边）：");
+      // A run with no outcome rows folds to its steps (ADR 0079).
+      expect(iter2Prompt).toContain("读 a.ts");
+      expect(iter2Prompt).toContain("写 a.ts");
       expect(iter2Prompt).not.toContain('Reading {"path":"a.ts"}');
     }
   });
@@ -6621,10 +6622,10 @@ describe("runActorCompletionTurn — compaction (2026-05-24)", () => {
     expect(beatPrompt).toBeDefined();
     // The beat prompt should NOT contain the compaction header
     // (compactBridgeOutput: false — even with 2 system blocks present).
-    expect(beatPrompt).not.toContain("[历史已压缩 · 板砖]");
+    expect(beatPrompt).not.toContain("板砖之前做过的事（细节不在手边）：");
     // Raw blocks present in the beat prompt.
-    expect(beatPrompt).toContain("patch preview: foo.ts");
-    expect(beatPrompt).toContain('Reading {"path":"foo.ts"}'); // ADDED — raw, uncompacted
+    expect(beatPrompt).toContain("改动 foo.ts");
+    expect(beatPrompt).toContain('{"path":"foo.ts"}'); // the step, uncompacted
   });
 
   it("selfCorrection + compactable system run upstream: both preserved in next-turn prompt", async () => {
@@ -6723,9 +6724,9 @@ describe("runActorCompletionTurn — compaction (2026-05-24)", () => {
     expect(lastPrompt).toContain("——换个说法");
     expect(lastPrompt).toContain("改了的话。@板砖");
     // Bridge output compacted.
-    expect(lastPrompt).toContain("[历史已压缩 · 板砖]");
-    expect(lastPrompt).toContain("Reading x.ts");
-    expect(lastPrompt).toContain("Writing x.ts");
+    expect(lastPrompt).toContain("板砖之前做过的事（细节不在手边）：");
+    expect(lastPrompt).toContain("读 x.ts");
+    expect(lastPrompt).toContain("写 x.ts");
   });
 });
 

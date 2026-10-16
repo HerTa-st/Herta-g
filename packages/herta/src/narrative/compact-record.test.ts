@@ -107,7 +107,7 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
       body: "↳ background bg-1: running",
       digest: { kind: "bg", id: "bg-1", state: "running" },
     };
-    expect(digestSystemBlock(bg)).toBe("background bg-1: running");
+    expect(digestSystemBlock(bg)).toBe("后台命令 bg-1 在跑");
     const todo: SystemBlock = {
       kind: "system",
       label: "差分协处理器",
@@ -117,13 +117,13 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
     expect(digestSystemBlock(todo)).toBeNull();
   });
 
-  it("renders the B1 no-op marker as '（板砖无产出）'", () => {
+  it("renders the B1 no-op marker as 「板砖这次什么也没动。」 (ADR 0079)", () => {
     const block: SystemBlock = {
       kind: "system",
       label: "差分协处理器",
       body: "无产出 — 这次没有触发任何文件、目录或命令操作。",
     };
-    expect(digestSystemBlock(block)).toBe("（板砖无产出）");
+    expect(digestSystemBlock(block)).toBe("板砖这次什么也没动。");
   });
 
   it("an attachment digest is the name and a plain aside, no path or sidecar (ADR 0079), in both languages", () => {
@@ -170,20 +170,24 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
       },
       evidenceDetail: "↳ 摘要 …\nOVERVIEW-LINE",
     };
+    // The document by name, not its store paths (ADR 0079); 板砖 finds the
+    // sidecar through its own lines.
     expect(digestSystemBlock(block)).toBe(
-      "Digest .herta/attachments/s1/b.pdf.txt → .herta/attachments/s1/b.pdf.digest.txt · 27 chunks · 正文已略去",
+      "通读了 b.pdf，共 27 段（摘要不在手边）",
     );
-    expect(digestSystemBlock(block, "en")).toContain("body elided");
+    expect(digestSystemBlock(block, "en")).toBe(
+      "Read through b.pdf, 27 parts (summary not at hand)",
+    );
   });
 
-  it("digests a role:noop-marker block to （板砖无产出）", () => {
+  it("digests a role:noop-marker block to 「板砖这次什么也没动。」", () => {
     const block: SystemBlock = {
       kind: "system",
       label: "差分协处理器",
       body: "无产出 — 这次没有触发任何文件、目录或命令操作。",
       role: "noop-marker",
     };
-    expect(digestSystemBlock(block)).toBe("（板砖无产出）");
+    expect(digestSystemBlock(block)).toBe("板砖这次什么也没动。");
   });
 
   it("still digests a roleless 无产出 body (fallback for pre-role persisted records)", () => {
@@ -192,7 +196,7 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
       label: "差分协处理器",
       body: "无产出 — 旧记录",
     };
-    expect(digestSystemBlock(block)).toBe("（板砖无产出）");
+    expect(digestSystemBlock(block)).toBe("板砖这次什么也没动。");
   });
 
   it("falls back to first non-empty line truncated to 60 chars for unknown 差分协处理器 bodies", () => {
@@ -281,7 +285,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading foo.ts\n- Writing foo.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading foo.ts\n- Writing foo.ts",
     );
   });
 
@@ -304,7 +308,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts, b.ts, c.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts, b.ts, c.ts",
     );
   });
 
@@ -322,7 +326,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Writing a.ts, b.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Writing a.ts, b.ts",
     );
   });
 
@@ -345,7 +349,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts\n- Writing b.ts\n- Reading c.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts\n- Writing b.ts\n- Reading c.ts",
     );
   });
 
@@ -369,7 +373,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts\n- Writing a.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts\n- Writing a.ts",
     );
   });
 
@@ -413,7 +417,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts, b.ts\n- write_new_file failed (file_exists)\n- Reading c.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts, b.ts\n- write_new_file failed (file_exists)\n- Reading c.ts",
     );
   });
 });
@@ -463,7 +467,7 @@ describe("compactRecordForPrompt — walker", () => {
     expect(compacted[2]).toEqual({
       kind: "system",
       label: "系统",
-      body: "[历史已压缩 · 板砖]\n- Reading a.ts\n- Writing a.ts",
+      body: "板砖之前做过的事（细节不在手边）：\n- Reading a.ts\n- Writing a.ts",
     });
     expect(compacted[3]).toEqual(record[4]);
   });
@@ -501,13 +505,13 @@ describe("compactRecordForPrompt — walker", () => {
     expect(compacted[2]).toEqual({
       kind: "system",
       label: "系统",
-      body: "[历史已压缩 · 板砖]\n- Reading a.ts, b.ts",
+      body: "板砖之前做过的事（细节不在手边）：\n- Reading a.ts, b.ts",
     });
     expect(compacted[3]).toEqual(record[4]); // the beat
     expect(compacted[4]).toEqual({
       kind: "system",
       label: "系统",
-      body: "[历史已压缩 · 板砖]\n- Writing a.ts\n- Tests: 8/8 passed",
+      body: "板砖之前做过的事（细节不在手边）：\n- Writing a.ts\n- Tests: 8/8 passed",
     });
   });
 
@@ -646,7 +650,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     const out = compactRecordForPrompt(later);
     const text = JSON.stringify(out);
     expect(text).not.toContain("const x = 1;");
-    expect(text).toContain("Excerpt src/a.ts:120-121");
+    expect(text).toContain("看过 src/a.ts 第 120–121 行（原文不在手边）");
   });
 
   it("a search-hit row folds to its citation with the lines elided (2026-08-17)", () => {
@@ -686,9 +690,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     ];
     const text = JSON.stringify(compactRecordForPrompt(later));
     expect(text).not.toContain("CUDA_VISIBLE_DEVICES=0");
-    expect(text).toContain(
-      "Search /CUDA/ · 2 matches in 1 files · 匹配行已略去",
-    );
+    expect(text).toContain("搜索 /CUDA/：1 个文件里 2 处（原文不在手边）");
   });
 
   it("a finding row survives compaction WHOLE — the claim is the deliverable (ADR 0039)", () => {
@@ -712,7 +714,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
       { kind: "user", text: "下一件事" },
     ];
     const text = JSON.stringify(compactRecordForPrompt(later));
-    expect(text).toContain("Finding: 崩在显存超限。 (log.txt:33)");
+    expect(text).toContain("结论：崩在显存超限。（log.txt:33）");
   });
 
   it("State 1 (verdict turn): passes the done-marker through verbatim with evidenceDetail", () => {
@@ -735,7 +737,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     const summary = out.find(
       (b) =>
         b.kind === "system" &&
-        (b as { body: string }).body.includes("历史已压缩"),
+        (b as { body: string }).body.includes("板砖之前做过的事"),
     );
     expect(summary).toBeDefined();
   });
@@ -765,7 +767,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     ];
     const out = compactRecordForPrompt(record);
     expect(out).toHaveLength(1);
-    expect((out[0] as { body: string }).body).toContain("历史已压缩");
+    expect((out[0] as { body: string }).body).toContain("板砖之前做过的事");
   });
 
   it("State 1: does not drop system blocks that follow the pass-through done-marker", () => {
@@ -809,7 +811,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     const summary = out.find(
       (b) =>
         b.kind === "system" &&
-        (b as { body: string }).body.includes("历史已压缩"),
+        (b as { body: string }).body.includes("板砖之前做过的事"),
     );
     expect(summary).toBeDefined();
     // Both x.ts and y.ts survive (in the summary).
@@ -822,7 +824,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
   // Blocks written since 2026-07-04 carry `digest` data; the body-regex
   // path above survives only for pre-digest persisted records.
 
-  it("renders op digests: Reading/Writing plain, Running backticked, Planning skipped", () => {
+  it("op rows are steps: no folded line of their own — the summary says what came of them (ADR 0079)", () => {
     const base = { kind: "system" as const, label: "差分协处理器" as const };
     expect(
       digestSystemBlock({
@@ -830,14 +832,14 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "Reading src/foo.ts",
         digest: { kind: "op", verb: "Reading", arg: "src/foo.ts" },
       }),
-    ).toBe("Reading src/foo.ts");
+    ).toBeNull();
     expect(
       digestSystemBlock({
         ...base,
         body: "Running pnpm test",
         digest: { kind: "op", verb: "Running", arg: "pnpm test" },
       }),
-    ).toBe("Running `pnpm test`");
+    ).toBeNull();
     expect(
       digestSystemBlock({
         ...base,
@@ -857,7 +859,9 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
       body: "Writing scripts/merge_sort.py",
       digest: { kind: "op", verb: "Writing", arg: "scripts/merge_sort.py" },
     });
-    expect(out).toBe("Writing scripts/merge_sort.py");
+    // The legacy fallback would have kept the body's first line; the digest
+    // says it is a step, which folds to nothing (ADR 0079).
+    expect(out).toBeNull();
   });
 
   it("renders tests digests from status + summary (both labels' legacy paths never matched real bodies)", () => {
@@ -868,7 +872,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "↳ tests: exit 0, 3.21s",
         digest: { kind: "tests", status: "passed", summary: "exit 0, 3.21s" },
       }),
-    ).toBe("Tests passed (exit 0, 3.21s)");
+    ).toBe("测试通过");
     expect(
       digestSystemBlock({
         kind: "system",
@@ -876,7 +880,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "↳ tests: exit 1, 5.02s",
         digest: { kind: "tests", status: "failed", summary: "exit 1, 5.02s" },
       }),
-    ).toBe("Tests failed (exit 1, 5.02s)");
+    ).toBe("测试没过");
   });
 
   it("renders tool-fail digests and skip digests", () => {
@@ -887,7 +891,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "↳ edit_file failed: stale_read: file changed",
         digest: { kind: "tool-fail", tool: "edit_file", code: "stale_read" },
       }),
-    ).toBe("edit_file failed (stale_read)");
+    ).toBe("这一步没成（edit_file）：文件读过之后又被改了");
     expect(
       digestSystemBlock({
         kind: "system",
@@ -921,7 +925,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
     expect(out).toBe("x".repeat(60));
   });
 
-  it("structured Reading lines coalesce in buildCompactionBody like legacy ones", () => {
+  it("a run that only looked around folds to its steps, a kind's consecutive ones on one line (ADR 0079)", () => {
     const body = buildCompactionBody([
       {
         kind: "system",
@@ -936,7 +940,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         digest: { kind: "op", verb: "Reading", arg: "b.ts" },
       },
     ]);
-    expect(body).toContain("- Reading a.ts, b.ts");
+    expect(body).toContain("- 读 a.ts、b.ts");
   });
 
   it("a block WITHOUT digest still digests via the legacy body path (pre-digest records)", () => {
@@ -976,10 +980,10 @@ describe("compaction markers — session language", () => {
     const zh = buildCompactionBody([excerpt, noop], "zh");
     const en = buildCompactionBody([excerpt, noop], "en");
     expect(zh).toBe(
-      "[历史已压缩 · 板砖]\n- Excerpt src/a.ts:120-140 · 正文已略去\n- （板砖无产出）",
+      "板砖之前做过的事（细节不在手边）：\n- 看过 src/a.ts 第 120–140 行（原文不在手边）\n- 板砖这次什么也没动。",
     );
     expect(en).toBe(
-      "[history compacted · 板砖]\n- Excerpt src/a.ts:120-140 · body elided\n- (板砖 produced nothing)",
+      "What 板砖 did before (details not at hand):\n- Was shown src/a.ts lines 120–140 (not at hand)\n- 板砖 did nothing this time.",
     );
   });
 
@@ -1019,8 +1023,8 @@ describe("compaction markers — session language", () => {
       { kind: "herta", surface: "speech", text: "there." },
     ];
     const en = JSON.stringify(compactRecordForPrompt(record, { lang: "en" }));
-    expect(en).toContain("[history compacted · 板砖]");
-    expect(en).toContain("body elided");
+    expect(en).toContain("What 板砖 did before (details not at hand):");
+    expect(en).toContain("(not at hand)");
     // The content itself is gone either way — the note describes a real loss.
     expect(en).not.toContain("const x = 1;");
   });
@@ -1110,7 +1114,9 @@ describe("stranded evidenceDetail — the run-of-one hole (self-review 2026-08-1
     const marker = out.find(
       (b) => b.kind === "system" && b.body.includes("完成 · 1 个文件"),
     );
-    expect(marker?.kind === "system" && marker.body).toContain("git diff");
+    expect(marker?.kind === "system" && marker.body).toContain(
+      "（改动的 diff 不在手边）",
+    );
   });
 
   it("the State-1 pass-through done-marker still keeps its roll-up", () => {
@@ -1173,10 +1179,10 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       { kind: "user", text: "改了哪几行？" },
     ]);
     const summary = out.find(
-      (b) => b.kind === "system" && b.body.includes("历史已压缩"),
+      (b) => b.kind === "system" && b.body.includes("板砖之前做过的事"),
     );
     expect(summary?.kind === "system" && summary.body).toContain(
-      "派板砖用 git diff 重读",
+      "（改动的 diff 不在手边）",
     );
   });
 
@@ -1195,7 +1201,7 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       { kind: "user", text: "换个话题" },
     ]);
     const s = JSON.stringify(out);
-    expect(s).toContain("历史已压缩");
+    expect(s).toContain("板砖之前做过的事");
     expect(s).not.toContain("git diff");
   });
 
@@ -1212,7 +1218,7 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       { kind: "user", text: "b 改了哪几行？" },
     ]);
     const hinted = out.filter(
-      (b) => b.kind === "system" && b.body.includes("git diff"),
+      (b) => b.kind === "system" && b.body.includes("（改动的 diff 不在手边）"),
     );
     expect(hinted).toHaveLength(1);
     expect(hinted[0]?.kind === "system" && hinted[0].body).toContain(
@@ -1231,9 +1237,7 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       ],
       { lang: "en" },
     );
-    expect(JSON.stringify(out)).toContain(
-      "re-read it via git diff before quoting details",
-    );
+    expect(JSON.stringify(out)).toContain("(the diff isn't at hand)");
   });
 });
 
@@ -1966,7 +1970,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       { kind: "herta", surface: "speech", text: "。" },
     ]);
     const s = JSON.stringify(out);
-    expect(s).not.toContain("历史已压缩");
+    expect(s).not.toContain("板砖之前做过的事");
     expect(s).not.toContain("CONFIDENTIAL-HEAD-LINE");
     expect(s).not.toContain("SECOND-HEAD-LINE");
     expect(sys(out).map((b) => b.digest?.kind)).toEqual([
@@ -1996,7 +2000,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     const s = JSON.stringify(out);
     // The dispatch pair still compacts; the attachment folded on its own.
-    expect(s).toContain("历史已压缩");
+    expect(s).toContain("板砖之前做过的事");
     expect(s).not.toContain("CONFIDENTIAL-HEAD-LINE");
     expect(s).toContain("读过，原文不在手边");
   });

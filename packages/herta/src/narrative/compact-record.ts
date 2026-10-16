@@ -6,6 +6,7 @@ import type {
 } from "@herta/core";
 import { COMPACTION_TEXT } from "./compaction-text.js";
 import type { PromptLang } from "./prompt-lang.js";
+import { foldedRunLine, foldedStepLines } from "./record-voice.js";
 
 /**
  * Render a single system block into one digest line per the
@@ -129,63 +130,6 @@ function renderStructuredDigest(
   block: SystemBlock,
 ): string | null {
   switch (d.kind) {
-    case "op": {
-      if (d.verb === "Planning") return null; // skip per spec §4.1
-      if (d.verb === "Running") return `Running \`${d.arg}\``;
-      return `${d.verb} ${d.arg}`.trim();
-    }
-    case "tests":
-      return d.status === "passed"
-        ? `Tests passed (${d.summary})`
-        : `Tests ${d.status} (${d.summary})`;
-    case "tool-fail":
-      return `${d.tool} failed (${d.code})`;
-    case "skip":
-      return null;
-    case "patch":
-      // Compaction keeps the MAGNITUDE, not the diff: after a compaction the
-      // patch body is gone, and "she changed 96 lines of spawn-git.ts" is the
-      // part worth carrying forward. Unmeasurable changes say so.
-      return d.add === undefined || d.del === undefined
-        ? `Patched ${d.files.join(", ")} (via a command, no line diff)`
-        : `Patched ${d.files.join(", ")} (+${d.add} -${d.del})`;
-    case "bg":
-      // One line per lifecycle row; the consecutive-state suppression in the
-      // bridge already keeps these sparse.
-      return `background ${d.id}: ${d.state}`;
-    case "todo":
-      // Legacy rows (nothing writes them since ADR 0073): the plan layout
-      // AND the "todo k/n" progress rows were working state, not operations
-      // — same skip rationale as the Planning op rows before them (spec §4.1).
-      return null;
-    case "excerpt":
-      // The CITATION survives compaction, the excerpt does not (ADR 0027):
-      // the content rode `evidenceDetail`, which this summary never carries,
-      // so a later turn keeps knowing she was shown that span without
-      // re-paying its tokens every turn thereafter.
-      //
-      // The elision is stated, not left implicit. Every other bullet here
-      // digests a block that never had a body to lose — `Reading foo.ts` is
-      // the WHOLE of what that block ever said. This one is the exception:
-      // Herta really did read those lines last turn, and a bare citation
-      // formatted exactly like its neighbours invites her to keep quoting
-      // from a span that is no longer in front of her — the same
-      // fabricated-receipt failure supervisor rule 9 exists to catch, except
-      // sourced from the harness rather than from her. Saying `正文已略去`
-      // costs four characters and makes "I was shown this" and "I can still
-      // read this" two distinguishable states.
-      return `Excerpt ${d.path}:${d.from}-${d.to} · ${COMPACTION_TEXT[lang].excerptElided}`;
-    case "finding":
-      // NOT elided (ADR 0039): the claim is the conclusion the brief was for,
-      // short by schema; dropping it would drop the one thing worth keeping.
-      // The cites travel so a later turn can send 板砖 back to them.
-      return `Finding: ${d.claim}${d.cites.length > 0 ? ` (${d.cites.join(", ")})` : ""}`;
-    case "search":
-      // Third member of the excerpt/attachment family (2026-08-17): the hit
-      // list rode `evidenceDetail` and is gone once this folds, so the
-      // citation says so — the counts stay, the lines do not. Same fabricated
-      // -quote hazard, same four-character remedy.
-      return `Search /${d.pattern}/ · ${d.matches} matches in ${d.files} files · ${COMPACTION_TEXT[lang].searchElided}`;
     case "attachment": {
       // Same two-state contract as `excerpt` above, and the same hazard for
       // the same reason: she really was shown the head of this document last
@@ -223,40 +167,9 @@ function renderStructuredDigest(
             : text.attachmentNotAtHand;
       return `附件 ${d.name}${lang === "en" ? ` (${note})` : `（${note}）`}`;
     }
-    case "digest":
-      // The overview rode evidenceDetail and is gone; the sidecar is not —
-      // keep its path so a later turn sends 板砖 to `cat` it rather than
-      // re-digest (ADR 0043).
-      return `Digest ${d.source} → ${d.path} · ${d.chunks} chunks · ${COMPACTION_TEXT[lang].excerptElided}`;
-    case "undo": {
-      // The 开拓者 took a turn's edits back (ADR 0074). What a later turn
-      // must keep is what is STILL changed — a file skipped or a command's
-      // edit is on disk, and "the edits were undone" alone would let her
-      // assume a clean tree.
-      const back = d.files
-        .filter((f) => f.result === "restored" || f.result === "deleted")
-        .map((f) => f.path);
-      const kept = d.files
-        .filter(
-          (f) =>
-            f.result !== "restored" &&
-            f.result !== "deleted" &&
-            f.result !== "unchanged",
-        )
-        .map((f) => `${f.path} (${f.result.replace("_", " ")})`);
-      const parts = [
-        `Undid the turn's edits: ${back.length > 0 ? back.join(", ") : "nothing to restore"}`,
-        ...(kept.length > 0 ? [`still changed: ${kept.join(", ")}`] : []),
-        ...(d.commands.length > 0
-          ? [`changed by commands, not undone: ${d.commands.join(", ")}`]
-          : d.commandsUnknown
-            ? ["commands ran; their changes, if any, not undone"]
-            : []),
-      ];
-      return parts.join(" · ");
-    }
-    case "text":
-      return fallbackDigest(d.text);
+    default:
+      // 板砖's rows fold into what was done, in her words (ADR 0079 §2).
+      return foldedRunLine(block, lang);
   }
 }
 
@@ -279,46 +192,64 @@ export function buildCompactionBody(
   blocks: readonly SystemBlock[],
   lang: PromptLang = "zh",
 ): string {
-  // 1. Map blocks through the template; drop skipped entries.
+  // 1. Each row as a line of what was done (ADR 0079 §2); a failed command
+  //    names the command its result row answers. Rows written before the
+  //    structured digest keep the legacy templates.
   const lines: string[] = [];
+  let lastCommand: string | undefined;
   for (const block of blocks) {
-    const digest = digestSystemBlock(block, lang);
-    if (digest !== null) lines.push(digest);
-  }
-  if (lines.length === 0) return "";
-
-  // 2. Consecutive-same-verb coalesce. Only Reading and Writing
-  //    coalesce (those are the verbs that commonly run in batches);
-  //    Running / Tests / failed entries stay one-per-bullet.
-  const coalesced: string[] = [];
-  for (const line of lines) {
-    const verb = matchCoalesceVerb(line);
-    const last = coalesced[coalesced.length - 1];
-    if (verb !== null && last !== undefined) {
-      const lastVerb = matchCoalesceVerb(last);
-      if (lastVerb !== null && lastVerb.verb === verb.verb) {
-        coalesced[coalesced.length - 1] =
-          `${lastVerb.verb} ${lastVerb.rest}, ${verb.rest}`;
-        continue;
-      }
+    if (block.digest?.kind === "op" && block.digest.verb === "Running") {
+      lastCommand = block.digest.arg;
     }
-    coalesced.push(line);
+    const structured =
+      block.digest !== undefined ||
+      block.markerSummary !== undefined ||
+      block.role === "noop-marker";
+    const line =
+      structured && block.digest?.kind !== "attachment"
+        ? foldedRunLine(block, lang, lastCommand)
+        : digestSystemBlock(block, lang);
+    if (line !== null) lines.push(line);
+  }
+  // A run with no outcome to report (板砖 only looked around) says what it
+  // ran, rather than nothing.
+  const outcomes = lines.length > 0 ? lines : foldedStepLines(blocks, lang);
+  if (outcomes.length === 0) return "";
+  // Legacy rows' `Reading` / `Writing` lines, consecutive, as one (records
+  // written before the structured digest still fold through the templates).
+  const raw: string[] = [];
+  for (const line of outcomes) {
+    const verb = /^(Reading|Writing)\s+(.+)$/.exec(line);
+    const last = raw[raw.length - 1];
+    const lastVerb =
+      last !== undefined ? /^(Reading|Writing)\s+(.+)$/.exec(last) : null;
+    if (verb !== null && lastVerb !== null && lastVerb[1] === verb[1]) {
+      raw[raw.length - 1] = `${last}, ${verb[2]}`;
+      continue;
+    }
+    raw.push(line);
+  }
+  // The same line again and again — tests rerun after each small fix — is
+  // one line with a count.
+  const kept: string[] = [];
+  let repeats = 1;
+  for (let k = 0; k < raw.length; k += 1) {
+    const line = raw[k] as string;
+    if (raw[k + 1] === line) {
+      repeats += 1;
+      continue;
+    }
+    kept.push(
+      repeats > 1
+        ? `${line}${lang === "en" ? ` (${repeats} times)` : `（${repeats} 次）`}`
+        : line,
+    );
+    repeats = 1;
   }
 
-  // 3. Assemble with header.
+  // 2. Assemble with header.
   const header = COMPACTION_TEXT[lang].header;
-  const bullets = coalesced.map((l) => `- ${l}`).join("\n");
-  return `${header}\n${bullets}`;
-}
-
-function matchCoalesceVerb(
-  line: string,
-): { verb: "Reading" | "Writing"; rest: string } | null {
-  const m = line.match(/^(Reading|Writing)\s+(.+)$/);
-  if (m === null) return null;
-  const verb = m[1] as "Reading" | "Writing";
-  const rest = m[2] ?? "";
-  return { verb, rest };
+  return `${header}\n${kept.map((l) => `- ${l}`).join("\n")}`;
 }
 
 /**

@@ -262,7 +262,7 @@ describe("predictionPrompt — the last few turns, 板砖's runs folded, with gu
     expect(
       text.slice(PREDICTION_FRAME.work.zh.length).split("→ 差分协处理器"),
     ).toHaveLength(2);
-    expect(text).toContain("历史已压缩");
+    expect(text).toContain("板砖之前做过的事");
     expect(text.startsWith(PREDICTION_FRAME.work.zh)).toBe(true);
     expect(text.endsWith(`${PREDICTION_HINT.work.zh}\n（开拓者 说）\n`)).toBe(
       true,

@@ -1,0 +1,392 @@
+import type { SystemBlock } from "@herta/core";
+import { describe, expect, it } from "vitest";
+import {
+  detailForHerta,
+  elisionNote,
+  foldedRunLine,
+  foldedStepLines,
+  receiptForHerta,
+  systemRowForHerta,
+} from "./record-voice.js";
+
+/** 板砖's rows as Herta reads them (ADR 0079 §2, owner 2026-10-16). */
+
+const row = (over: Partial<SystemBlock>): SystemBlock => ({
+  kind: "system",
+  label: "差分协处理器",
+  body: "",
+  ...over,
+});
+const read = (b: SystemBlock, lang: "zh" | "en" = "zh") => {
+  const out = systemRowForHerta(b, lang);
+  return out === null
+    ? null
+    : `${out.body}${out.evidenceDetail !== undefined ? `\n${out.evidenceDetail}` : ""}`;
+};
+
+describe("the done-marker reads as a sentence", () => {
+  const marker = (state: string, extra: object = {}): SystemBlock =>
+    row({
+      body: "完成 · 2 个文件 · +196 −0 · 测试 6/6",
+      role: "done-marker",
+      markerSummary: {
+        kind: "done",
+        state,
+        fileCount: 2,
+        lines: { add: 196, del: 0 },
+        tests: { passed: 6, failed: 0 },
+        riskCount: 0,
+        ...extra,
+      } as never,
+    });
+
+  it("states what changed and what the tests said", () => {
+    expect(read(marker("completed"))).toBe(
+      "做完了：改了 2 个文件（+196 −0），测试 6/6 通过。",
+    );
+    expect(read(marker("completed"), "en")).toBe(
+      "Done: changed 2 files (+196 −0), tests 6/6 passed.",
+    );
+  });
+
+  it("the user's own Stop is never a failure (audit 2026-07-24, 1.4)", () => {
+    expect(read(marker("interrupted"))).toMatch(/^停下了：/u);
+    expect(read(marker("interrupted"))).not.toContain("没做成");
+  });
+
+  it("failed tests, risks, a commit and the step limit are each said", () => {
+    const out = read(
+      marker("partial", {
+        tests: { passed: 4, failed: 1 },
+        riskCount: 2,
+        git: { commit: "abc1234" },
+        stepLimit: true,
+      }),
+    );
+    expect(out).toBe(
+      "做了一部分：改了 2 个文件（+196 −0），测试 4 过、1 没过，提交 abc1234，留了 2 个风险，步数到了上限。",
+    );
+  });
+
+  it("its detail loses the arrows, the log path, the sandbox and the call ids; a command's own `; ` survives", () => {
+    const out = read({
+      ...marker("completed"),
+      evidenceDetail: [
+        "↳ 摘录 test_primes.py:30-31",
+        "30\tclass TestSieveFast(unittest.TestCase):",
+        "31\t    pass",
+        "↳ 改动文件: a.py, b.py",
+        "↳ 结论: 快了 24 倍（bench.py:12）",
+        "↳ 依据: ran `cd /c/Users/x/.herta/workspaces/abc && for L in 1 2; do echo $L; done` (exit 0, 0.26s) — log at .herta/logs/x.log（call_00_ab12）",
+      ].join("\n"),
+      evidence: [
+        { kind: "files", paths: ["a.py", "b.py"] },
+        { kind: "findings", items: ["快了 24 倍（bench.py:12）"] },
+        {
+          kind: "evidence",
+          items: [
+            "ran `cd /c/Users/x/.herta/workspaces/abc && for L in 1 2; do echo $L; done` (exit 0, 0.26s) — log at .herta/logs/x.log（call_00_ab12）",
+          ],
+        },
+      ],
+    });
+    expect(out).toBe(
+      [
+        "做完了：改了 2 个文件（+196 −0），测试 6/6 通过。",
+        "摘录 test_primes.py 第 30–31 行：",
+        "30\tclass TestSieveFast(unittest.TestCase):",
+        "31\t    pass",
+        "改了：a.py、b.py",
+        "结论：快了 24 倍（bench.py:12）",
+        "依据：运行 `for L in 1 2; do echo $L; done`",
+      ].join("\n"),
+    );
+  });
+
+  it("a hint line the compaction added stays under the sentence", () => {
+    const hinted = {
+      ...marker("completed"),
+      body: "完成 · 2 个文件\n（改动的 diff 不在手边）",
+    };
+    expect(read(hinted)).toBe(
+      "做完了：改了 2 个文件（+196 −0），测试 6/6 通过。\n（改动的 diff 不在手边）",
+    );
+  });
+
+  it("with its detail dropped by the compaction, it says the details are not at hand", () => {
+    const elided = {
+      ...marker("completed"),
+      body: `完成 · 2 个文件${elisionNote("zh")}`,
+    };
+    expect(read(elided)).toBe(
+      "做完了：改了 2 个文件（+196 −0），测试 6/6 通过。（细节不在手边）",
+    );
+  });
+});
+
+describe("板砖's other rows", () => {
+  it("a step names what it did; a memory save's kind and a planning step drop out", () => {
+    expect(
+      read(
+        row({
+          body: "Running pnpm test",
+          digest: { kind: "op", verb: "Running", arg: "pnpm test" },
+        }),
+      ),
+    ).toBe("运行 `pnpm test`");
+    expect(
+      read(
+        row({
+          body: "Reading a.ts:1-9",
+          digest: { kind: "op", verb: "Reading", arg: "a.ts:1-9" },
+        }),
+      ),
+    ).toBe("读 a.ts 第 1–9 行");
+    expect(
+      read(
+        row({
+          body: "Saving memory test_command",
+          digest: { kind: "op", verb: "Saving memory", arg: "test_command" },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      read(
+        row({
+          body: "Planning x",
+          digest: { kind: "op", verb: "Planning", arg: "x" },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("a command's result: its output, its exit code only when it failed, nothing when it printed nothing and passed", () => {
+    const result = (exitCode: number, output?: string) =>
+      row({
+        body: `↳ exit ${exitCode} · 1 lines`,
+        digest: {
+          kind: "text",
+          text: `↳ exit ${exitCode} · 1 lines`,
+          exitCode,
+          lineCount: 1,
+        },
+        ...(output !== undefined
+          ? {
+              evidenceDetail: `↳ 输出:\n${output}\n…(truncated, full log: .herta/logs/a.log)`,
+            }
+          : {}),
+      });
+    expect(read(result(0, "ok"))).toBe("输出：\nok\n……（后面还有，没贴全）");
+    expect(read(result(2, "boom"))).toBe(
+      "没成，退出码 2\n输出：\nboom\n……（后面还有，没贴全）",
+    );
+    expect(read(result(0))).toBeNull();
+  });
+
+  it("a test run, a change, a finding, a remembered fact, a failure, a background command", () => {
+    expect(
+      read(
+        row({
+          body: "↳ tests: exit 0, 0.24s",
+          digest: { kind: "tests", status: "passed", summary: "exit 0, 0.24s" },
+        }),
+      ),
+    ).toBe("测试通过");
+    expect(
+      read(
+        row({
+          body: "↳ tests: 3 passed, 1 failed",
+          digest: {
+            kind: "tests",
+            status: "failed",
+            summary: "3 passed, 1 failed",
+          },
+        }),
+      ),
+    ).toBe("测试没过（3 passed, 1 failed）");
+    expect(
+      read(
+        row({
+          label: "系统",
+          body: "patch preview: a.ts (+3 -1)\n\n```diff\n+x\n```",
+          digest: { kind: "patch", files: ["a.ts"], add: 3, del: 1 },
+        }),
+      ),
+    ).toBe("改动 a.ts（+3 −1）\n\n```diff\n+x\n```");
+    expect(
+      read(
+        row({
+          body: "↳ finding: 崩在显存超限。 — log.txt:33",
+          digest: {
+            kind: "finding",
+            claim: "崩在显存超限。",
+            cites: ["log.txt:33"],
+          },
+        }),
+      ),
+    ).toBe("结论：崩在显存超限。（log.txt:33）");
+    expect(
+      read(
+        row({
+          body: "↳ remembered: 测试用 pnpm test",
+          digest: { kind: "text", text: "↳ remembered: 测试用 pnpm test" },
+        }),
+      ),
+    ).toBe("记下：测试用 pnpm test");
+    expect(
+      read(
+        row({
+          label: "系统",
+          body: "↳ bash failed: path_denied: .herta is denied",
+          digest: {
+            kind: "tool-fail",
+            tool: "bash",
+            code: "path_denied",
+            message: ".herta is denied",
+          },
+          evidenceDetail: "↳ 提示: read the file by its full path",
+        }),
+      ),
+    ).toBe(
+      "这一步没成（bash）：.herta is denied\n提示：read the file by its full path",
+    );
+    expect(
+      read(
+        row({
+          body: "↳ background bg-1: exited (0)",
+          digest: { kind: "bg", id: "bg-1", state: "exited", exitCode: 0 },
+        }),
+      ),
+    ).toBe("后台命令 bg-1 结束，退出码 0");
+  });
+
+  it("an excerpt reads its lines under a plain header; a no-op says 板砖 did nothing", () => {
+    expect(
+      read(
+        row({
+          body: "↳ excerpt a.ts:5-6",
+          digest: { kind: "excerpt", path: "a.ts", from: 5, to: 6 },
+          evidenceDetail: "↳ 摘录 a.ts:5-6\n5\tx\n6\ty",
+        }),
+      ),
+    ).toBe("摘录 a.ts 第 5–6 行：\n5\tx\n6\ty");
+    expect(
+      read(
+        row({
+          body: "无产出 — 这次没有触发任何文件、目录或命令操作。",
+          role: "noop-marker",
+        }),
+      ),
+    ).toBe("板砖这次什么也没动。");
+  });
+
+  it("an attachment is the fold's, and a row with no digest keeps its own text", () => {
+    const attachment = row({
+      label: "系统",
+      body: "附件 a.pdf",
+      digest: {
+        kind: "attachment",
+        name: "a.pdf",
+        path: "p",
+        lines: 1,
+        chars: 1,
+      },
+    });
+    expect(systemRowForHerta(attachment, "zh")).toBe(attachment);
+    const legacy = row({ body: 'Reading {"path":"old.ts"}' });
+    expect(systemRowForHerta(legacy, "zh")).toBe(legacy);
+  });
+});
+
+describe("folded lines: what was done, never how", () => {
+  it("a failed command names the command its result row answers", () => {
+    const fail = row({
+      body: "↳ exit 128 · 2 lines",
+      digest: {
+        kind: "text",
+        text: "↳ exit 128 · 2 lines",
+        exitCode: 128,
+        lineCount: 2,
+      },
+    });
+    expect(foldedRunLine(fail, "zh", "git status")).toBe(
+      "运行 `git status`（退出码 128）",
+    );
+    expect(foldedRunLine(fail, "zh")).toBe("没成，退出码 128");
+  });
+
+  it("a failure folds to its cause in plain words, not the tool's message", () => {
+    const fail = row({
+      label: "系统",
+      body: "↳ bash failed: path_denied: …",
+      digest: {
+        kind: "tool-fail",
+        tool: "bash",
+        code: "path_denied",
+        message: "read-only command targets .herta",
+      },
+    });
+    expect(foldedRunLine(fail, "zh")).toBe(
+      "这一步没成（bash）：碰到了受保护的路径",
+    );
+  });
+
+  it("an excerpt and a search say they are not at hand", () => {
+    expect(
+      foldedRunLine(
+        row({
+          body: "",
+          digest: { kind: "excerpt", path: "a.ts", from: 1, to: 2 },
+        }),
+        "zh",
+      ),
+    ).toBe("看过 a.ts 第 1–2 行（原文不在手边）");
+    expect(
+      foldedRunLine(
+        row({
+          body: "",
+          digest: {
+            kind: "search",
+            pattern: "x",
+            matches: 3,
+            files: 2,
+            truncated: false,
+          },
+        }),
+        "en",
+      ),
+    ).toBe("Searched /x/: 3 matches in 2 files (not at hand)");
+  });
+
+  it("a run with no outcome folds to its steps, a kind's consecutive ones on one line", () => {
+    const op = (verb: "Reading" | "Running", arg: string) =>
+      row({ body: "", digest: { kind: "op", verb, arg } });
+    expect(
+      foldedStepLines(
+        [
+          op("Reading", "a.ts"),
+          op("Reading", "b.ts"),
+          op("Running", "ls"),
+          op("Running", "pwd"),
+        ],
+        "zh",
+      ),
+    ).toEqual(["读 a.ts、b.ts", "运行 `ls`", "运行 `pwd`"]);
+  });
+});
+
+describe("receipts and labels", () => {
+  it("a timed-out command, and a receipt it does not know, keep their meaning", () => {
+    expect(
+      receiptForHerta(
+        "timed out: npm run dev (120000ms) — partial output captured, log at .herta/logs/a.log",
+        "zh",
+      ),
+    ).toBe("运行 npm run dev 超时");
+    expect(receiptForHerta("edited a.ts", "zh")).toBe("edited a.ts");
+  });
+
+  it("an unknown label keeps its words without the arrow", () => {
+    expect(detailForHerta("↳ 待办: x", "zh")).toBe("待办: x");
+  });
+});

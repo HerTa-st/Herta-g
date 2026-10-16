@@ -27,7 +27,7 @@ import type { PromptLang } from "./prompt-lang.js";
 export const COMPACTION_TEXT = {
   zh: {
     /** Header of a compacted contiguous-system-run summary block. */
-    header: "[历史已压缩 · 板砖]",
+    header: "板砖之前做过的事（细节不在手边）：",
     /** Appended to an excerpt citation once its text is gone. Shared with the
      *  attachment citation: the fact is identical ("the body is no longer in
      *  front of you"), and two phrasings for one fact would only invite the
@@ -75,16 +75,18 @@ export const COMPACTION_TEXT = {
      *  invented detail instead — which then fossilized into recap and dream.
      *  Same prescription as the attachment hint: for a few turns, say the
      *  diff is re-readable, then stop nudging. */
-    diffRereadHint:
-      "（改动的 diff 已不在眼前，引用细节前可派板砖用 git diff 重读）",
+    diffRereadHint: "（改动的 diff 不在手边）",
     /** Digest of a `role: "noop-marker"` block. */
-    noOutput: "（板砖无产出）",
-    /** Footer replacing the tail of an over-long ```diff fence. */
+    noOutput: "板砖这次什么也没动。",
+    /** Footer replacing the tail of an over-long ```diff fence on the
+     *  user's screen, where the evidence it names is one click away. */
     diffSuppressed: (suppressed: number) =>
       `… (另有 ${suppressed} 行已略去 — 完整 diff 在证据里)`,
+    /** The same footer in Herta's prompt, in her own words (ADR 0079 §2). */
+    diffNotShown: (suppressed: number) => `……（还有 ${suppressed} 行没贴出来）`,
   },
   en: {
-    header: "[history compacted · 板砖]",
+    header: "What 板砖 did before (details not at hand):",
     excerptElided: "body elided",
     searchElided: "matched lines elided",
     attachmentUnreadable: {
@@ -106,10 +108,11 @@ export const COMPACTION_TEXT = {
         ? `Contents (${total} entries, the first ${shown} shown):`
         : `Contents (${total} entries):`,
     pictureMark: "(figure)",
-    diffRereadHint:
-      "(the diff is no longer in view — have 板砖 re-read it via git diff before quoting details)",
-    noOutput: "(板砖 produced nothing)",
+    diffRereadHint: "(the diff isn't at hand)",
+    noOutput: "板砖 did nothing this time.",
     diffSuppressed: (suppressed: number) =>
       `… (${suppressed} more lines suppressed — full diff in evidence)`,
+    diffNotShown: (suppressed: number) =>
+      `…(${suppressed} more lines not shown)`,
   },
 } as const satisfies Record<PromptLang, unknown>;
