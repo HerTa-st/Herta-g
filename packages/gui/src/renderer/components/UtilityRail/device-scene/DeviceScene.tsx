@@ -36,6 +36,11 @@ export interface DeviceSceneProps {
    *  next launch): shortly after live, after a theme change, and every
    *  ten minutes while drawing. */
   readonly onSnapshot?: (dataUrl: string) => void;
+  /** A lost scene that will be rebuilt: the card shows its glass — the
+   *  scene's own last picture — until the rebuild goes live or fails, not
+   *  the flat art, a different drawing of the device, for the seconds
+   *  between. Absent: the loss reads as not-live. */
+  readonly onPending?: () => void;
 }
 
 /** After live / a theme flip: past the focus cross-fade and the theme's
@@ -69,6 +74,8 @@ export function DeviceScene(props: DeviceSceneProps): JSX.Element {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onLive = useRef(props.onLive);
   onLive.current = props.onLive;
+  const onPending = useRef(props.onPending);
+  onPending.current = props.onPending;
   useEffect(
     () => () => {
       if (timer.current !== null) clearTimeout(timer.current);
@@ -85,8 +92,16 @@ export function DeviceScene(props: DeviceSceneProps): JSX.Element {
       rebuilds.current = 0;
     }
     liveAt.current = null;
-    if (rebuilds.current >= SCENE_REBUILD_LIMIT) return;
+    if (rebuilds.current >= SCENE_REBUILD_LIMIT) {
+      onLive.current(false);
+      return;
+    }
     rebuilds.current += 1;
+    // A flaky driver showed the flat art and the scene by turns, three
+    // times over (release review 2026-10-13): the glass holds the place.
+    const pending = onPending.current;
+    if (pending !== undefined) pending();
+    else onLive.current(false);
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       timer.current = null;
@@ -108,9 +123,9 @@ export function DeviceScene(props: DeviceSceneProps): JSX.Element {
  * immediately, probes the GPU path, then lazily imports the three.js scene
  * module and builds the scene; `onLive(true)` fires only after a first
  * frame, so the flat renders stay up until there is something to show. Any
- * failure — before or after — is `onLive(false)` and the card is flat
- * again; a LOSS after going live (the scene's fallback) also reports
- * `onLost`, which the wrapper above answers with a rebuild. The scene's
+ * other failure — before or after — is `onLive(false)` and the card is
+ * flat again; a LOSS (the scene's fallback) reports `onLost`, which the
+ * wrapper above answers with a rebuild, or with not-live past its limit. The scene's
  * inputs ride a ref so the mount effect runs once.
  */
 function DeviceSceneBuild(
@@ -186,9 +201,10 @@ function DeviceSceneBuild(
               maxWaitMs: IDLE_MOUNT_MAX_WAIT_MS,
             });
           }),
+        // Not-live or pending is the wrapper's call: it knows whether a
+        // rebuild follows.
         onFallback: () => {
           handle.current = null;
-          onLive.current(false);
           onLost.current();
         },
       });

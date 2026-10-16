@@ -99,8 +99,16 @@ export async function repl(deps: ReplDeps): Promise<void> {
       const record = await deps.actor.runTurn(wireText, controller.signal);
       // A beat — or, with the supervisor off, the whole reply — may still be
       // revealing at its paced cadence: let it finish before the prompt.
-      // (Optional call: test doubles of the renderer omit it.)
-      await deps.renderer.settled?.();
+      // Ctrl+C lands it at once: the turn is over, so the abort reached
+      // nothing and the wait ran on (release review 2026-10-13).
+      // (Optional calls: test doubles of the renderer omit them.)
+      const land = (): void => deps.renderer.landReveal?.();
+      controller.signal.addEventListener("abort", land, { once: true });
+      try {
+        await deps.renderer.settled?.();
+      } finally {
+        controller.signal.removeEventListener("abort", land);
+      }
       deps.renderer.update(record);
     } catch (err) {
       // Slice 9: if we crashed mid-stream, the renderer may be in

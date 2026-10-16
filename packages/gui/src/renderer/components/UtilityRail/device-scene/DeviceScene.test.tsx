@@ -272,6 +272,75 @@ describe("DeviceScene — a lost GPU context (UX review 2026-09-22, item 23)", (
   });
 });
 
+describe("DeviceScene — a loss that will be rebuilt is pending, not flat (release review 2026-10-13)", () => {
+  it("reports pending for each rebuild and not-live only past the limit", async () => {
+    vi.useFakeTimers();
+    try {
+      const gpu = { requestAdapter: async () => null };
+      vi.stubGlobal("navigator", { ...navigator, gpu });
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((
+        type: string,
+      ) =>
+        type === "webgl2"
+          ? {
+              getExtension: () => null,
+              getParameter: () => "NVIDIA GeForce",
+              RENDERER: 0,
+            }
+          : null) as typeof HTMLCanvasElement.prototype.getContext);
+      const fallbacks: Array<() => void> = [];
+      createDeviceScene.mockImplementation(
+        async (o: { onFallback: () => void }) => {
+          fallbacks.push(o.onFallback);
+          return {
+            stats: {
+              backend: "webgl2",
+              loadMs: 1,
+              compileMs: 1,
+              firstFrameMs: 1,
+              presentMs: 1,
+            },
+            snapshot: async () => null,
+            update: vi.fn(),
+            dispose: vi.fn(),
+          };
+        },
+      );
+      const onLive = vi.fn();
+      const onPending = vi.fn();
+      render(
+        <DeviceScene
+          state="idle"
+          theme="light"
+          paused={false}
+          liftPx={0}
+          onLive={onLive}
+          onPending={onPending}
+        />,
+      );
+      await act(flush);
+      expect(onLive).toHaveBeenLastCalledWith(true);
+      for (let i = 0; i < SCENE_REBUILD_LIMIT; i += 1) {
+        act(() => fallbacks[i]?.());
+        expect(onPending).toHaveBeenCalledTimes(i + 1);
+        expect(onLive).not.toHaveBeenCalledWith(false);
+        await act(async () => {
+          vi.advanceTimersByTime(SCENE_REBUILD_DELAY_MS);
+        });
+        await act(flush);
+        expect(onLive).toHaveBeenLastCalledWith(true);
+      }
+      // One loss past the limit: no rebuild, and the card goes flat.
+      act(() => fallbacks[SCENE_REBUILD_LIMIT]?.());
+      expect(onPending).toHaveBeenCalledTimes(SCENE_REBUILD_LIMIT);
+      expect(onLive).toHaveBeenLastCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("DeviceScene — a build abandoned mid-flight (ADR 0057 §6.5)", () => {
   it("unmounting mid-build aborts the build's signal, and a handle that lands after is disposed", async () => {
     const gpu = {
