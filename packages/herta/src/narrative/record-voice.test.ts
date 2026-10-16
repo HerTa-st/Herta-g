@@ -1,5 +1,6 @@
-import type { SystemBlock } from "@herta/core";
+import type { AgentEvent, SystemBlock } from "@herta/core";
 import { describe, expect, it } from "vitest";
+import { projectBackendEvent } from "./backend-record-projection.js";
 import {
   detailForHerta,
   elisionNote,
@@ -23,6 +24,23 @@ const read = (b: SystemBlock, lang: "zh" | "en" = "zh") => {
   return out === null
     ? null
     : `${out.body}${out.evidenceDetail !== undefined ? `\n${out.evidenceDetail}` : ""}`;
+};
+/** A memory save's row as the bridge writes it: its body, no digest. */
+const remembered = (text: string): SystemBlock => {
+  const event: AgentEvent = {
+    type: "tool.call.finished",
+    layer: "backend",
+    id: "m1",
+    tool: "memory_save",
+    result: {
+      ok: true,
+      summary: "remembered: test_command",
+      data: { id: "x", kind: "test_command", text, why: "开拓者说的" },
+    },
+  };
+  const block = projectBackendEvent(event);
+  if (block === null) throw new Error("the bridge wrote no row");
+  return block;
 };
 
 describe("the done-marker reads as a sentence", () => {
@@ -256,14 +274,7 @@ describe("板砖's other rows", () => {
         }),
       ),
     ).toBe("结论：崩在显存超限。（log.txt:33）");
-    expect(
-      read(
-        row({
-          body: "↳ remembered: 测试用 pnpm test",
-          digest: { kind: "text", text: "↳ remembered: 测试用 pnpm test" },
-        }),
-      ),
-    ).toBe("记下：测试用 pnpm test");
+    expect(read(remembered("测试用 pnpm test"))).toBe("记下：测试用 pnpm test");
     expect(
       read(
         row({
@@ -326,6 +337,35 @@ describe("板砖's other rows", () => {
     expect(systemRowForHerta(attachment, "zh")).toBe(attachment);
     const legacy = row({ body: 'Reading {"path":"old.ts"}' });
     expect(systemRowForHerta(legacy, "zh")).toBe(legacy);
+  });
+});
+
+describe("a memory save, as the bridge writes it — no digest (ADR 0079 §2)", () => {
+  // Longer than the 60 characters the legacy fold cut a row's first line to.
+  const fact =
+    "测试用 node --test test/，别用 npm test：package.json 的 test 脚本是坏的，在 Node 22 下一跑就退出，所以别再用它";
+  const saved = remembered(fact);
+
+  it("the bridge writes its body and no digest", () => {
+    expect(saved.digest).toBeUndefined();
+    expect(saved.body).toBe(`↳ remembered: ${fact}`);
+    expect(fact.length).toBeGreaterThan(60);
+  });
+
+  it("fresh, it reads as what was remembered, in the session's language", () => {
+    expect(read(saved)).toBe(`记下：${fact}`);
+    expect(read(saved, "en")).toBe(`Remembered: ${fact}`);
+  });
+
+  it("folded, it is the whole fact, never the arrow, the English label or a cut", () => {
+    expect(foldedRunLine(saved, "zh")).toBe(`记下：${fact}`);
+    expect(foldedRunLine(saved, "en")).toBe(`Remembered: ${fact}`);
+  });
+
+  it("a row it does not know, digest-less, still keeps its own text", () => {
+    const note = row({ body: "↳ rememberedness: x" });
+    expect(systemRowForHerta(note, "zh")).toBe(note);
+    expect(foldedRunLine(note, "zh")).toBeNull();
   });
 });
 

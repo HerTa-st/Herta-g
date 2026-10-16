@@ -9,6 +9,7 @@ import type { PromptLang } from "./prompt-lang.js";
 import {
   foldedRunLine,
   foldedStepLines,
+  isRememberedRow,
   shownExcerptLine,
 } from "./record-voice.js";
 
@@ -201,7 +202,8 @@ export function buildCompactionBody(
 ): string {
   // 1. Each row as a line of what was done (ADR 0079 §2); a failed command
   //    names the command its result row answers. Rows written before the
-  //    structured digest keep the legacy templates.
+  //    structured digest keep the legacy templates — not a memory save's,
+  //    which is written without one and folds to what was remembered.
   const lines: string[] = [];
   let lastCommand: string | undefined;
   for (const block of blocks) {
@@ -211,7 +213,8 @@ export function buildCompactionBody(
     const structured =
       block.digest !== undefined ||
       block.markerSummary !== undefined ||
-      block.role === "noop-marker";
+      block.role === "noop-marker" ||
+      isRememberedRow(block);
     const line =
       shownBy !== undefined && markerShows(shownBy, block)
         ? shownExcerptLine(block, lang)

@@ -1,9 +1,11 @@
 import type {
+  AgentEvent,
   SystemBlock,
   TerminalRecord,
   TerminalRecordBlock,
 } from "@herta/core";
 import { describe, expect, it } from "vitest";
+import { projectBackendEvent } from "./backend-record-projection.js";
 import {
   buildCompactionBody,
   compactRecordForPrompt,
@@ -11,6 +13,7 @@ import {
   digestSystemBlock,
   foldAttachments,
 } from "./compact-record.js";
+import { serializeTerminalRecord } from "./serialize.js";
 
 describe("digestSystemBlock — 差分协处理器 entries", () => {
   it('renders Reading {"path":"X"} as \'Reading X\'', () => {
@@ -2190,5 +2193,102 @@ describe("the verdict turn: an excerpt the marker shows folds to the read (ADR 0
     expect(beforeBeat).toBe(
       "板砖之前做过的事（细节不在手边）：\n- 读 test_primes.py 第 30–31 行\n- 改动 primes.py（+3 −1）",
     );
+  });
+});
+
+describe("a memory save, as the bridge writes it — no digest (ADR 0079 §2)", () => {
+  // Longer than the 60 characters the legacy fold cut a row's first line to.
+  const fact =
+    "测试用 node --test test/，别用 npm test：package.json 的 test 脚本是坏的，在 Node 22 下一跑就退出，所以别再用它";
+  const saved = (): SystemBlock => {
+    const event: AgentEvent = {
+      type: "tool.call.finished",
+      layer: "backend",
+      id: "m1",
+      tool: "memory_save",
+      result: {
+        ok: true,
+        summary: "remembered: test_command",
+        data: { id: "x", kind: "test_command", text: fact, why: "开拓者说的" },
+      },
+    };
+    const block = projectBackendEvent(event);
+    if (block === null) throw new Error("the bridge wrote no row");
+    return block;
+  };
+  const op = (verb: "Running" | "Saving memory", arg: string): SystemBlock => ({
+    kind: "system",
+    label: "差分协处理器",
+    body: `${verb} ${arg}`,
+    digest: { kind: "op", verb, arg },
+  });
+  const marker: SystemBlock = {
+    kind: "system",
+    label: "差分协处理器",
+    body: "完成",
+    role: "done-marker",
+    markerSummary: {
+      kind: "done",
+      state: "completed",
+      fileCount: 0,
+      riskCount: 0,
+    },
+  };
+  const dispatch: TerminalRecord = [
+    { kind: "user", text: "记住：测试用 node --test test/" },
+    { kind: "herta", surface: "speech", text: "@板砖 记下来。" },
+  ];
+  const run = [
+    op("Running", "cat package.json"),
+    op("Saving memory", "test_command"),
+    saved(),
+  ];
+
+  it("folded, the summary says what was remembered — the whole fact, in both languages", () => {
+    const later: TerminalRecord = [
+      ...dispatch,
+      ...run,
+      marker,
+      { kind: "herta", surface: "speech", text: "记下了。" },
+      { kind: "user", text: "下一件事" },
+    ];
+    expect(buildCompactionBody(run, "zh")).toBe(
+      `板砖之前做过的事（细节不在手边）：\n- 记下：${fact}`,
+    );
+    expect(buildCompactionBody(run, "en")).toBe(
+      `What 板砖 did before (details not at hand):\n- Remembered: ${fact}`,
+    );
+    for (const [lang, line] of [
+      ["zh", `- 记下：${fact}`],
+      ["en", `- Remembered: ${fact}`],
+    ] as const) {
+      const prompt = serializeTerminalRecord(later, { lang });
+      expect(prompt).toContain(line);
+      expect(prompt).not.toContain("remembered");
+    }
+  });
+
+  it("fresh — a beat's window, a run of one — it reads the same, in both languages", () => {
+    const beat: TerminalRecord = [...dispatch, ...run];
+    const alone: TerminalRecord = [
+      ...dispatch,
+      saved(),
+      { kind: "herta", surface: "speech", text: "记下了。" },
+    ];
+    for (const [lang, line] of [
+      ["zh", `记下：${fact}`],
+      ["en", `Remembered: ${fact}`],
+    ] as const) {
+      for (const prompt of [
+        serializeTerminalRecord(beat, {
+          lang,
+          verbatimSinceLastDispatch: true,
+        }),
+        serializeTerminalRecord(alone, { lang }),
+      ]) {
+        expect(prompt).toContain(line);
+        expect(prompt).not.toContain("remembered");
+      }
+    }
   });
 });

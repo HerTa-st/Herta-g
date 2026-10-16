@@ -1,4 +1,5 @@
 import type { SystemBlock, TerminalRecordBlock } from "@herta/core";
+import { projectBackendEvent } from "@herta/herta";
 import { describe, expect, it } from "vitest";
 import {
   buildEpisodeDigest,
@@ -462,6 +463,8 @@ describe("buildEpisodeDigest — 板砖's rows in the words she read them in (AD
   // retells it from. Built from the stored bodies, it handed the dream the
   // grammar Herta's prompt no longer reads — `↳ exit 0 · 2 lines`,
   // `ran … (exit 0, 3.1s) — log at …` — and the new 废案 came out in it.
+  const REMEMBERED =
+    "测试用 pnpm test，别用 npm test：package.json 里的 test 脚本在 Node 22 下一跑就退出，所以别再用它";
   const run: TerminalRecordBlock[] = [
     { kind: "user", text: "把 fib 改成迭代" },
     { kind: "herta", surface: "speech", text: "@板砖 改。" },
@@ -471,6 +474,18 @@ describe("buildEpisodeDigest — 板砖's rows in the words she read them in (AD
       body: "Saving memory test_command",
       digest: { kind: "op", verb: "Saving memory", arg: "test_command" },
     },
+    // What was saved, as the bridge writes it: its body, no digest.
+    projectBackendEvent({
+      type: "tool.call.finished",
+      layer: "backend",
+      id: "m1",
+      tool: "memory_save",
+      result: {
+        ok: true,
+        summary: "remembered: test_command",
+        data: { id: "x", kind: "test_command", text: REMEMBERED, why: "x" },
+      },
+    }) as SystemBlock,
     running("pnpm test"),
     result(0),
     {
@@ -508,6 +523,9 @@ describe("buildEpisodeDigest — 板砖's rows in the words she read them in (AD
     expect(d).toContain(
       "〔差分协处理器（已核实）：做完了：改了 1 个文件（+9 −4），测试 8/8 通过。\n改了：fibonacci.ts\n依据：运行 `pnpm test`〕",
     );
+    // A memory save's row has no digest; it reads as what was remembered,
+    // the whole fact, as in her prompt.
+    expect(d).toContain(`〔差分协处理器（已核实）：记下：${REMEMBERED}〕`);
     for (const bookkeeping of [
       "↳",
       "exit 0",
@@ -527,8 +545,12 @@ describe("buildEpisodeDigest — 板砖's rows in the words she read them in (AD
     expect(d).toContain(
       "〔差分协处理器（已核实）：Done: changed 1 file (+9 −4), tests 8/8 passed.\nChanged files: fibonacci.ts\nBased on: ran `pnpm test`〕",
     );
+    expect(d).toContain(
+      `〔差分协处理器（已核实）：Remembered: ${REMEMBERED}〕`,
+    );
     expect(d).toContain("开拓者：把 fib 改成迭代");
     expect(d).not.toContain("↳");
+    expect(d).not.toContain("remembered");
     expect(d).not.toContain(".herta/logs");
   });
 });

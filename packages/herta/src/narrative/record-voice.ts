@@ -353,6 +353,28 @@ export function detailForHerta(
     .join("\n");
 }
 
+/** The memory-save row's opening, as the bridge writes it (ADR 0077). */
+const REMEMBERED = "↳ remembered: ";
+
+/**
+ * What a memory-save row says was saved, or null for any other row. The
+ * bridge writes that row with its body only — no digest, in every record
+ * since memory_save existed — so it is known by its body.
+ */
+function rememberedFact(block: SystemBlock): string | null {
+  const kind = block.digest?.kind;
+  return (kind === undefined || kind === "text") &&
+    block.body.startsWith(REMEMBERED)
+    ? block.body.slice(REMEMBERED.length)
+    : null;
+}
+
+/** Whether this is a memory-save row: the fold reads it as what was
+ *  remembered (`foldedRunLine`), though it carries no digest. */
+export function isRememberedRow(block: SystemBlock): boolean {
+  return rememberedFact(block) !== null;
+}
+
 /** A stored document's name from its store path: no directory, no content
  *  hash, no `.txt`. */
 function docName(path: string): string {
@@ -365,7 +387,7 @@ function docName(path: string): string {
  * (a memory save's kind, a planning step, a routine command that printed
  * nothing). Attachment rows are the fold's (`compact-record.ts`); rows with
  * no structured digest — written before it existed, or harness notes —
- * keep their own text.
+ * keep their own text, except the memory save's, which never had one.
  */
 export function systemRowForHerta(
   block: SystemBlock,
@@ -404,6 +426,9 @@ export function systemRowForHerta(
   }
   if (block.role === "noop-marker") return { ...rest, body: t.noop };
 
+  const fact = rememberedFact(block);
+  if (fact !== null) return { ...rest, body: `${t.remembered}${fact}` };
+
   const d = block.digest;
   if (d === undefined) return block;
   switch (d.kind) {
@@ -415,12 +440,6 @@ export function systemRowForHerta(
       return withDetail(`${verb ?? d.verb} ${arg}`.trim());
     }
     case "text": {
-      if (block.body.startsWith("↳ remembered: ")) {
-        return {
-          ...rest,
-          body: `${t.remembered}${block.body.slice("↳ remembered: ".length)}`,
-        };
-      }
       if (d.exitCode !== undefined) {
         const lines: string[] = [];
         if (d.exitCode !== 0) lines.push(t.exitCode(String(d.exitCode)));
@@ -554,15 +573,14 @@ export function foldedRunLine(
     return t.done(block.markerSummary);
   }
   if (block.role === "noop-marker") return t.noop;
+  const fact = rememberedFact(block);
+  if (fact !== null) return `${t.remembered}${fact}`;
   const d = block.digest;
   if (d === undefined) return null;
   switch (d.kind) {
     case "op":
       return null;
     case "text":
-      if (block.body.startsWith("↳ remembered: ")) {
-        return `${t.remembered}${block.body.slice("↳ remembered: ".length)}`;
-      }
       if (d.exitCode !== undefined) {
         if (d.exitCode === 0) return null;
         // The receipt's own form, as a line of its own: `Ran …`, where
