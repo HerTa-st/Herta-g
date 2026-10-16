@@ -203,19 +203,20 @@ function renderStructuredDigest(
       // from precisely the timescales this design exists to reach: the
       // recap, the 废案 distillation, and the next session's few-shots.
       // This is why the caption rides the body rather than evidenceDetail.
-      const tail =
-        d.caption !== undefined
-          ? d.caption
-          : d.unreadable === undefined
-            ? COMPACTION_TEXT[lang].excerptElided
-            : COMPACTION_TEXT[lang].attachmentUnreadable[d.unreadable];
-      // The outline sidecar survives the fold by citation (2026-08-23) —
-      // path included, for the same reason the document's path is kept.
-      const outline =
-        d.outline !== undefined
-          ? ` · ${COMPACTION_TEXT[lang].attachmentOutline(d.outline.entries, d.outline.path)}`
-          : "";
-      return `Attachment ${d.name} (${d.path}) · ${tail}${outline}`;
+      //
+      // Since ADR 0079 (2026-10-16) the line is the attachment as she would
+      // remember it, the same as the fold's: the name and a plain aside, no
+      // path — 板砖 reaches the file through its own task line, which keeps
+      // the path, and a request naming the document is enough.
+      const text = COMPACTION_TEXT[lang];
+      if (d.caption !== undefined) {
+        return `附件 ${d.name}${lang === "en" ? ": " : "："}${d.caption}`;
+      }
+      const note =
+        d.unreadable === undefined
+          ? text.attachmentNotInView
+          : text.attachmentUnreadable[d.unreadable];
+      return `附件 ${d.name}${lang === "en" ? ` (${note})` : `（${note}）`}`;
     }
     case "digest":
       // The overview rode evidenceDetail and is gone; the sidecar is not —
@@ -382,7 +383,7 @@ export const ATTACHMENT_VERBATIM_USER_TURNS = 3;
 
 /**
  * How many further user turns a freshly folded citation carries the re-read
- * hint (`attachmentRereadHint`). The user's follow-up may not name the file,
+ * hint (`attachmentNotInViewHint`). The user's follow-up may not name the file,
  * and Herta's only route back to the body is a 板砖 dispatch — for a few
  * turns after the fold the harness says so under the citation, then the
  * hint expires and the bare citation remains (owner 2026-08-11: "like the
@@ -443,8 +444,8 @@ export const DIFF_REREAD_HINT_USER_TURNS = 3;
  *       recent user message whose text names the file (case-insensitive
  *       substring of the display name) — returning to the document re-opens
  *       the window, and the window can expire again after it.
- *   State 2 (both exhausted): the head is dropped and the body says so
- *   (`· 正文已略去`), leaving the citation. "I was shown this" and "I can
+ *   State 2 (both exhausted): the head is dropped and an aside says so
+ *   (`附件 hw.pdf（内容已不在眼前）`, ADR 0079), leaving the name. "I was shown this" and "I can
  *   still read this" stay two distinguishable states — the same
  *   fabricated-quote hazard the excerpt digest documents. For the first
  *   ATTACHMENT_HINT_USER_TURNS turns of this state the citation carries a
@@ -461,28 +462,107 @@ export const DIFF_REREAD_HINT_USER_TURNS = 3;
  *
  * An unreadable attachment has no detail to drop and its body already says
  * why; appending an elision note would claim a body that never existed, so it
- * passes through unchanged in both states.
+ * reads the same in every state.
+ *
+ * What she reads is the attachment as she would remember it, not the
+ * store's bookkeeping (ADR 0079, owner 2026-10-16: "the herta's context
+ * should be written like 自传"): `附件 <name>`, the document's opening
+ * text under it, and a plain aside once it is gone — never the stored
+ * path, the line and character counts, or a picture's file. 板砖 keeps all
+ * of that in its own task line (`attachmentTaskLine`), and the user's row
+ * reads the digest; only this projection changes.
  */
 function foldAttachmentForPrompt(
   block: SystemBlock,
   state: AttachmentFoldState,
   lang: PromptLang,
 ): SystemBlock {
-  if (state === "verbatim") return block;
-  // No detail means nothing was ever elided — unreadable and removed blocks
-  // pass through unchanged, and the hint stays away too: for `removed` the
-  // file is gone from disk, so inviting a re-read would be a lie.
-  if (block.evidenceDetail === undefined || block.evidenceDetail.length === 0) {
-    return block;
-  }
-  const { evidenceDetail: _dropped, ...rest } = block;
+  const d = block.digest;
+  if (d?.kind !== "attachment") return block;
   const text = COMPACTION_TEXT[lang];
-  const hint =
-    state === "citation-hint" ? `\n${text.attachmentRereadHint}` : "";
+  const aside = (note: string): string =>
+    lang === "en" ? ` (${note})` : `（${note}）`;
+  const named = `附件 ${d.name}`;
+  const { evidenceDetail: _detail, ...rest } = block;
+  // A picture's caption is the only text it ever had, kept in every state
+  // (ADR 0048 §1); an unreadable file says why, in every state.
+  if (d.caption !== undefined) {
+    return {
+      ...rest,
+      body: `${named}${lang === "en" ? ": " : "："}${d.caption}`,
+    };
+  }
+  if (d.unreadable !== undefined) {
+    return {
+      ...rest,
+      body: `${named}${aside(text.attachmentUnreadable[d.unreadable])}`,
+    };
+  }
+  const detail = attachmentDetailForHerta(block, d, lang);
+  if (detail === null) return { ...rest, body: named };
+  if (state === "verbatim") {
+    return { ...rest, body: named, evidenceDetail: detail };
+  }
   return {
     ...rest,
-    body: `${block.body} · ${text.excerptElided}${hint}`,
+    body: `${named}${aside(
+      state === "citation-hint"
+        ? text.attachmentNotInViewHint
+        : text.attachmentNotInView,
+    )}`,
   };
+}
+
+/** A transcribed picture's line in a PDF's text (`storePictures`): its
+ *  transcript is group 1. */
+const TRANSCRIBED_PICTURE_LINE =
+  /^\[(?:图|Image) \d+-\d+ · [^\]\n]*\] (?:自动转写：|transcribed: )(.*)$/gm;
+/** Every other form a picture's line takes: not transcribed, not stored. */
+const PICTURE_LINE = /^\[(?:图|Image) \d+-\d+(?:[ ·：:][^\n]*)?$/gm;
+
+/**
+ * The document's opening text and outline preview, as she reads them: no
+ * `↳ 附件` header, each picture's line its transcript (owner: "if the （图）
+ * is scanned, then it should be replaced by the transcript") or a plain
+ * `（图）`, the "runs longer" note and the outline's header in the session's
+ * language. Null when the row carried neither.
+ */
+function attachmentDetailForHerta(
+  block: SystemBlock,
+  d: Extract<SystemBlockDigest, { kind: "attachment" }>,
+  lang: PromptLang,
+): string | null {
+  const text = COMPACTION_TEXT[lang];
+  const sections: string[] = [];
+  const head = block.evidence?.find((e) => e.kind === "attachment");
+  const outline = block.evidence?.find((e) => e.kind === "outline");
+  if (head?.kind === "attachment") {
+    let body = head.text;
+    if (d.format === "pdf") {
+      body = body
+        .replace(TRANSCRIBED_PICTURE_LINE, "$1")
+        .replace(PICTURE_LINE, text.pictureMark);
+    }
+    sections.push(
+      head.clipped
+        ? `${body}\n${lang === "en" ? `(${text.attachmentHeadOnly})` : `（${text.attachmentHeadOnly}）`}`
+        : body,
+    );
+  }
+  if (outline?.kind === "outline") {
+    sections.push(
+      `${text.attachmentContents(outline.total, outline.items.length)}\n${outline.items.join("\n")}`,
+    );
+  }
+  if (sections.length > 0) return sections.join("\n");
+  // A row written before its evidence was structured: its detail as stored,
+  // less the `↳` header lines that were the store's.
+  const legacy = (block.evidenceDetail ?? "")
+    .split("\n")
+    .filter((l) => !l.startsWith("↳ "))
+    .join("\n")
+    .trim();
+  return legacy.length > 0 ? legacy : null;
 }
 
 /** Characters that can appear INSIDE a filename. A display-name match

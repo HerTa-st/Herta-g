@@ -126,7 +126,7 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
     expect(digestSystemBlock(block)).toBe("（板砖无产出）");
   });
 
-  it("an attachment digest keeps the outline sidecar by citation (2026-08-23), in both languages", () => {
+  it("an attachment digest is the name and a plain aside, no path or sidecar (ADR 0079), in both languages", () => {
     const block: SystemBlock = {
       kind: "system",
       label: "系统",
@@ -147,11 +147,12 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
         },
       },
     };
+    // 板砖 reaches the file and its outline through its own task line.
     expect(digestSystemBlock(block)).toBe(
-      "Attachment book.pdf (.herta/attachments/s1/book-ab12cd34.pdf.txt) · 文件过大，未取正文 · 目录 124 条在 .herta/attachments/s1/book-ab12cd34.pdf.outline.txt",
+      "附件 book.pdf（文件过大，未取正文）",
     );
     expect(digestSystemBlock(block, "en")).toBe(
-      "Attachment book.pdf (.herta/attachments/s1/book-ab12cd34.pdf.txt) · file too large, no body taken · outline of 124 entries at .herta/attachments/s1/book-ab12cd34.pdf.outline.txt",
+      "附件 book.pdf (file too large, no body taken)",
     );
   });
 
@@ -1293,7 +1294,7 @@ describe("decideAttachmentFolds / foldAttachments — the fold lane on its own (
       undefined,
     );
     expect(folded?.kind === "system" ? folded.body : "").toContain(
-      "正文已略去",
+      "内容已不在眼前",
     );
     // The system run beside it is neither compacted nor touched: the same
     // block objects come back, uncompacted.
@@ -1302,9 +1303,140 @@ describe("decideAttachmentFolds / foldAttachments — the fold lane on its own (
     expect(JSON.stringify(out)).not.toContain("[历史已压缩");
   });
 
-  it("a block nobody decided stays verbatim", () => {
+  it("a block nobody decided is read fresh: its name, then its text (ADR 0079)", () => {
     const out = foldAttachments([attachment], new Map());
-    expect(out[0]).toBe(attachment);
+    const fresh = out[0];
+    expect(fresh?.kind === "system" ? fresh.body : "").toBe("附件 spec.md");
+    expect(fresh?.kind === "system" ? fresh.evidenceDetail : "").toBe(
+      "# Spec\nCONFIDENTIAL-HEAD-LINE",
+    );
+  });
+});
+
+describe("an attachment as Herta reads it (ADR 0079, owner 2026-10-16)", () => {
+  // The row as the ingest writes it: bookkeeping in the body, the head and
+  // the outline preview in `evidence`. What she reads is the name, the
+  // document's text and its outline — every picture its transcript where
+  // one was made, a plain （图） where none was.
+  const pdf: SystemBlock = {
+    kind: "system",
+    label: "系统",
+    body: "附件 hw3.pdf · PDF · 2 页 · 已提取文本 · 11 行 · 423 字 · 目录 2 条 · .herta/attachments/s1/hw3-02738c2d.pdf.txt",
+    evidenceDetail:
+      "↳ 附件 hw3.pdf\n(the stored detail, superseded by evidence)",
+    evidence: [
+      {
+        kind: "attachment",
+        name: "hw3.pdf",
+        path: ".herta/attachments/s1/hw3-02738c2d.pdf.txt",
+        text: [
+          "── 第 1 页 ──",
+          "Question 1. Let A be the matrix below.",
+          "[图 1-1 · .herta/attachments/s1/hw3-02738c2d.pdf.p1-1.png] 自动转写：A=\\begin{bmatrix}2&1\\\\1&2\\end{bmatrix}",
+          "(a) Compute det(A).",
+          "[图 1-2 · .herta/attachments/s1/hw3-02738c2d.pdf.p1-2.png]（未转写，可用 view_image 查看原图）",
+          "[图 1-3：未能保存]",
+          "(b) Find the eigenvalues of A.",
+        ].join("\n"),
+        clipped: true,
+      },
+      {
+        kind: "outline",
+        name: "hw3.pdf",
+        path: ".herta/attachments/s1/hw3-02738c2d.pdf.outline.txt",
+        items: ["Question 1 · 第 1 页", "Question 2 · 第 2 页"],
+        total: 5,
+      },
+    ],
+    digest: {
+      kind: "attachment",
+      name: "hw3.pdf",
+      path: ".herta/attachments/s1/hw3-02738c2d.pdf.txt",
+      lines: 11,
+      chars: 423,
+      format: "pdf",
+      pages: 2,
+      outline: {
+        path: ".herta/attachments/s1/hw3-02738c2d.pdf.outline.txt",
+        entries: 5,
+      },
+    },
+  };
+  const read = (lang: "zh" | "en"): SystemBlock => {
+    const out = foldAttachments([pdf], new Map(), lang)[0];
+    if (out?.kind !== "system") throw new Error("not a system block");
+    return out;
+  };
+
+  it("fresh: the name, the text with each picture its transcript or （图）, and the outline", () => {
+    const fresh = read("zh");
+    expect(fresh.body).toBe("附件 hw3.pdf");
+    expect(fresh.evidenceDetail).toBe(
+      [
+        "── 第 1 页 ──",
+        "Question 1. Let A be the matrix below.",
+        "A=\\begin{bmatrix}2&1\\\\1&2\\end{bmatrix}",
+        "(a) Compute det(A).",
+        "（图）",
+        "（图）",
+        "(b) Find the eigenvalues of A.",
+        "（仅开头部分，正文更长）",
+        "目录（共 5 条，这里是前 2 条）：",
+        "Question 1 · 第 1 页",
+        "Question 2 · 第 2 页",
+      ].join("\n"),
+    );
+    // None of the store's bookkeeping reaches her.
+    const all = `${fresh.body}\n${fresh.evidenceDetail}`;
+    for (const gone of [
+      ".herta/",
+      "423 字",
+      "11 行",
+      "已提取文本",
+      "自动转写",
+      "view_image",
+      "↳",
+    ]) {
+      expect(all).not.toContain(gone);
+    }
+  });
+
+  it("an EN session reads the notes and the picture mark in English; 附件 stays the record's word", () => {
+    const fresh = read("en");
+    expect(fresh.body).toBe("附件 hw3.pdf");
+    expect(fresh.evidenceDetail).toContain("(figure)");
+    expect(fresh.evidenceDetail).toContain(
+      "(only the opening; the document runs longer)",
+    );
+    expect(fresh.evidenceDetail).toContain(
+      "Contents (5 entries, the first 2 shown):",
+    );
+  });
+
+  it("a picture's line is projected only in a PDF's text — a text file keeps its own lines", () => {
+    const md: SystemBlock = {
+      ...pdf,
+      evidence: [
+        {
+          kind: "attachment",
+          name: "notes.md",
+          path: ".herta/attachments/s1/notes.md",
+          text: "[图 1-1 · a note the user wrote this way]",
+          clipped: false,
+        },
+      ],
+      digest: {
+        kind: "attachment",
+        name: "notes.md",
+        path: ".herta/attachments/s1/notes.md",
+        lines: 1,
+        chars: 40,
+      },
+    };
+    const out = foldAttachments([md], new Map())[0];
+    expect(out?.kind === "system" ? out.evidenceDetail : "").toBe(
+      "[图 1-1 · a note the user wrote this way]",
+    );
   });
 });
 
@@ -1338,7 +1470,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     const kept = sys(out)[0];
     expect(kept?.evidenceDetail).toContain("CONFIDENTIAL-HEAD-LINE");
-    expect(kept?.body).not.toContain("正文已略去");
+    expect(kept?.body).toBe("附件 spec.md");
   });
 
   it("State 1 spans the drop turn plus two follow-ups; the third folds it (§6g window)", () => {
@@ -1368,10 +1500,10 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     const folded = sys(exhausted)[0];
     expect(folded?.evidenceDetail).toBeUndefined();
-    expect(folded?.body).toContain("正文已略去");
-    // The citation survives whole — she still knows what and where it is.
+    expect(folded?.body).toContain("内容已不在眼前");
+    // She still knows what it was; where it is stays 板砖's (ADR 0079).
     expect(folded?.body).toContain("spec.md");
-    expect(folded?.body).toContain(".herta/attachments/s1/spec.md");
+    expect(folded?.body).not.toContain(".herta/attachments/s1/spec.md");
     expect(JSON.stringify(exhausted)).not.toContain("CONFIDENTIAL-HEAD-LINE");
   });
 
@@ -1408,19 +1540,17 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     // 3 user turns past the block — just folded, hint attached.
     const fresh = compactRecordForPrompt([attachment, ...exchanges(3)]);
     const freshBody = sys(fresh)[0]?.body ?? "";
-    expect(freshBody).toContain("正文已略去");
-    expect(freshBody).toContain("需要时可派板砖重读");
+    expect(freshBody).toBe("附件 spec.md（内容已不在眼前，需要时让板砖重读）");
     expect(sys(fresh)[0]?.evidenceDetail).toBeUndefined();
 
     // 5 user turns — last hinted prompt.
     const lastHinted = compactRecordForPrompt([attachment, ...exchanges(5)]);
-    expect(sys(lastHinted)[0]?.body).toContain("需要时可派板砖重读");
+    expect(sys(lastHinted)[0]?.body).toContain("需要时让板砖重读");
 
     // 6 user turns — the hint expires; the bare citation remains.
     const expired = compactRecordForPrompt([attachment, ...exchanges(6)]);
     const expiredBody = sys(expired)[0]?.body ?? "";
-    expect(expiredBody).toContain("正文已略去");
-    expect(expiredBody).not.toContain("板砖重读");
+    expect(expiredBody).toBe("附件 spec.md（内容已不在眼前）");
   });
 
   it("naming the file re-opens the window, which can expire again (§6g re-inflate)", () => {
@@ -1661,7 +1791,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     // Window exhausted AND spoken since — deep in State 2 territory, and the
     // body still must not claim an elided body that never existed.
-    expect(sys(out)[0]?.body).toBe(unreadable.body);
+    expect(sys(out)[0]?.body).toBe("附件 photo.bin（非文本文件，未取正文）");
   });
 
   // ── Images (ADR 0048) ────────────────────────────────────────────────────
@@ -1696,13 +1826,10 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       { kind: "user", text: "换个话题" },
     ]);
     const folded = sys(out)[0];
-    expect(folded?.body).toContain("一张终端截图，测试全部通过。");
-    // Never the document elision note: nothing was elided.
-    expect(folded?.body).not.toContain("正文已略去");
-    // The citation still survives whole, so a vision-capable 板砖 can be sent
-    // back to the picture itself (ADR 0048 §5).
-    expect(folded?.body).toContain("shot.png");
-    expect(folded?.body).toContain(".herta/attachments/s1/shot.png");
+    // Never the document elision note: nothing was elided. A vision-capable
+    // 板砖 is sent back to the picture through its own task line, which
+    // keeps the path (ADR 0048 §5, ADR 0079).
+    expect(folded?.body).toBe("附件 shot.png：一张终端截图，测试全部通过。");
   });
 
   it("an uncaptioned image says so and claims no reading", () => {
@@ -1728,7 +1855,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       { kind: "herta", surface: "speech", text: "。" },
       { kind: "user", text: "行吧" },
     ]);
-    expect(sys(out)[0]?.body).toBe(uncaptioned.body);
+    expect(sys(out)[0]?.body).toBe("附件 shot.png（图片已存，未能读图）");
   });
 
   it("the caption survives into an EN session's summary verbatim", () => {
@@ -1745,8 +1872,9 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       ],
       { lang: "en" },
     );
-    expect(sys(out)[0]?.body).toContain("一张终端截图，测试全部通过。");
-    expect(sys(out)[0]?.body).not.toContain("body elided");
+    expect(sys(out)[0]?.body).toBe(
+      "附件 shot.png: 一张终端截图，测试全部通过。",
+    );
   });
 
   it("adjacent attachments never fold into a 板砖-headed summary", () => {
@@ -1809,7 +1937,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     // The dispatch pair still compacts; the attachment folded on its own.
     expect(s).toContain("历史已压缩");
     expect(s).not.toContain("CONFIDENTIAL-HEAD-LINE");
-    expect(s).toContain("正文已略去");
+    expect(s).toContain("内容已不在眼前");
   });
 
   it("localizes the elision note by session language", () => {
@@ -1824,9 +1952,10 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       ],
       { lang: "en" },
     );
-    expect(sys(out)[0]?.body).toContain("body elided");
-    // The fresh fold's hint localizes too (板砖 stays literal per ADR 0015 —
-    // display alias only).
-    expect(sys(out)[0]?.body).toContain("send 板砖 to re-read");
+    // The aside localizes; 附件 is the record's own word and does not, and
+    // 板砖 stays literal per ADR 0015 (display alias only).
+    expect(sys(out)[0]?.body).toBe(
+      "附件 spec.md (no longer in view — have 板砖 re-read it if needed)",
+    );
   });
 });

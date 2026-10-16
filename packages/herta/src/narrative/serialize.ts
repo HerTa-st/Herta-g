@@ -261,9 +261,13 @@ function renderRun(
           ? { attachmentFolds: treatment.attachmentFolds }
           : {}),
       })
-    : treatment.attachmentFolds !== undefined
-      ? foldAttachments(blocks, treatment.attachmentFolds, treatment.lang)
-      : blocks;
+    : // Uncompacted, an attachment still reads as she would remember it
+      // (ADR 0079): with no fold decided, every one is fresh.
+      foldAttachments(
+        blocks,
+        treatment.attachmentFolds ?? new Map(),
+        treatment.lang,
+      );
   return projected
     .map((b) =>
       serializeBlock(b, {
