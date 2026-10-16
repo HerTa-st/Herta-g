@@ -525,7 +525,9 @@ describe("buildEpisodeDigest — 板砖's rows in the words she read them in (AD
     );
     // A memory save's row has no digest; it reads as what was remembered,
     // the whole fact, as in her prompt.
-    expect(d).toContain(`〔差分协处理器（已核实）：记下：${REMEMBERED}〕`);
+    expect(d).toContain(
+      `〔差分协处理器（已核实）：板砖记下了：${REMEMBERED}〕`,
+    );
     for (const bookkeeping of [
       "↳",
       "exit 0",
@@ -546,7 +548,7 @@ describe("buildEpisodeDigest — 板砖's rows in the words she read them in (AD
       "〔差分协处理器（已核实）：Done: changed 1 file (+9 −4), tests 8/8 passed.\nChanged files: fibonacci.ts\nBased on: ran `pnpm test`〕",
     );
     expect(d).toContain(
-      `〔差分协处理器（已核实）：Remembered: ${REMEMBERED}〕`,
+      `〔差分协处理器（已核实）：板砖 noted: ${REMEMBERED}〕`,
     );
     expect(d).toContain("开拓者：把 fib 改成迭代");
     expect(d).not.toContain("↳");

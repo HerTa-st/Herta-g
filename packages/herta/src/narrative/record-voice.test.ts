@@ -274,7 +274,9 @@ describe("板砖's other rows", () => {
         }),
       ),
     ).toBe("结论：崩在显存超限。（log.txt:33）");
-    expect(read(remembered("测试用 pnpm test"))).toBe("记下：测试用 pnpm test");
+    expect(read(remembered("测试用 pnpm test"))).toBe(
+      "板砖记下了：测试用 pnpm test",
+    );
     expect(
       read(
         row({
@@ -353,13 +355,13 @@ describe("a memory save, as the bridge writes it — no digest (ADR 0079 §2)", 
   });
 
   it("fresh, it reads as what was remembered, in the session's language", () => {
-    expect(read(saved)).toBe(`记下：${fact}`);
-    expect(read(saved, "en")).toBe(`Remembered: ${fact}`);
+    expect(read(saved)).toBe(`板砖记下了：${fact}`);
+    expect(read(saved, "en")).toBe(`板砖 noted: ${fact}`);
   });
 
   it("folded, it is the whole fact, never the arrow, the English label or a cut", () => {
-    expect(foldedRunLine(saved, "zh")).toBe(`记下：${fact}`);
-    expect(foldedRunLine(saved, "en")).toBe(`Remembered: ${fact}`);
+    expect(foldedRunLine(saved, "zh")).toBe(`板砖记下了：${fact}`);
+    expect(foldedRunLine(saved, "en")).toBe(`板砖 noted: ${fact}`);
   });
 
   it("a row it does not know, digest-less, still keeps its own text", () => {

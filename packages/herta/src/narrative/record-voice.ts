@@ -87,7 +87,8 @@ const TEXTS: Record<PromptLang, Texts> = {
     exitCode: (code) => `没成，退出码 ${code}`,
     output: "输出：",
     moreNotShown: "……（后面还有，没贴全）",
-    remembered: "记下：",
+    // 板砖's note, not hers: a saved fact is not something she knows.
+    remembered: "板砖记下了：",
     tests: {
       passed: "测试通过",
       failed: "测试没过",
@@ -178,7 +179,7 @@ const TEXTS: Record<PromptLang, Texts> = {
     exitCode: (code) => `Failed, exit code ${code}`,
     output: "Output:",
     moreNotShown: "…(more, not shown)",
-    remembered: "Remembered: ",
+    remembered: "板砖 noted: ",
     tests: {
       passed: "Tests passed",
       failed: "Tests failed",

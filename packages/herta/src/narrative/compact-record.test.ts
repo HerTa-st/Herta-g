@@ -2253,14 +2253,14 @@ describe("a memory save, as the bridge writes it — no digest (ADR 0079 §2)", 
       { kind: "user", text: "下一件事" },
     ];
     expect(buildCompactionBody(run, "zh")).toBe(
-      `板砖之前做过的事（细节不在手边）：\n- 记下：${fact}`,
+      `板砖之前做过的事（细节不在手边）：\n- 板砖记下了：${fact}`,
     );
     expect(buildCompactionBody(run, "en")).toBe(
-      `What 板砖 did before (details not at hand):\n- Remembered: ${fact}`,
+      `What 板砖 did before (details not at hand):\n- 板砖 noted: ${fact}`,
     );
     for (const [lang, line] of [
-      ["zh", `- 记下：${fact}`],
-      ["en", `- Remembered: ${fact}`],
+      ["zh", `- 板砖记下了：${fact}`],
+      ["en", `- 板砖 noted: ${fact}`],
     ] as const) {
       const prompt = serializeTerminalRecord(later, { lang });
       expect(prompt).toContain(line);
@@ -2276,8 +2276,8 @@ describe("a memory save, as the bridge writes it — no digest (ADR 0079 §2)", 
       { kind: "herta", surface: "speech", text: "记下了。" },
     ];
     for (const [lang, line] of [
-      ["zh", `记下：${fact}`],
-      ["en", `Remembered: ${fact}`],
+      ["zh", `板砖记下了：${fact}`],
+      ["en", `板砖 noted: ${fact}`],
     ] as const) {
       for (const prompt of [
         serializeTerminalRecord(beat, {
