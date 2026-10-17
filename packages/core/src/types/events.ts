@@ -30,6 +30,8 @@ export interface PermissionRequest {
   /** Rule-decided: everything it changes is a workspace file kept for undo;
    *  see `RuleVerdict`. */
   undoable?: true;
+  /** Rule-derived: the directory the command runs in; see RuleVerdict. */
+  cwd?: string;
 }
 
 /** What a test run came back with. `passed` was added 2026-09-03 so the

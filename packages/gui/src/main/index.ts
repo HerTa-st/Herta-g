@@ -2,6 +2,10 @@ import { join } from "node:path";
 import { isatty } from "node:tty";
 import { pathToFileURL } from "node:url";
 import {
+  setDocumentExtractor,
+  workerDocumentExtractor,
+} from "@herta/app-server/document-worker";
+import {
   app,
   BrowserWindow,
   dialog,
@@ -34,6 +38,7 @@ import {
   registerAttachmentScheme,
 } from "./attachment-protocol.js";
 import { buildCsp } from "./csp.js";
+import createDocumentWorker from "./document-worker?nodeWorker";
 import { hideToTray } from "./hide-to-tray.js";
 import { installMode } from "./install-mode.js";
 import { applyLoginPath, launchLocaleEnv } from "./login-path.js";
@@ -71,6 +76,13 @@ import { captureWindowState, restoreWindowBounds } from "./window-state.js";
 registerVoiceScheme();
 registerAttachmentScheme();
 registerAssetScheme();
+
+// Documents are read on a thread of their own (owner 2026-10-16): pdfjs
+// decoded a page's every picture in one stretch of the main process — 3.1 s
+// for a page of 40 photos — freezing the window and every IPC. Started on
+// the first attach; ended at quit.
+const documentReader = workerDocumentExtractor(() => createDocumentWorker());
+setDocumentExtractor(documentReader.extract);
 
 /**
  * The dev-server URL — ONLY in a non-packaged build (audit 2026-08-05, S2).
@@ -918,4 +930,5 @@ app.on("before-quit", (event) => {
 app.on("will-quit", () => {
   tray?.destroy();
   tray = null;
+  void documentReader.close();
 });

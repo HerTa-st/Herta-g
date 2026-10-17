@@ -558,9 +558,11 @@ describe("recap selectBoundary — liveness / effectiveness (L2)", () => {
     // so the boundary reaches userIdx[0] ⇒ 0. selectBoundary can only point at a
     // user block, so a non-user head is never summarizable on its own.
     {
+      // Two different bodies: identical consecutive summary lines merge into
+      // one with a count (ADR 0079), which would shrink the head under budget.
       const record: TerminalRecord = [
         mkSys("a".repeat(4000)),
-        mkSys("a".repeat(4000)),
+        mkSys("b".repeat(4000)),
         mkUser("hi"),
         mkUser("there"),
       ];

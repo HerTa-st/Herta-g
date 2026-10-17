@@ -59,7 +59,8 @@ import {
  *   - `fences` — the CLI has never had the slice-5 atomic fence emit; on a
  *     styled TTY each write carries its own ANSI wrap, so enabling it would
  *     change the zh byte stream. It keeps pacing fences like prose.
- *   - `maxRevealMs` — the CLI has no reveal ceiling; it passes Infinity.
+ *   - `maxRevealMs` — the CLI's supervised reveal has no ceiling (it passes
+ *     Infinity); its raw lane takes the desktop's.
  *   - `firstDelayMs` — the CLI's first tick is a humanized delay (consumes
  *     one `random` draw at construction); the GUI's is plain `baseMs`.
  *
@@ -82,7 +83,8 @@ export interface RevealDriverDeps {
   /**
    * Wall-clock reveal ceiling (ms), measured from the first emitted unit and
    * re-anchored when a pending verdict resolves. Past it the tail lands in
-   * ONE emit. `Number.POSITIVE_INFINITY` disables (the CLI has no ceiling).
+   * ONE emit. `Number.POSITIVE_INFINITY` disables (the CLI's supervised
+   * reveal).
    */
   readonly maxRevealMs: number;
   /** Atomic ``` fence emission (slice 5). `false` paces fenced code like

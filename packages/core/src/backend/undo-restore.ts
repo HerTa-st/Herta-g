@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, realpath, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { writeFileAtomic } from "../atomic-write.js";
 import { isPathInside } from "../path-containment.js";
 import type { UndoFileResult } from "../types/terminal-record.js";
@@ -95,22 +96,53 @@ export async function restoreUndo(
   workspaceRoot: string,
 ): Promise<UndoOutcome> {
   const span = undoSpan(views);
+  const realRoot = await realpath(workspaceRoot).catch(() => null);
   const files: { path: string; result: UndoFileResult }[] = [];
   for (const w of span.writes) {
     files.push({
       path: w.path,
-      result: await restoreOne(dir, w, workspaceRoot),
+      result: await restoreOne(dir, w, workspaceRoot, realRoot),
     });
   }
   return { files, commands: span.commands, incomplete: span.incomplete };
+}
+
+/** Where a write to `p` lands once links are followed: its deepest existing
+ *  folder realpath-ed, the rest joined back (the file itself may be gone).
+ *  Null when nothing on the way resolves. */
+async function landing(p: string): Promise<string | null> {
+  let dir = dirname(p);
+  const rest = [basename(p)];
+  for (;;) {
+    try {
+      return join(await realpath(dir), ...rest.reverse());
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return null;
+      rest.push(basename(dir));
+      dir = parent;
+    }
+  }
 }
 
 async function restoreOne(
   dir: string,
   w: { path: string; before: string | null; after: string },
   workspaceRoot: string,
+  realRoot: string | null,
 ): Promise<UndoFileResult> {
   if (!isPathInside(workspaceRoot, w.path, { strict: true })) {
+    return "outside_workspace";
+  }
+  // By name alone a path can be inside while a folder on its way is now a
+  // link (a junction on Windows) that carries the write out of the
+  // workspace (release review 2026-10-13): judge where it lands.
+  const lands = await landing(w.path);
+  if (
+    realRoot === null ||
+    lands === null ||
+    !isPathInside(realRoot, lands, { strict: true })
+  ) {
     return "outside_workspace";
   }
   const now = await current(w.path);

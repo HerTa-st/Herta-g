@@ -36,11 +36,16 @@ import type { PromptLang } from "./prompt-lang.js";
  * purely for back-compat: this is a pure exported function whose
  * historical footer was English, and the default keeps a caller that
  * knows no language producing exactly the bytes it always did.
+ *
+ * `audience` picks whose footer it is: the screen's names the evidence
+ * the user can open; Herta's prompt says only that the rest wasn't
+ * pasted, in her own words (ADR 0079 §2).
  */
 export function collapseLongDiffs(
   body: string,
   maxLines: number,
   lang: PromptLang = "en",
+  audience: "screen" | "herta" = "screen",
 ): string {
   if (!Number.isFinite(maxLines)) return body;
   const lines = body.split("\n");
@@ -66,7 +71,12 @@ export function collapseLongDiffs(
         const kept = diffLines.slice(0, visibleCount);
         const suppressed = diffLines.length - kept.length;
         for (const dl of kept) out.push(dl);
-        out.push(COMPACTION_TEXT[lang].diffSuppressed(suppressed));
+        const text = COMPACTION_TEXT[lang];
+        out.push(
+          audience === "herta"
+            ? text.diffNotShown(suppressed)
+            : text.diffSuppressed(suppressed),
+        );
       }
       if (j < lines.length) out.push("```"); // closing fence
       i = j + 1;

@@ -260,11 +260,15 @@ export function reviewMessage(
     readonly codes: readonly string[];
     readonly reason: string;
     readonly workspace: string;
+    /** Where the command runs, when the rule knows it (`request.cwd`); the
+     *  workspace root otherwise. The review used to be told the root always,
+     *  and read a relative path after 板砖's `cd` against the wrong place. */
+    readonly cwd?: string;
     readonly userMessages: readonly string[];
   },
   platform: NodeJS.Platform = process.platform,
 ): string {
-  const tail = `\n\n工作区：${input.workspace}\n当前目录：${input.workspace}\n${shellLine(platform)}\n检查器的分类：${input.codes.join("、")}（${input.reason}）\n\n待审核的命令：\n\`\`\`\n${stripShellComments(input.command)}\n\`\`\``;
+  const tail = `\n\n工作区：${input.workspace}\n当前目录：${input.cwd ?? input.workspace}\n${shellLine(platform)}\n检查器的分类：${input.codes.join("、")}（${input.reason}）\n\n待审核的命令：\n\`\`\`\n${stripShellComments(input.command)}\n\`\`\``;
   const message = (kept: readonly string[], left: number): string => {
     const lines = kept.map((r, i) => `${i + 1}. ${r}`);
     if (left > 0) lines.unshift(`（更早的 ${left} 条消息从略）`);
@@ -355,6 +359,7 @@ export class AutoReviewer {
         codes,
         reason: request.reason,
         workspace: input.workspace,
+        ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
         userMessages: input.userMessages,
       },
       this.opts.platform,

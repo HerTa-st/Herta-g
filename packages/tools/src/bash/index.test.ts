@@ -505,6 +505,26 @@ d("bash tool (real bash)", () => {
     await ctx.bg.stopAll();
   });
 
+  it("an ask carries the directory the line runs in — the shell's own, after a cd (ADR 0075: a review reads relative paths against it)", async () => {
+    ws = await mkTmpWorkspace({ "sub/a.txt": "x\n" });
+    const ctx = ctxFor(ws.root);
+    const engine = new RulePermissionEngine({
+      ask: { present: async () => "allow" },
+    });
+    registerBashRule(engine, { bashPath: BASH, bus: ctx.bus });
+    const cwdOf = async (cmd: string): Promise<string | undefined> => {
+      const d = await engine.check(call(cmd), ctx);
+      expect(d.kind, cmd).toBe("ask");
+      return d.kind === "ask" ? d.request.cwd : undefined;
+    };
+    // No shell yet: the line starts at the root.
+    expect(await cwdOf("rm -rf build")).toBe(ws.root);
+    const tool = bashTool({ bashPath: BASH as string });
+    expect((await tool.run(call("cd sub"), ctx, noopProgress)).ok).toBe(true);
+    expect(await cwdOf("rm -rf build")).toBe(join(ws.root, "sub"));
+    await ctx.bg.stopAll();
+  });
+
   it("summarize: the record header drops the model's `cd <workspace> &&` in the SHELL's own spelling (MSYS `/tmp/…` under %TEMP%), which the loop cannot derive", async () => {
     ws = await mkTmpWorkspace({});
     const tool = bashTool({ bashPath: BASH as string });

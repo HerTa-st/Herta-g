@@ -1,9 +1,11 @@
 import type {
+  AgentEvent,
   SystemBlock,
   TerminalRecord,
   TerminalRecordBlock,
 } from "@herta/core";
 import { describe, expect, it } from "vitest";
+import { projectBackendEvent } from "./backend-record-projection.js";
 import {
   buildCompactionBody,
   compactRecordForPrompt,
@@ -11,6 +13,7 @@ import {
   digestSystemBlock,
   foldAttachments,
 } from "./compact-record.js";
+import { serializeTerminalRecord } from "./serialize.js";
 
 describe("digestSystemBlock — 差分协处理器 entries", () => {
   it('renders Reading {"path":"X"} as \'Reading X\'', () => {
@@ -107,7 +110,7 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
       body: "↳ background bg-1: running",
       digest: { kind: "bg", id: "bg-1", state: "running" },
     };
-    expect(digestSystemBlock(bg)).toBe("background bg-1: running");
+    expect(digestSystemBlock(bg)).toBe("后台命令 bg-1 在跑");
     const todo: SystemBlock = {
       kind: "system",
       label: "差分协处理器",
@@ -117,16 +120,16 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
     expect(digestSystemBlock(todo)).toBeNull();
   });
 
-  it("renders the B1 no-op marker as '（板砖无产出）'", () => {
+  it("renders the B1 no-op marker as 「板砖这次什么也没动。」 (ADR 0079)", () => {
     const block: SystemBlock = {
       kind: "system",
       label: "差分协处理器",
       body: "无产出 — 这次没有触发任何文件、目录或命令操作。",
     };
-    expect(digestSystemBlock(block)).toBe("（板砖无产出）");
+    expect(digestSystemBlock(block)).toBe("板砖这次什么也没动。");
   });
 
-  it("an attachment digest keeps the outline sidecar by citation (2026-08-23), in both languages", () => {
+  it("an attachment digest is the name and a plain aside, no path or sidecar (ADR 0079), in both languages", () => {
     const block: SystemBlock = {
       kind: "system",
       label: "系统",
@@ -147,11 +150,12 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
         },
       },
     };
+    // 板砖 reaches the file and its outline through its own task line.
     expect(digestSystemBlock(block)).toBe(
-      "Attachment book.pdf (.herta/attachments/s1/book-ab12cd34.pdf.txt) · 文件过大，未取正文 · 目录 124 条在 .herta/attachments/s1/book-ab12cd34.pdf.outline.txt",
+      "附件 book.pdf（文件过大，未取正文）",
     );
     expect(digestSystemBlock(block, "en")).toBe(
-      "Attachment book.pdf (.herta/attachments/s1/book-ab12cd34.pdf.txt) · file too large, no body taken · outline of 124 entries at .herta/attachments/s1/book-ab12cd34.pdf.outline.txt",
+      "附件 book.pdf (file too large, no body taken)",
     );
   });
 
@@ -169,20 +173,24 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
       },
       evidenceDetail: "↳ 摘要 …\nOVERVIEW-LINE",
     };
+    // The document by name, not its store paths (ADR 0079); 板砖 finds the
+    // sidecar through its own lines.
     expect(digestSystemBlock(block)).toBe(
-      "Digest .herta/attachments/s1/b.pdf.txt → .herta/attachments/s1/b.pdf.digest.txt · 27 chunks · 正文已略去",
+      "通读了 b.pdf，共 27 段（摘要不在手边）",
     );
-    expect(digestSystemBlock(block, "en")).toContain("body elided");
+    expect(digestSystemBlock(block, "en")).toBe(
+      "Read through b.pdf, 27 parts (summary not at hand)",
+    );
   });
 
-  it("digests a role:noop-marker block to （板砖无产出）", () => {
+  it("digests a role:noop-marker block to 「板砖这次什么也没动。」", () => {
     const block: SystemBlock = {
       kind: "system",
       label: "差分协处理器",
       body: "无产出 — 这次没有触发任何文件、目录或命令操作。",
       role: "noop-marker",
     };
-    expect(digestSystemBlock(block)).toBe("（板砖无产出）");
+    expect(digestSystemBlock(block)).toBe("板砖这次什么也没动。");
   });
 
   it("still digests a roleless 无产出 body (fallback for pre-role persisted records)", () => {
@@ -191,7 +199,7 @@ describe("digestSystemBlock — 差分协处理器 entries", () => {
       label: "差分协处理器",
       body: "无产出 — 旧记录",
     };
-    expect(digestSystemBlock(block)).toBe("（板砖无产出）");
+    expect(digestSystemBlock(block)).toBe("板砖这次什么也没动。");
   });
 
   it("falls back to first non-empty line truncated to 60 chars for unknown 差分协处理器 bodies", () => {
@@ -280,7 +288,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading foo.ts\n- Writing foo.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading foo.ts\n- Writing foo.ts",
     );
   });
 
@@ -303,7 +311,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts, b.ts, c.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts, b.ts, c.ts",
     );
   });
 
@@ -321,7 +329,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Writing a.ts, b.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Writing a.ts, b.ts",
     );
   });
 
@@ -344,7 +352,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts\n- Writing b.ts\n- Reading c.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts\n- Writing b.ts\n- Reading c.ts",
     );
   });
 
@@ -368,7 +376,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts\n- Writing a.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts\n- Writing a.ts",
     );
   });
 
@@ -412,7 +420,7 @@ describe("buildCompactionBody — assemble summary block body", () => {
       },
     ];
     expect(buildCompactionBody(blocks)).toBe(
-      "[历史已压缩 · 板砖]\n- Reading a.ts, b.ts\n- write_new_file failed (file_exists)\n- Reading c.ts",
+      "板砖之前做过的事（细节不在手边）：\n- Reading a.ts, b.ts\n- write_new_file failed (file_exists)\n- Reading c.ts",
     );
   });
 });
@@ -462,7 +470,7 @@ describe("compactRecordForPrompt — walker", () => {
     expect(compacted[2]).toEqual({
       kind: "system",
       label: "系统",
-      body: "[历史已压缩 · 板砖]\n- Reading a.ts\n- Writing a.ts",
+      body: "板砖之前做过的事（细节不在手边）：\n- Reading a.ts\n- Writing a.ts",
     });
     expect(compacted[3]).toEqual(record[4]);
   });
@@ -500,13 +508,13 @@ describe("compactRecordForPrompt — walker", () => {
     expect(compacted[2]).toEqual({
       kind: "system",
       label: "系统",
-      body: "[历史已压缩 · 板砖]\n- Reading a.ts, b.ts",
+      body: "板砖之前做过的事（细节不在手边）：\n- Reading a.ts, b.ts",
     });
     expect(compacted[3]).toEqual(record[4]); // the beat
     expect(compacted[4]).toEqual({
       kind: "system",
       label: "系统",
-      body: "[历史已压缩 · 板砖]\n- Writing a.ts\n- Tests: 8/8 passed",
+      body: "板砖之前做过的事（细节不在手边）：\n- Writing a.ts\n- Tests: 8/8 passed",
     });
   });
 
@@ -645,7 +653,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     const out = compactRecordForPrompt(later);
     const text = JSON.stringify(out);
     expect(text).not.toContain("const x = 1;");
-    expect(text).toContain("Excerpt src/a.ts:120-121");
+    expect(text).toContain("看过 src/a.ts 第 120–121 行（原文不在手边）");
   });
 
   it("a search-hit row folds to its citation with the lines elided (2026-08-17)", () => {
@@ -685,9 +693,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     ];
     const text = JSON.stringify(compactRecordForPrompt(later));
     expect(text).not.toContain("CUDA_VISIBLE_DEVICES=0");
-    expect(text).toContain(
-      "Search /CUDA/ · 2 matches in 1 files · 匹配行已略去",
-    );
+    expect(text).toContain("搜索 /CUDA/：1 个文件里 2 处（原文不在手边）");
   });
 
   it("a finding row survives compaction WHOLE — the claim is the deliverable (ADR 0039)", () => {
@@ -711,7 +717,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
       { kind: "user", text: "下一件事" },
     ];
     const text = JSON.stringify(compactRecordForPrompt(later));
-    expect(text).toContain("Finding: 崩在显存超限。 (log.txt:33)");
+    expect(text).toContain("结论：崩在显存超限。（log.txt:33）");
   });
 
   it("State 1 (verdict turn): passes the done-marker through verbatim with evidenceDetail", () => {
@@ -734,7 +740,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     const summary = out.find(
       (b) =>
         b.kind === "system" &&
-        (b as { body: string }).body.includes("历史已压缩"),
+        (b as { body: string }).body.includes("板砖之前做过的事"),
     );
     expect(summary).toBeDefined();
   });
@@ -764,7 +770,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     ];
     const out = compactRecordForPrompt(record);
     expect(out).toHaveLength(1);
-    expect((out[0] as { body: string }).body).toContain("历史已压缩");
+    expect((out[0] as { body: string }).body).toContain("板砖之前做过的事");
   });
 
   it("State 1: does not drop system blocks that follow the pass-through done-marker", () => {
@@ -808,7 +814,7 @@ describe("compactRecordForPrompt — done-marker two-state lifecycle", () => {
     const summary = out.find(
       (b) =>
         b.kind === "system" &&
-        (b as { body: string }).body.includes("历史已压缩"),
+        (b as { body: string }).body.includes("板砖之前做过的事"),
     );
     expect(summary).toBeDefined();
     // Both x.ts and y.ts survive (in the summary).
@@ -821,7 +827,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
   // Blocks written since 2026-07-04 carry `digest` data; the body-regex
   // path above survives only for pre-digest persisted records.
 
-  it("renders op digests: Reading/Writing plain, Running backticked, Planning skipped", () => {
+  it("op rows are steps: no folded line of their own — the summary says what came of them (ADR 0079)", () => {
     const base = { kind: "system" as const, label: "差分协处理器" as const };
     expect(
       digestSystemBlock({
@@ -829,14 +835,14 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "Reading src/foo.ts",
         digest: { kind: "op", verb: "Reading", arg: "src/foo.ts" },
       }),
-    ).toBe("Reading src/foo.ts");
+    ).toBeNull();
     expect(
       digestSystemBlock({
         ...base,
         body: "Running pnpm test",
         digest: { kind: "op", verb: "Running", arg: "pnpm test" },
       }),
-    ).toBe("Running `pnpm test`");
+    ).toBeNull();
     expect(
       digestSystemBlock({
         ...base,
@@ -856,7 +862,9 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
       body: "Writing scripts/merge_sort.py",
       digest: { kind: "op", verb: "Writing", arg: "scripts/merge_sort.py" },
     });
-    expect(out).toBe("Writing scripts/merge_sort.py");
+    // The legacy fallback would have kept the body's first line; the digest
+    // says it is a step, which folds to nothing (ADR 0079).
+    expect(out).toBeNull();
   });
 
   it("renders tests digests from status + summary (both labels' legacy paths never matched real bodies)", () => {
@@ -867,7 +875,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "↳ tests: exit 0, 3.21s",
         digest: { kind: "tests", status: "passed", summary: "exit 0, 3.21s" },
       }),
-    ).toBe("Tests passed (exit 0, 3.21s)");
+    ).toBe("测试通过");
     expect(
       digestSystemBlock({
         kind: "system",
@@ -875,7 +883,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "↳ tests: exit 1, 5.02s",
         digest: { kind: "tests", status: "failed", summary: "exit 1, 5.02s" },
       }),
-    ).toBe("Tests failed (exit 1, 5.02s)");
+    ).toBe("测试没过");
   });
 
   it("renders tool-fail digests and skip digests", () => {
@@ -886,7 +894,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         body: "↳ edit_file failed: stale_read: file changed",
         digest: { kind: "tool-fail", tool: "edit_file", code: "stale_read" },
       }),
-    ).toBe("edit_file failed (stale_read)");
+    ).toBe("这一步没成（edit_file）：文件读过之后又被改了");
     expect(
       digestSystemBlock({
         kind: "system",
@@ -920,7 +928,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
     expect(out).toBe("x".repeat(60));
   });
 
-  it("structured Reading lines coalesce in buildCompactionBody like legacy ones", () => {
+  it("a run that only looked around folds to its steps, a kind's consecutive ones on one line (ADR 0079)", () => {
     const body = buildCompactionBody([
       {
         kind: "system",
@@ -935,7 +943,7 @@ describe("digestSystemBlock — structured digest field (M-projection-3)", () =>
         digest: { kind: "op", verb: "Reading", arg: "b.ts" },
       },
     ]);
-    expect(body).toContain("- Reading a.ts, b.ts");
+    expect(body).toContain("- 读 a.ts、b.ts");
   });
 
   it("a block WITHOUT digest still digests via the legacy body path (pre-digest records)", () => {
@@ -975,10 +983,10 @@ describe("compaction markers — session language", () => {
     const zh = buildCompactionBody([excerpt, noop], "zh");
     const en = buildCompactionBody([excerpt, noop], "en");
     expect(zh).toBe(
-      "[历史已压缩 · 板砖]\n- Excerpt src/a.ts:120-140 · 正文已略去\n- （板砖无产出）",
+      "板砖之前做过的事（细节不在手边）：\n- 看过 src/a.ts 第 120–140 行（原文不在手边）\n- 板砖这次什么也没动。",
     );
     expect(en).toBe(
-      "[history compacted · 板砖]\n- Excerpt src/a.ts:120-140 · body elided\n- (板砖 produced nothing)",
+      "What 板砖 did before (details not at hand):\n- Was shown src/a.ts lines 120–140 (not at hand)\n- 板砖 did nothing this time.",
     );
   });
 
@@ -1018,8 +1026,8 @@ describe("compaction markers — session language", () => {
       { kind: "herta", surface: "speech", text: "there." },
     ];
     const en = JSON.stringify(compactRecordForPrompt(record, { lang: "en" }));
-    expect(en).toContain("[history compacted · 板砖]");
-    expect(en).toContain("body elided");
+    expect(en).toContain("What 板砖 did before (details not at hand):");
+    expect(en).toContain("(not at hand)");
     // The content itself is gone either way — the note describes a real loss.
     expect(en).not.toContain("const x = 1;");
   });
@@ -1109,7 +1117,9 @@ describe("stranded evidenceDetail — the run-of-one hole (self-review 2026-08-1
     const marker = out.find(
       (b) => b.kind === "system" && b.body.includes("完成 · 1 个文件"),
     );
-    expect(marker?.kind === "system" && marker.body).toContain("git diff");
+    expect(marker?.kind === "system" && marker.body).toContain(
+      "（改动的 diff 不在手边）",
+    );
   });
 
   it("the State-1 pass-through done-marker still keeps its roll-up", () => {
@@ -1172,10 +1182,10 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       { kind: "user", text: "改了哪几行？" },
     ]);
     const summary = out.find(
-      (b) => b.kind === "system" && b.body.includes("历史已压缩"),
+      (b) => b.kind === "system" && b.body.includes("板砖之前做过的事"),
     );
     expect(summary?.kind === "system" && summary.body).toContain(
-      "派板砖用 git diff 重读",
+      "（改动的 diff 不在手边）",
     );
   });
 
@@ -1194,7 +1204,7 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       { kind: "user", text: "换个话题" },
     ]);
     const s = JSON.stringify(out);
-    expect(s).toContain("历史已压缩");
+    expect(s).toContain("板砖之前做过的事");
     expect(s).not.toContain("git diff");
   });
 
@@ -1211,7 +1221,7 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       { kind: "user", text: "b 改了哪几行？" },
     ]);
     const hinted = out.filter(
-      (b) => b.kind === "system" && b.body.includes("git diff"),
+      (b) => b.kind === "system" && b.body.includes("（改动的 diff 不在手边）"),
     );
     expect(hinted).toHaveLength(1);
     expect(hinted[0]?.kind === "system" && hinted[0].body).toContain(
@@ -1230,9 +1240,7 @@ describe("done-marker diff re-read hint (E2E 2026-08-11)", () => {
       ],
       { lang: "en" },
     );
-    expect(JSON.stringify(out)).toContain(
-      "re-read it via git diff before quoting details",
-    );
+    expect(JSON.stringify(out)).toContain("(the diff isn't at hand)");
   });
 });
 
@@ -1293,7 +1301,7 @@ describe("decideAttachmentFolds / foldAttachments — the fold lane on its own (
       undefined,
     );
     expect(folded?.kind === "system" ? folded.body : "").toContain(
-      "正文已略去",
+      "读过，原文不在手边",
     );
     // The system run beside it is neither compacted nor touched: the same
     // block objects come back, uncompacted.
@@ -1302,9 +1310,202 @@ describe("decideAttachmentFolds / foldAttachments — the fold lane on its own (
     expect(JSON.stringify(out)).not.toContain("[历史已压缩");
   });
 
-  it("a block nobody decided stays verbatim", () => {
+  it("a block nobody decided is read fresh: its name, then its text (ADR 0079)", () => {
     const out = foldAttachments([attachment], new Map());
-    expect(out[0]).toBe(attachment);
+    const fresh = out[0];
+    expect(fresh?.kind === "system" ? fresh.body : "").toBe("附件 spec.md");
+    expect(fresh?.kind === "system" ? fresh.evidenceDetail : "").toBe(
+      "# Spec\nCONFIDENTIAL-HEAD-LINE",
+    );
+  });
+});
+
+describe("an attachment as Herta reads it (ADR 0079, owner 2026-10-16)", () => {
+  // The row as the ingest writes it: bookkeeping in the body, the head and
+  // the outline preview in `evidence`. What she reads is the name, the
+  // document's text and its outline — every picture its transcript where
+  // one was made, a plain （图） where none was.
+  const pdf: SystemBlock = {
+    kind: "system",
+    label: "系统",
+    body: "附件 hw3.pdf · PDF · 2 页 · 已提取文本 · 11 行 · 423 字 · 目录 2 条 · .herta/attachments/s1/hw3-02738c2d.pdf.txt",
+    evidenceDetail:
+      "↳ 附件 hw3.pdf\n(the stored detail, superseded by evidence)",
+    evidence: [
+      {
+        kind: "attachment",
+        name: "hw3.pdf",
+        path: ".herta/attachments/s1/hw3-02738c2d.pdf.txt",
+        text: [
+          "── 第 1 页 ──",
+          "Question 1. Let A be the matrix below.",
+          "[图 1-1 · .herta/attachments/s1/hw3-02738c2d.pdf.p1-1.png] 自动转写：A=\\begin{bmatrix}2&1\\\\1&2\\end{bmatrix}",
+          "(a) Compute det(A).",
+          "[图 1-2 · .herta/attachments/s1/hw3-02738c2d.pdf.p1-2.png]（未转写，可用 view_image 查看原图）",
+          "[图 1-3：未能保存]",
+          "(b) Find the eigenvalues of A.",
+        ].join("\n"),
+        clipped: true,
+      },
+      {
+        kind: "outline",
+        name: "hw3.pdf",
+        path: ".herta/attachments/s1/hw3-02738c2d.pdf.outline.txt",
+        items: ["Question 1 · 第 1 页", "Question 2 · 第 2 页"],
+        total: 5,
+      },
+    ],
+    digest: {
+      kind: "attachment",
+      name: "hw3.pdf",
+      path: ".herta/attachments/s1/hw3-02738c2d.pdf.txt",
+      lines: 11,
+      chars: 423,
+      format: "pdf",
+      pages: 2,
+      outline: {
+        path: ".herta/attachments/s1/hw3-02738c2d.pdf.outline.txt",
+        entries: 5,
+      },
+    },
+  };
+  const read = (lang: "zh" | "en"): SystemBlock => {
+    const out = foldAttachments([pdf], new Map(), lang)[0];
+    if (out?.kind !== "system") throw new Error("not a system block");
+    return out;
+  };
+
+  it("fresh: the name, the text with each picture its transcript or （图）, and the outline", () => {
+    const fresh = read("zh");
+    expect(fresh.body).toBe("附件 hw3.pdf");
+    expect(fresh.evidenceDetail).toBe(
+      [
+        "── 第 1 页 ──",
+        "Question 1. Let A be the matrix below.",
+        "A=\\begin{bmatrix}2&1\\\\1&2\\end{bmatrix}",
+        "(a) Compute det(A).",
+        "（图）",
+        "（图）",
+        "(b) Find the eigenvalues of A.",
+        "（仅开头部分，正文更长）",
+        "目录（共 5 条，这里是前 2 条）：",
+        "Question 1 · 第 1 页",
+        "Question 2 · 第 2 页",
+      ].join("\n"),
+    );
+    // None of the store's bookkeeping reaches her.
+    const all = `${fresh.body}\n${fresh.evidenceDetail}`;
+    for (const gone of [
+      ".herta/",
+      "423 字",
+      "11 行",
+      "已提取文本",
+      "自动转写",
+      "view_image",
+      "↳",
+    ]) {
+      expect(all).not.toContain(gone);
+    }
+  });
+
+  it("an EN session reads the notes and the picture mark in English; 附件 stays the record's word", () => {
+    const fresh = read("en");
+    expect(fresh.body).toBe("附件 hw3.pdf");
+    expect(fresh.evidenceDetail).toContain("(figure)");
+    expect(fresh.evidenceDetail).toContain(
+      "(only the opening; the document runs longer)",
+    );
+    expect(fresh.evidenceDetail).toContain(
+      "Contents (5 entries, the first 2 shown):",
+    );
+  });
+
+  it("folded, a document she saw only the opening of says so — 「读过」 alone would claim more", () => {
+    const out = compactRecordForPrompt([
+      pdf,
+      { kind: "user", text: "看看" },
+      { kind: "herta", surface: "speech", text: "看了。" },
+      { kind: "user", text: "嗯" },
+      { kind: "herta", surface: "speech", text: "。" },
+      { kind: "user", text: "换个话题" },
+    ]);
+    const folded = out.find((b) => b.kind === "system");
+    expect(folded?.kind === "system" ? folded.body : "").toBe(
+      "附件 hw3.pdf（读过开头，原文不在手边）",
+    );
+    expect(digestSystemBlock(pdf, "en")).toBe(
+      "附件 hw3.pdf (read the opening; the original isn't at hand)",
+    );
+  });
+
+  it("a document too long to take keeps its outline preview while fresh, and says why in every state", () => {
+    const book: SystemBlock = {
+      kind: "system",
+      label: "系统",
+      body: "附件 book.pdf · PDF · 516 页 · 文件过大，未取正文 · 目录 124 条 · .herta/attachments/s1/book.pdf.txt",
+      evidence: [
+        {
+          kind: "outline",
+          name: "book.pdf",
+          path: ".herta/attachments/s1/book.pdf.outline.txt",
+          items: ["第一章 · 第 1 页"],
+          total: 124,
+        },
+      ],
+      digest: {
+        kind: "attachment",
+        name: "book.pdf",
+        path: ".herta/attachments/s1/book.pdf.txt",
+        lines: 14603,
+        chars: 318437,
+        format: "pdf",
+        pages: 516,
+        unreadable: "too_large",
+      },
+    };
+    const fresh = foldAttachments([book], new Map())[0];
+    expect(fresh?.kind === "system" ? fresh.body : "").toBe(
+      "附件 book.pdf（文件过大，未取正文）",
+    );
+    expect(fresh?.kind === "system" ? fresh.evidenceDetail : "").toBe(
+      "目录（共 124 条，这里是前 1 条）：\n第一章 · 第 1 页",
+    );
+    const folded = foldAttachments(
+      [book],
+      new Map([[book, "citation" as const]]),
+    )[0];
+    expect(folded?.kind === "system" ? folded.body : "").toBe(
+      "附件 book.pdf（文件过大，未取正文）",
+    );
+    expect(
+      folded?.kind === "system" ? folded.evidenceDetail : "",
+    ).toBeUndefined();
+  });
+
+  it("a picture's line is projected only in a PDF's text — a text file keeps its own lines", () => {
+    const md: SystemBlock = {
+      ...pdf,
+      evidence: [
+        {
+          kind: "attachment",
+          name: "notes.md",
+          path: ".herta/attachments/s1/notes.md",
+          text: "[图 1-1 · a note the user wrote this way]",
+          clipped: false,
+        },
+      ],
+      digest: {
+        kind: "attachment",
+        name: "notes.md",
+        path: ".herta/attachments/s1/notes.md",
+        lines: 1,
+        chars: 40,
+      },
+    };
+    const out = foldAttachments([md], new Map())[0];
+    expect(out?.kind === "system" ? out.evidenceDetail : "").toBe(
+      "[图 1-1 · a note the user wrote this way]",
+    );
   });
 });
 
@@ -1338,7 +1539,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     const kept = sys(out)[0];
     expect(kept?.evidenceDetail).toContain("CONFIDENTIAL-HEAD-LINE");
-    expect(kept?.body).not.toContain("正文已略去");
+    expect(kept?.body).toBe("附件 spec.md");
   });
 
   it("State 1 spans the drop turn plus two follow-ups; the third folds it (§6g window)", () => {
@@ -1368,10 +1569,10 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     const folded = sys(exhausted)[0];
     expect(folded?.evidenceDetail).toBeUndefined();
-    expect(folded?.body).toContain("正文已略去");
-    // The citation survives whole — she still knows what and where it is.
+    expect(folded?.body).toContain("读过，原文不在手边");
+    // She still knows what it was; where it is stays 板砖's (ADR 0079).
     expect(folded?.body).toContain("spec.md");
-    expect(folded?.body).toContain(".herta/attachments/s1/spec.md");
+    expect(folded?.body).not.toContain(".herta/attachments/s1/spec.md");
     expect(JSON.stringify(exhausted)).not.toContain("CONFIDENTIAL-HEAD-LINE");
   });
 
@@ -1391,10 +1592,9 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     expect(sys(out)[0]?.evidenceDetail).toContain("CONFIDENTIAL-HEAD-LINE");
   });
 
-  it("a fresh fold carries the re-read hint; the hint expires after N more turns (§6g)", () => {
-    // The follow-up that needs the body back may not name the file, and
-    // Herta's only route to it is a 板砖 dispatch — so the citation says so
-    // for a few turns (owner 2026-08-11), then stops nudging.
+  it("folded, every turn reads 「读过，原文不在手边」 — the hinted turns and the later ones alike (ADR 0079)", () => {
+    // The re-read hint (owner 2026-08-11) read wrong in her 自传 (owner
+    // 2026-10-16); "not at hand" already says the text can be fetched.
     const exchanges = (n: number): TerminalRecordBlock[] =>
       Array.from({ length: n }, (_, k) => [
         { kind: "user", text: `第 ${k} 句` } as TerminalRecordBlock,
@@ -1408,19 +1608,17 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     // 3 user turns past the block — just folded, hint attached.
     const fresh = compactRecordForPrompt([attachment, ...exchanges(3)]);
     const freshBody = sys(fresh)[0]?.body ?? "";
-    expect(freshBody).toContain("正文已略去");
-    expect(freshBody).toContain("需要时可派板砖重读");
+    expect(freshBody).toBe("附件 spec.md（读过，原文不在手边）");
     expect(sys(fresh)[0]?.evidenceDetail).toBeUndefined();
 
     // 5 user turns — last hinted prompt.
     const lastHinted = compactRecordForPrompt([attachment, ...exchanges(5)]);
-    expect(sys(lastHinted)[0]?.body).toContain("需要时可派板砖重读");
+    expect(sys(lastHinted)[0]?.body).toBe(freshBody);
 
     // 6 user turns — the hint expires; the bare citation remains.
     const expired = compactRecordForPrompt([attachment, ...exchanges(6)]);
     const expiredBody = sys(expired)[0]?.body ?? "";
-    expect(expiredBody).toContain("正文已略去");
-    expect(expiredBody).not.toContain("板砖重读");
+    expect(expiredBody).toBe(freshBody);
   });
 
   it("naming the file re-opens the window, which can expire again (§6g re-inflate)", () => {
@@ -1661,7 +1859,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     // Window exhausted AND spoken since — deep in State 2 territory, and the
     // body still must not claim an elided body that never existed.
-    expect(sys(out)[0]?.body).toBe(unreadable.body);
+    expect(sys(out)[0]?.body).toBe("附件 photo.bin（非文本文件，未取正文）");
   });
 
   // ── Images (ADR 0048) ────────────────────────────────────────────────────
@@ -1696,13 +1894,10 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       { kind: "user", text: "换个话题" },
     ]);
     const folded = sys(out)[0];
-    expect(folded?.body).toContain("一张终端截图，测试全部通过。");
-    // Never the document elision note: nothing was elided.
-    expect(folded?.body).not.toContain("正文已略去");
-    // The citation still survives whole, so a vision-capable 板砖 can be sent
-    // back to the picture itself (ADR 0048 §5).
-    expect(folded?.body).toContain("shot.png");
-    expect(folded?.body).toContain(".herta/attachments/s1/shot.png");
+    // Never the document elision note: nothing was elided. A vision-capable
+    // 板砖 is sent back to the picture through its own task line, which
+    // keeps the path (ADR 0048 §5, ADR 0079).
+    expect(folded?.body).toBe("附件 shot.png：一张终端截图，测试全部通过。");
   });
 
   it("an uncaptioned image says so and claims no reading", () => {
@@ -1728,7 +1923,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       { kind: "herta", surface: "speech", text: "。" },
       { kind: "user", text: "行吧" },
     ]);
-    expect(sys(out)[0]?.body).toBe(uncaptioned.body);
+    expect(sys(out)[0]?.body).toBe("附件 shot.png（图片已存，未能读图）");
   });
 
   it("the caption survives into an EN session's summary verbatim", () => {
@@ -1745,8 +1940,9 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       ],
       { lang: "en" },
     );
-    expect(sys(out)[0]?.body).toContain("一张终端截图，测试全部通过。");
-    expect(sys(out)[0]?.body).not.toContain("body elided");
+    expect(sys(out)[0]?.body).toBe(
+      "附件 shot.png: 一张终端截图，测试全部通过。",
+    );
   });
 
   it("adjacent attachments never fold into a 板砖-headed summary", () => {
@@ -1777,7 +1973,7 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       { kind: "herta", surface: "speech", text: "。" },
     ]);
     const s = JSON.stringify(out);
-    expect(s).not.toContain("历史已压缩");
+    expect(s).not.toContain("板砖之前做过的事");
     expect(s).not.toContain("CONFIDENTIAL-HEAD-LINE");
     expect(s).not.toContain("SECOND-HEAD-LINE");
     expect(sys(out).map((b) => b.digest?.kind)).toEqual([
@@ -1807,9 +2003,9 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
     ]);
     const s = JSON.stringify(out);
     // The dispatch pair still compacts; the attachment folded on its own.
-    expect(s).toContain("历史已压缩");
+    expect(s).toContain("板砖之前做过的事");
     expect(s).not.toContain("CONFIDENTIAL-HEAD-LINE");
-    expect(s).toContain("正文已略去");
+    expect(s).toContain("读过，原文不在手边");
   });
 
   it("localizes the elision note by session language", () => {
@@ -1824,9 +2020,275 @@ describe("attachment blocks — per-block two-state fold (ADR 0033)", () => {
       ],
       { lang: "en" },
     );
-    expect(sys(out)[0]?.body).toContain("body elided");
-    // The fresh fold's hint localizes too (板砖 stays literal per ADR 0015 —
-    // display alias only).
-    expect(sys(out)[0]?.body).toContain("send 板砖 to re-read");
+    // The aside localizes; 附件 is the record's own word and does not, and
+    // 板砖 stays literal per ADR 0015 (display alias only).
+    expect(sys(out)[0]?.body).toBe(
+      "附件 spec.md (read it; the original isn't at hand)",
+    );
+  });
+});
+
+describe("the verdict turn: an excerpt the marker shows folds to the read (ADR 0079 §2)", () => {
+  // The bridge's shape: the marker's tail is the run's last 差分协处理器 row
+  // with a detail (`lastCommandTail`), here the excerpt — a patch preview is
+  // a 系统 row and does not replace it.
+  const lines =
+    "30\tclass TestSieveFast(unittest.TestCase):\n31\t    LIMITS = [0, 1, 2, 3, 997]";
+  const shown = `↳ 摘录 test_primes.py:30-31\n${lines}`;
+  const op = (verb: "Reading" | "Writing" | "Running", arg: string) =>
+    ({
+      kind: "system",
+      label: "差分协处理器",
+      body: `${verb} ${arg}`,
+      digest: { kind: "op", verb, arg },
+    }) satisfies SystemBlock;
+  const excerpt = (detail = shown, path = "test_primes.py"): SystemBlock => ({
+    kind: "system",
+    label: "差分协处理器",
+    body: `↳ excerpt ${path}:30-31`,
+    digest: { kind: "excerpt", path, from: 30, to: 31 },
+    evidenceDetail: detail,
+  });
+  const patch: SystemBlock = {
+    kind: "system",
+    label: "系统",
+    body: "patch preview: primes.py (+3 -1)\n\n```diff\n+x\n```",
+    digest: { kind: "patch", files: ["primes.py"], add: 3, del: 1 },
+  };
+  const marker = (tail: string): SystemBlock => ({
+    kind: "system",
+    label: "差分协处理器",
+    body: "完成 · 1 个文件 · +3 −1 · 测试 1/1",
+    role: "done-marker",
+    markerSummary: {
+      kind: "done",
+      state: "completed",
+      fileCount: 1,
+      lines: { add: 3, del: 1 },
+      tests: { passed: 1, failed: 0 },
+      riskCount: 0,
+    },
+    evidenceDetail: `${tail}\n↳ 改动文件: primes.py`,
+  });
+  const dispatch = (...rows: TerminalRecordBlock[]): TerminalRecord => [
+    { kind: "user", text: "TestSieveFast 拿哪些 limit 比对？" },
+    { kind: "herta", surface: "speech", text: "@板砖 去看。" },
+    ...rows,
+  ];
+  /** The compaction summaries' bodies, in order. */
+  const summaries = (out: TerminalRecord): string[] =>
+    out
+      .filter(
+        (b): b is SystemBlock =>
+          b.kind === "system" &&
+          b.role === undefined &&
+          b.digest === undefined &&
+          b.evidenceDetail === undefined,
+      )
+      .map((b) => b.body);
+
+  it("the excerpt the marker ends on reads as the read, not 「原文不在手边」 above its own lines", () => {
+    const out = compactRecordForPrompt(
+      dispatch(
+        op("Reading", "test_primes.py:30-31"),
+        excerpt(),
+        patch,
+        op("Writing", "primes.py"),
+        marker(shown),
+      ),
+    );
+    expect(summaries(out)).toEqual([
+      "板砖之前做过的事（细节不在手边）：\n- 读 test_primes.py 第 30–31 行\n- 改动 primes.py（+3 −1）",
+    ]);
+    // The marker passes through with the lines.
+    const dm = out.find(
+      (b): b is SystemBlock => b.kind === "system" && b.role === "done-marker",
+    );
+    expect(dm?.evidenceDetail).toContain(lines);
+    expect(JSON.stringify(out)).not.toContain("原文不在手边");
+  });
+
+  it("in an English session too", () => {
+    const out = compactRecordForPrompt(
+      dispatch(excerpt(), patch, marker(shown)),
+      { lang: "en" },
+    );
+    expect(summaries(out)).toEqual([
+      "What 板砖 did before (details not at hand):\n- Read test_primes.py lines 30–31\n- Changed primes.py (+3 −1)",
+    ]);
+  });
+
+  it("once she has spoken her verdict, the fold says the lines are not at hand again", () => {
+    const out = compactRecordForPrompt([
+      ...dispatch(excerpt(), patch, marker(shown)),
+      { kind: "herta", surface: "speech", text: "五个 limit。" },
+    ]);
+    expect(summaries(out)[0]).toContain(
+      "- 看过 test_primes.py 第 30–31 行（原文不在手边）",
+    );
+    expect(JSON.stringify(out)).not.toContain("LIMITS");
+  });
+
+  it("an excerpt the marker does not show keeps 「原文不在手边」: other lines, the same lines before an edit, a tail that is a command's output", () => {
+    const before = `↳ 摘录 test_primes.py:30-31\n30\tclass TestSieveFast(unittest.TestCase):\n31\t    LIMITS = [0, 1]`;
+    const out = compactRecordForPrompt(
+      dispatch(
+        excerpt("↳ 摘录 bench.py:30-31\n30\tx\n31\ty", "bench.py"),
+        excerpt(before),
+        patch,
+        excerpt(),
+        marker(shown),
+      ),
+    );
+    expect(summaries(out)).toEqual([
+      [
+        "板砖之前做过的事（细节不在手边）：",
+        "- 看过 bench.py 第 30–31 行（原文不在手边）",
+        "- 看过 test_primes.py 第 30–31 行（原文不在手边）",
+        "- 改动 primes.py（+3 −1）",
+        "- 读 test_primes.py 第 30–31 行",
+      ].join("\n"),
+    ]);
+
+    const output: SystemBlock = {
+      kind: "system",
+      label: "差分协处理器",
+      body: "↳ exit 0 · 1 lines",
+      digest: { kind: "text", text: "↳ exit 0 · 1 lines", exitCode: 0 },
+      evidenceDetail: "↳ 输出:\nOK",
+    };
+    const tailIsOutput = compactRecordForPrompt(
+      dispatch(
+        excerpt(),
+        op("Running", "pytest"),
+        output,
+        marker("↳ 输出:\nOK"),
+      ),
+    );
+    expect(summaries(tailIsOutput)[0]).toContain(
+      "- 看过 test_primes.py 第 30–31 行（原文不在手边）",
+    );
+  });
+
+  it("only the dispatch the marker closes: a run split by a beat or a steer reads the read, an earlier dispatch's same excerpt does not", () => {
+    const earlier = dispatch(excerpt(), patch, marker(shown));
+    const out = compactRecordForPrompt([
+      ...earlier,
+      { kind: "herta", surface: "speech", text: "五个 limit。" },
+      ...dispatch(
+        op("Reading", "test_primes.py:30-31"),
+        excerpt(),
+        patch,
+        // A beat splits the run, and a steer is not a new message to answer;
+        // the marker after them still shows the lines.
+        { kind: "herta", surface: "speech", text: "改得不错。" },
+        { kind: "user", text: "顺便跑下测试", steer: true },
+        op("Writing", "primes.py"),
+        op("Running", "pytest"),
+        marker(shown),
+      ),
+    ]);
+    const [old, beforeBeat] = summaries(out);
+    expect(old).toContain("- 看过 test_primes.py 第 30–31 行（原文不在手边）");
+    expect(beforeBeat).toBe(
+      "板砖之前做过的事（细节不在手边）：\n- 读 test_primes.py 第 30–31 行\n- 改动 primes.py（+3 −1）",
+    );
+  });
+});
+
+describe("a memory save, as the bridge writes it — no digest (ADR 0079 §2)", () => {
+  // Longer than the 60 characters the legacy fold cut a row's first line to.
+  const fact =
+    "测试用 node --test test/，别用 npm test：package.json 的 test 脚本是坏的，在 Node 22 下一跑就退出，所以别再用它";
+  const saved = (): SystemBlock => {
+    const event: AgentEvent = {
+      type: "tool.call.finished",
+      layer: "backend",
+      id: "m1",
+      tool: "memory_save",
+      result: {
+        ok: true,
+        summary: "remembered: test_command",
+        data: { id: "x", kind: "test_command", text: fact, why: "开拓者说的" },
+      },
+    };
+    const block = projectBackendEvent(event);
+    if (block === null) throw new Error("the bridge wrote no row");
+    return block;
+  };
+  const op = (verb: "Running" | "Saving memory", arg: string): SystemBlock => ({
+    kind: "system",
+    label: "差分协处理器",
+    body: `${verb} ${arg}`,
+    digest: { kind: "op", verb, arg },
+  });
+  const marker: SystemBlock = {
+    kind: "system",
+    label: "差分协处理器",
+    body: "完成",
+    role: "done-marker",
+    markerSummary: {
+      kind: "done",
+      state: "completed",
+      fileCount: 0,
+      riskCount: 0,
+    },
+  };
+  const dispatch: TerminalRecord = [
+    { kind: "user", text: "记住：测试用 node --test test/" },
+    { kind: "herta", surface: "speech", text: "@板砖 记下来。" },
+  ];
+  const run = [
+    op("Running", "cat package.json"),
+    op("Saving memory", "test_command"),
+    saved(),
+  ];
+
+  it("folded, the summary says what was remembered — the whole fact, in both languages", () => {
+    const later: TerminalRecord = [
+      ...dispatch,
+      ...run,
+      marker,
+      { kind: "herta", surface: "speech", text: "记下了。" },
+      { kind: "user", text: "下一件事" },
+    ];
+    expect(buildCompactionBody(run, "zh")).toBe(
+      `板砖之前做过的事（细节不在手边）：\n- 板砖记下了：${fact}`,
+    );
+    expect(buildCompactionBody(run, "en")).toBe(
+      `What 板砖 did before (details not at hand):\n- 板砖 noted: ${fact}`,
+    );
+    for (const [lang, line] of [
+      ["zh", `- 板砖记下了：${fact}`],
+      ["en", `- 板砖 noted: ${fact}`],
+    ] as const) {
+      const prompt = serializeTerminalRecord(later, { lang });
+      expect(prompt).toContain(line);
+      expect(prompt).not.toContain("remembered");
+    }
+  });
+
+  it("fresh — a beat's window, a run of one — it reads the same, in both languages", () => {
+    const beat: TerminalRecord = [...dispatch, ...run];
+    const alone: TerminalRecord = [
+      ...dispatch,
+      saved(),
+      { kind: "herta", surface: "speech", text: "记下了。" },
+    ];
+    for (const [lang, line] of [
+      ["zh", `板砖记下了：${fact}`],
+      ["en", `板砖 noted: ${fact}`],
+    ] as const) {
+      for (const prompt of [
+        serializeTerminalRecord(beat, {
+          lang,
+          verbatimSinceLastDispatch: true,
+        }),
+        serializeTerminalRecord(alone, { lang }),
+      ]) {
+        expect(prompt).toContain(line);
+        expect(prompt).not.toContain("remembered");
+      }
+    }
   });
 });

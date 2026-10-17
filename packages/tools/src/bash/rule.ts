@@ -133,6 +133,7 @@ export function makeBashRule(deps: BashRuleDeps): PermissionRule {
             ? { consequence: verdict.consequence }
             : {}),
           ...(undoable ? { undoable: true as const } : {}),
+          cwd,
         };
       }
       return {
@@ -147,6 +148,7 @@ export function makeBashRule(deps: BashRuleDeps): PermissionRule {
           ? { consequence: verdict.consequence }
           : {}),
         ...(undoable ? { undoable: true as const } : {}),
+        cwd,
       };
     }
     // allow → realpath the reader operands of every segment (async guard).

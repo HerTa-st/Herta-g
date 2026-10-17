@@ -16,6 +16,7 @@ import {
 } from "./diff-collapse.js";
 import { escapeUserText } from "./escape.js";
 import type { PromptLang } from "./prompt-lang.js";
+import { systemRowForHerta } from "./record-voice.js";
 
 /**
  * Serializer options for the prompt-side projection of a TerminalRecord.
@@ -149,6 +150,7 @@ export function serializeBlock(
               block.body,
               resolveDiffPromptMaxLines(),
               opts?.lang ?? "zh",
+              "herta",
             );
       // Append fuller evidence (command output tail / done-marker roll-up)
       // for the prompt ONLY. The CLI renderer ignores evidenceDetail (it
@@ -261,10 +263,21 @@ function renderRun(
           ? { attachmentFolds: treatment.attachmentFolds }
           : {}),
       })
-    : treatment.attachmentFolds !== undefined
-      ? foldAttachments(blocks, treatment.attachmentFolds, treatment.lang)
-      : blocks;
+    : // Uncompacted, an attachment still reads as she would remember it
+      // (ADR 0079): with no fold decided, every one is fresh.
+      foldAttachments(
+        blocks,
+        treatment.attachmentFolds ?? new Map(),
+        treatment.lang,
+      );
   return projected
+    .flatMap((b): TerminalRecordBlock[] => {
+      // 板砖's rows read as her notes (ADR 0079 §2); a row with nothing for
+      // her drops out.
+      if (b.kind !== "system") return [b];
+      const row = systemRowForHerta(b, treatment.lang);
+      return row === null ? [] : [row];
+    })
     .map((b) =>
       serializeBlock(b, {
         compressDiffs: treatment.compress,

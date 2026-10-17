@@ -19,6 +19,10 @@ import { boundQuoteText, type ComposerQuote } from "../../lib/quote-format.js";
 /** Locked by the owner's tuner (ADR 0078, 2026-10-13). */
 export const PIECE_REST_MS = 1_200;
 
+/** `.piece-mask`'s opacity transition: a hidden mask lets its pieces go
+ *  after it. */
+export const MASK_FADE_MS = 280;
+
 const STORE_KEY = "herta.viewer.pieceQuote";
 
 function readEnabled(): boolean {
@@ -149,13 +153,28 @@ export function PieceMask({
   const shownRef = useRef(shown);
   shownRef.current = shown;
 
+  const release = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hide = useCallback((force: boolean) => {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
     if (!force && selectedRef.current.size > 0) return;
     setSelected(new Set());
     setShown(false);
+    // A hidden mask kept every piece mounted — thousands of boxes on a long
+    // file, under every later render (release review 2026-10-13). They go
+    // once the fade is over; the next rest measures them again.
+    if (release.current !== null) clearTimeout(release.current);
+    release.current = setTimeout(() => {
+      release.current = null;
+      setPieces([]);
+    }, MASK_FADE_MS);
   }, []);
+  useEffect(
+    () => () => {
+      if (release.current !== null) clearTimeout(release.current);
+    },
+    [],
+  );
 
   // A new file, or the switch turned off: nothing stays.
   // biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is the trigger
@@ -177,6 +196,8 @@ export function PieceMask({
         return;
       timer.current = setTimeout(() => {
         timer.current = null;
+        if (release.current !== null) clearTimeout(release.current);
+        release.current = null;
         setPieces(measure());
         setShown(true);
       }, PIECE_REST_MS);

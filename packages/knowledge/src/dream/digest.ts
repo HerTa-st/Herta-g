@@ -1,11 +1,22 @@
 import type { SystemBlock, TerminalRecordBlock } from "@herta/core";
+import {
+  digestSystemBlock,
+  foldedRunLine,
+  systemRowForHerta,
+} from "@herta/herta";
+
+/** Language of the rows' notes: the dream pass's own (ADR 0079 §3). */
+type DigestLang = "zh" | "en";
 
 /**
- * Which system blocks belong in a dream episode's evidence spine — and
- * which are live-work chrome that would only hand the worthiness gate
- * noise it then has to reject (consumer audit 2026-07-23).
+ * One of 板砖's rows as the dream reads it: the same words Herta read it in
+ * (ADR 0079 §3, `record-voice.ts`), so the 废案 a dream writes retells the
+ * record in the grammar her prompt and her seeds use — never the store's
+ * bookkeeping (`↳ exit 0 · 12 lines`, log paths, `ran … (exit 0, 3.1s)`).
+ * Null leaves the row out.
  *
- * Skipped, by digest kind:
+ * Left out, as live-work chrome that would only hand the worthiness gate
+ * noise it then has to reject (consumer audit 2026-07-23):
  *  - "bg"   — a background command's start, its polls while running and
  *             an explicit stop: transient run state. Its EXIT row stays —
  *             that is an outcome, and a background test run's verdict used
@@ -13,29 +24,56 @@ import type { SystemBlock, TerminalRecordBlock } from "@herta/core";
  *             review 2026-09-22, finding 17).
  *  - "todo" — the plan layout block: working state (same rationale as
  *             the live compaction's Planning/todo skip).
- *  - "patch" / "skip" — patch previews, i.e. the FULL diff body. The
- *             Writing op row (with its `↳ +N −M`) and the done-marker
- *             already carry the outcome; a dream prompt has no use for a
- *             hundred-line diff. The projector has emitted `patch` since
- *             2026-08-25 and the skip list never learned it — every
- *             coding episode carried its diffs into every distillation
- *             call and past the 200-char floor (dream review 2026-09-22,
- *             finding 1). `skip` is the older kind; records persisted
- *             before the digest field existed are matched by body prefix.
+ *  - "skip" and a pre-digest `patch preview` — the full diff with nothing
+ *             structured to fold it to. A dream prompt has no use for a
+ *             hundred-line diff (dream review 2026-09-22, finding 1).
+ *  - what Herta's prompt leaves out too: a memory save's kind, a planning
+ *             step, a command that came back fine with nothing to show.
  *
- * Everything else — op rows, test results, tool failures, markers,
- * plain text — returns its body verbatim: that is what actually
- * happened, which is exactly what the dream should ground in.
- *
+ * Kept, each in her words:
+ *  - a patch preview as its folded line, `改动 a.ts（+2 −1）` — the
+ *             magnitude without the diff. The write step no longer carries
+ *             it (`写 a.ts`), so the preview row is where it comes from.
+ *  - an attachment as its one-line digest, `附件 spec.md（读过，原文不在
+ *             手边）` — its name, never its text (see the evidence rule
+ *             below) or where the store keeps it.
+ *  - steps, markers and rows written before the structured digest as they
+ *             read fresh, with `detail` (the evidence this digest keeps
+ *             for the row, already filtered) under them.
+ *  - every other row fresh while its evidence is in the digest, and as its
+ *             folded line once it is not: `看过 a.ts 第 5–6 行（原文不在手
+ *             边）` rather than a header over nothing, and a failed
+ *             command named (`lastCommand`, the command its result row
+ *             answers).
  */
-export function dreamRelevantSystemBody(b: SystemBlock): string | null {
+export function systemRowForDream(
+  b: SystemBlock,
+  detail: string | null,
+  lang: DigestLang = "zh",
+  lastCommand?: string,
+): string | null {
   const kind = b.digest?.kind;
-  if (kind === "todo" || kind === "skip" || kind === "patch") {
-    return null;
-  }
+  if (kind === "todo" || kind === "skip") return null;
   if (b.digest?.kind === "bg" && b.digest.state !== "exited") return null;
   if (b.digest === undefined && b.body.startsWith("patch preview")) return null;
-  return b.body;
+  if (kind === "attachment") return digestSystemBlock(b, lang);
+  if (kind === "patch") return foldedRunLine(b, lang);
+  const fresh =
+    kind === undefined ||
+    kind === "op" ||
+    b.role === "done-marker" ||
+    b.role === "noop-marker" ||
+    detail !== null;
+  if (!fresh) return foldedRunLine(b, lang, lastCommand);
+  const { evidenceDetail: _stored, ...rest } = b;
+  const row = systemRowForHerta(
+    detail !== null ? { ...rest, evidenceDetail: detail } : rest,
+    lang,
+  );
+  if (row === null) return null;
+  return row.evidenceDetail !== undefined && row.evidenceDetail.length > 0
+    ? `${row.body}\n${row.evidenceDetail}`
+    : row.body;
 }
 
 /** A path inside the harness's attachment store (ADR 0033), where every
@@ -116,14 +154,16 @@ const DIGEST_HEAD_ROWS = 15;
  * Characters of run evidence — excerpts, outputs, hit lists — one digest
  * carries, filled from the end: the rows nearest the verdict first. A
  * marker's own detail (files, risks, tests) always stays. Past the budget a
- * row keeps its body and loses its detail.
+ * row loses its detail and reads as its folded line (`systemRowForDream`).
  */
 export const DIGEST_EVIDENCE_BUDGET = 6000;
 
 interface SystemRow {
-  readonly body: string;
+  readonly block: SystemBlock;
   readonly evidence: string;
   readonly marker: boolean;
+  /** The command a result row answers (`systemRowForDream`). */
+  readonly lastCommand: string | undefined;
 }
 
 /** The outcome word a marker's state maps to (ExecutionStatus). */
@@ -160,6 +200,10 @@ export function outcomeTag(b: SystemBlock): string {
 
 export function buildEpisodeDigest(
   blocks: readonly TerminalRecordBlock[],
+  /** The dream pass's language: 板砖's rows read in it (ADR 0079 §3). The
+   *  digest's own notation — `〔…（已核实）：…〕`, `开拓者：` — stays as it
+   *  is in both (distill-prompt.ts). */
+  lang: DigestLang = "zh",
 ): string {
   // Pass 1 — every system row the dream keeps, with its evidence, in order.
   // The latest `Running …` row named the attachment store: the output row
@@ -168,12 +212,14 @@ export function buildEpisodeDigest(
   // id is remembered from the row that reported it running.
   const rows = new Map<number, SystemRow>();
   let afterAttachmentCommand = false;
+  let lastCommand: string | undefined;
   const attachmentBackgroundIds = new Set<string>();
   blocks.forEach((b, i) => {
     if (b.kind !== "system") return;
     if (b.digest?.kind === "op") {
       afterAttachmentCommand =
         b.digest.verb === "Running" && mentionsAttachmentStore(b.digest.arg);
+      if (b.digest.verb === "Running") lastCommand = b.digest.arg;
     }
     if (
       b.digest?.kind === "bg" &&
@@ -182,8 +228,6 @@ export function buildEpisodeDigest(
     ) {
       attachmentBackgroundIds.add(b.digest.id);
     }
-    const body = dreamRelevantSystemBody(b);
-    if (body === null) return;
     const fromStore =
       b.digest?.kind === "bg"
         ? attachmentBackgroundIds.has(b.digest.id)
@@ -198,10 +242,23 @@ export function buildEpisodeDigest(
             .split("\n")
             .filter((l) => !l.startsWith("↳ 待办"))
             .join("\n");
+    // A row with nothing for her even with its evidence is not one of the
+    // rows the bounds below count.
+    if (
+      systemRowForDream(
+        b,
+        evidence.length > 0 ? evidence : null,
+        lang,
+        lastCommand,
+      ) === null
+    ) {
+      return;
+    }
     rows.set(i, {
-      body,
+      block: b,
       evidence,
       marker: b.role === "done-marker" || b.role === "noop-marker",
+      lastCommand,
     });
   });
 
@@ -261,11 +318,17 @@ export function buildEpisodeDigest(
         return;
       }
       // Backend/system evidence — the outcome spine. Labeled by what it is,
-      // so the model grounds the verdict in what actually happened.
-      const evidence = withEvidence.has(i) ? row.evidence : "";
-      parts.push(
-        `〔${b.label}（${outcomeTag(b)}）：${row.body}${evidence.length > 0 ? `\n${evidence}` : ""}〕`,
+      // so the model grounds the verdict in what actually happened; in the
+      // words she read it in. A row that lost its evidence to the budget
+      // reads as its folded line, or drops out when that leaves nothing.
+      const text = systemRowForDream(
+        row.block,
+        withEvidence.has(i) ? row.evidence : null,
+        lang,
+        row.lastCommand,
       );
+      if (text === null) return;
+      parts.push(`〔${b.label}（${outcomeTag(b)}）：${text}〕`);
     }
   });
   return parts.join("\n");

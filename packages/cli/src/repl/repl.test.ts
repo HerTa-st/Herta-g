@@ -174,6 +174,53 @@ describe("repl", () => {
   });
 });
 
+describe("repl — Ctrl+C while a reveal finishes (release review 2026-10-13)", () => {
+  it("lands the reveal at once: the turn is over, so the abort alone reached nothing", async () => {
+    const on = vi.spyOn(process, "on");
+    let finish: () => void = () => {};
+    const landReveal = vi.fn(() => finish());
+    const renderer = {
+      update: vi.fn(),
+      landReveal,
+      settled: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+            // Ctrl+C, as the REPL's own SIGINT handler receives it.
+            const ctrlC = on.mock.calls.find(([ev]) => ev === "SIGINT")?.[1];
+            (ctrlC as (() => void) | undefined)?.();
+          }),
+      ),
+    } as unknown as NarrativeRenderer;
+    const driver = {
+      runTurn: vi.fn(async () => [] as TerminalRecord),
+      getRecord: vi.fn(() => [] as TerminalRecord),
+      loadRecord: vi.fn(),
+      setPersister: vi.fn(),
+    } as unknown as V2ActorDriver;
+    const stdout = new MockWritable();
+    const stdin = new MockReadable();
+    const input = new Input(stdin, stdout);
+    stdin.feed("在吗\n");
+    stdin.feed("/quit\n");
+    stdin.end();
+    try {
+      await repl({
+        actor: driver,
+        renderer,
+        tools: new InMemoryToolRegistry(),
+        input,
+        out: stdout,
+        style,
+      });
+    } finally {
+      on.mockRestore();
+    }
+    expect(landReveal).toHaveBeenCalledOnce();
+    expect(stdout.full()).not.toContain("interrupted");
+  });
+});
+
 describe("repl — mid-stream error recovery (Slice 9)", () => {
   it("calls renderer.cancelStream() if the actor throws mid-turn", async () => {
     // Set up a renderer with a cancelStream spy. Other methods are minimal mocks.

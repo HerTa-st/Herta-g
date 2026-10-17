@@ -12,7 +12,12 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RepoContextSnapshot, TerminalRecord } from "@herta/core";
+import type {
+  RepoContextSnapshot,
+  TerminalRecord,
+  TerminalRecordBlock,
+  UndoFileResult,
+} from "@herta/core";
 import type { OpeningChoice } from "@herta/herta";
 import type { RepoContextOutcome } from "@herta/tools";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +25,7 @@ import {
   SessionImpl,
   type SessionInternalDeps,
   spanEditedFiles,
+  spanEditsLeft,
 } from "./session.js";
 import { createSessionHost } from "./session-host.js";
 import type { BackendStack } from "./session-wiring.js";
@@ -1492,6 +1498,64 @@ describe("spanEditedFiles", () => {
         { kind: "herta", surface: "speech", text: "在。" },
       ]),
     ).toBe(false);
+  });
+});
+
+describe("spanEditsLeft", () => {
+  const done: TerminalRecordBlock = {
+    kind: "system",
+    label: "差分协处理器",
+    body: "完成 · 1 file · tests 1/1",
+    role: "done-marker",
+    evidenceDetail: "↳ 改动文件: a.ts",
+  };
+  const undo = (
+    files: Array<{ path: string; result: UndoFileResult }>,
+    commands: string[] = [],
+  ): TerminalRecordBlock => ({
+    kind: "system",
+    label: "系统",
+    body: "Undid 板砖's file changes from this turn.",
+    digest: {
+      kind: "undo",
+      files,
+      commands,
+      commandsUnknown: false,
+      incomplete: false,
+    },
+  });
+
+  it("a turn whose edits its own undo took back leaves nothing to name (release review 2026-10-13)", () => {
+    expect(
+      spanEditsLeft([
+        { kind: "user", text: "x" },
+        done,
+        undo([
+          { path: "a.ts", result: "restored" },
+          { path: "b.ts", result: "deleted" },
+        ]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("what the undo left alone, what commands changed, and edits after it still count", () => {
+    expect(
+      spanEditsLeft([done, undo([{ path: "a.ts", result: "changed_since" }])]),
+    ).toBe(true);
+    expect(
+      spanEditsLeft([
+        done,
+        undo([{ path: "a.ts", result: "restored" }], ["gen/out.js"]),
+      ]),
+    ).toBe(true);
+    expect(
+      spanEditsLeft([done, undo([{ path: "a.ts", result: "restored" }]), done]),
+    ).toBe(true);
+  });
+
+  it("without an undo line it is spanEditedFiles", () => {
+    expect(spanEditsLeft([{ kind: "user", text: "x" }, done])).toBe(true);
+    expect(spanEditsLeft([{ kind: "user", text: "x" }])).toBe(false);
   });
 });
 

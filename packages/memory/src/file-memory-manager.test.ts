@@ -201,6 +201,27 @@ describe("FileMemoryManager", () => {
     expect(onDisk).toEqual(["a", "b"]);
   });
 
+  it("two managers on one workspace in one process keep each other's saves (release review 2026-10-13)", async () => {
+    // Each manager queued only its own saves: both read the file, and the
+    // second write dropped the first's fact — or, both naming their tmp
+    // `<pid>-1`, the loser's rename threw ENOENT.
+    const { shim, state } = makeShim();
+    const a = new FileMemoryManager({ workspaceRoot: ROOT, fs: shim });
+    const b = new FileMemoryManager({ workspaceRoot: ROOT, fs: shim });
+    await Promise.all([
+      a.save(mkItem({ id: "a1", text: "alpha" })),
+      b.save(mkItem({ id: "b1", text: "beta" })),
+      a.save(mkItem({ id: "a2", text: "gamma" })),
+      b.save(mkItem({ id: "b2", text: "delta" })),
+    ]);
+    const onDisk = (state.files.get(FILE_PATH) ?? "")
+      .split("\n")
+      .filter((l) => l.length > 0)
+      .map((l) => (JSON.parse(l) as MemoryItem).id)
+      .sort();
+    expect(onDisk).toEqual(["a1", "a2", "b1", "b2"]);
+  });
+
   it("currentItems returns [] before any recall or save", () => {
     const { shim } = makeShim();
     const m = new FileMemoryManager({ workspaceRoot: ROOT, fs: shim });

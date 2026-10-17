@@ -138,11 +138,21 @@ export function MarkdownView({
   // top-level blocks — a section starts at its heading, and its seam sits
   // halfway through the gap before it. A page whose headings do not match
   // the source's one for one is one piece.
+  // Lexed once per content, at the first rest: every rest re-lexed the
+  // whole document (release review 2026-10-13), and a page never rested on
+  // pays nothing.
+  const sectionsOf = useRef<{
+    readonly content: string;
+    readonly sections: ReturnType<typeof markdownSections>;
+  } | null>(null);
   const measurePieces = useCallback((): readonly MaskPiece[] => {
     const host = hostRef.current;
     const doc = bodyRef.current;
     if (host === null || doc === null) return [];
-    const sections = markdownSections(content);
+    if (sectionsOf.current?.content !== content) {
+      sectionsOf.current = { content, sections: markdownSections(content) };
+    }
+    const { sections } = sectionsOf.current;
     const blocks = Array.from(doc.children) as HTMLElement[];
     const headings = blocks.filter((b) => /^H[1-6]$/.test(b.tagName));
     const titled = sections.filter((s) => s.title !== undefined);

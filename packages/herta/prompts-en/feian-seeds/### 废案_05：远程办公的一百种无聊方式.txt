@@ -21,7 +21,7 @@ The test suite is already in tests/fibonacci.test.ts. If it passes, we're done.
 → 差分协处理器
 
 ```text
-Reading fibonacci.ts
+Read fibonacci.ts
 ```
 
 （我 想）
@@ -37,7 +37,7 @@ This request has more sense than noise in it. Who taught you?
 → 系统
 
 ````text
-patch preview: fibonacci.ts (+9 −4)
+Changed fibonacci.ts (+9 −4)
 
 ```diff
 --- a/fibonacci.ts
@@ -69,18 +69,16 @@ Pretty clean patch. One check, two accumulators, a loop instead of recursion, no
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Patched fibonacci.ts (+9 −4)
-- Running `pnpm test tests/fibonacci.test.ts`
-- ↳ exit 0 · 12 lines
+What 板砖 did before (details not at hand):
+- Changed fibonacci.ts (+9 −4)
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +9 −4 · 测试 8/8
-↳ 改动文件: fibonacci.ts
-↳ 依据: ran `pnpm test tests/fibonacci.test.ts` (exit 0, 3.1s) — 8 passed, 0 failed
+Done: changed 1 file (+9 −4), tests 8/8 passed.
+Changed files: fibonacci.ts
+Based on: ran `pnpm test tests/fibonacci.test.ts`
 ```
 
 （我 想）

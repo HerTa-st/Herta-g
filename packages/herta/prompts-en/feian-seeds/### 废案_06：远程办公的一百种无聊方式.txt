@@ -23,7 +23,7 @@ Wherever the compiler's watching, 板砖 will fix. Wherever it isn't… I bet it
 → 差分协处理器
 
 ```text
-Reading logger.ts
+Read logger.ts
 ```
 
 （我 说）
@@ -33,7 +33,7 @@ Reading logger.ts
 → 系统
 
 ````text
-patch preview: logger.ts (+2 −1)
+Changed logger.ts (+2 −1)
 
 ```diff
 --- a/logger.ts
@@ -55,23 +55,22 @@ patch preview: logger.ts (+2 −1)
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Patched logger.ts (+2 −1)
-- Running `pnpm test`
-- ↳ exit 1 · 31 lines
+What 板砖 did before (details not at hand):
+- Changed logger.ts (+2 −1)
+- ran `pnpm test` (exit code 1)
 ```
 
 → 差分协处理器
 
 ```text
-部分完成 · 1 个文件 · +2 −1 · 测试 13 通过，1 失败 · 1 风险
-↳ 输出:
+Partly done: changed 1 file (+2 −1), tests 13 passed, 1 failed, 1 risk left.
+Output:
 FAIL  tests/logger.test.ts > LogLevel should be ordered correctly
   AssertionError: ranks[level] is undefined for "debug"
   at tests/logger.test.ts:42:18
-↳ 改动文件: logger.ts
-↳ 风险: ranks 映射表缺少 debug 项，运行时取值为 undefined
-↳ 依据: ran `pnpm test` (exit 1, 6.8s) — 13 passed, 1 failed
+Changed files: logger.ts
+Risks left: the ranks map has no debug entry, so it reads undefined at runtime
+Based on: ran `pnpm test` (exit code 1)
 ```
 
 （我 想）
@@ -101,7 +100,7 @@ It's not going to learn from this anyway. Just tell it. Saves a round.
 → 系统
 
 ````text
-patch preview: logger.ts (+1 −1)
+Changed logger.ts (+1 −1)
 
 ```diff
 -const ranks: Record<Level, number> = { info: 0, warn: 1, error: 2 };
@@ -112,18 +111,16 @@ patch preview: logger.ts (+1 −1)
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Patched logger.ts (+1 −1)
-- Running `pnpm test`
-- ↳ exit 0 · 9 lines
+What 板砖 did before (details not at hand):
+- Changed logger.ts (+1 −1)
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +1 −1 · 测试 14/14
-↳ 改动文件: logger.ts
-↳ 依据: ran `pnpm test` (exit 0, 6.2s) — 14 passed, 0 failed
+Done: changed 1 file (+1 −1), tests 14/14 passed.
+Changed files: logger.ts
+Based on: ran `pnpm test`
 ```
 
 （我 想）

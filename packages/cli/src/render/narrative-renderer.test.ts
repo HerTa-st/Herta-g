@@ -2037,6 +2037,32 @@ describe("NarrativeRenderer — a beat is paced like the reply on a TTY (owner 2
     expect(second.out.full()).toBe("半句\n");
   });
 
+  it("past the desktop's 18 s ceiling the rest lands at once (release review 2026-10-13)", async () => {
+    // With the supervisor off the whole reply rides this lane, and nothing
+    // sped its end: 1 500 characters took about 150 s.
+    const { out, r } = mkTty();
+    const LONG = "慢".repeat(600);
+    fireBeat(r, LONG, recordWith(LONG).slice(0, 2));
+    let done = false;
+    void r.settled().then(() => {
+      done = true;
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(done).toBe(true);
+    expect(out.full()).toBe(`${LONG}\n→ 差分协处理器\n  Running node --test\n`);
+  });
+
+  it("landReveal lands a reveal still running, for the REPL's Ctrl+C", async () => {
+    const { out, r } = mkTty();
+    fireBeat(r, BEAT, recordWith(BEAT).slice(0, 2));
+    await vi.advanceTimersByTimeAsync(TICK * 2);
+    r.landReveal();
+    expect(out.full()).toBe(`${BEAT}\n→ 差分协处理器\n  Running node --test\n`);
+    await r.settled();
+  });
+
   it("non-TTY output keeps the raw writes", () => {
     const out = new MockWritable();
     const r = new NarrativeRenderer(out, plainStyle);

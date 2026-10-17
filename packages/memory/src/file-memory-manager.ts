@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { MemoryItem, MemoryManager, MemoryQuery } from "@herta/core";
 
 const ITEM_CAP = 200;
@@ -37,6 +37,22 @@ function dedupeKey(item: { kind: string; text: string }): string {
   return `${item.kind}\x00${item.text}`;
 }
 
+/**
+ * Saves queue per FILE, process-wide (release review 2026-10-13). Each
+ * manager used to queue only its own: two managers on one workspace in one
+ * process both read the file, and the second write dropped the first's
+ * fact — and with a counter of their own, both named their tmp file
+ * `<pid>-1` and the loser's rename threw ENOENT. A different process still
+ * narrows to the write window (see `saveInner`).
+ */
+const saveTails = new Map<string, Promise<void>>();
+let tmpCounter = 0;
+
+function fileKey(p: string): string {
+  const abs = resolve(p);
+  return process.platform === "win32" ? abs.toLowerCase() : abs;
+}
+
 /** When a fact was last saved — `lastSeen`, or `createdAt` for an item
  *  written without one. */
 function confirmedAt(item: MemoryItem): string {
@@ -48,11 +64,6 @@ export class FileMemoryManager implements MemoryManager {
   private readonly dir: string;
   private readonly path: string;
   private cache: MemoryItem[] | undefined;
-  /** In-process save serialization (audit 2026-07-10, finding 19): two
-   *  overlapping saves interleaved read/write on the same file, and the
-   *  shared tmp path made the loser's rename throw ENOENT. */
-  private saveTail: Promise<void> = Promise.resolve();
-  private tmpCounter = 0;
 
   constructor(deps: FileMemoryManagerDeps) {
     this.fs = deps.fs ?? defaultFs;
@@ -80,13 +91,21 @@ export class FileMemoryManager implements MemoryManager {
   }
 
   save(item: MemoryItem): Promise<void> {
-    // Serialize in-process saves behind a promise chain; a failed save
-    // never poisons the chain, and its rejection reaches its own caller.
-    const run = this.saveTail.then(
+    // Serialize the process's saves to this file behind a promise chain
+    // (audit 2026-07-10, finding 19; per file since 2026-10-13); a failed
+    // save never poisons the chain, and its rejection reaches its own
+    // caller. The entry goes once the chain is idle.
+    const key = fileKey(this.path);
+    const tail = saveTails.get(key) ?? Promise.resolve();
+    const run = tail.then(
       () => this.saveInner(item),
       () => this.saveInner(item),
     );
-    this.saveTail = run.catch(() => undefined);
+    const settled = run.catch(() => undefined);
+    saveTails.set(key, settled);
+    void settled.then(() => {
+      if (saveTails.get(key) === settled) saveTails.delete(key);
+    });
     return run;
   }
 
@@ -128,8 +147,8 @@ export class FileMemoryManager implements MemoryManager {
     // Unique tmp per save AND per process: with the shared `.tmp` name, two
     // overlapping writers renamed each other's tmp away and the loser threw
     // ENOENT (finding 19's second half).
-    this.tmpCounter += 1;
-    const tmp = `${this.path}.${process.pid}-${this.tmpCounter}.tmp`;
+    tmpCounter += 1;
+    const tmp = `${this.path}.${process.pid}-${tmpCounter}.tmp`;
     await this.fs.writeFile(tmp, serialized);
     await this.fs.rename(tmp, this.path);
   }

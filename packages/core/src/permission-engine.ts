@@ -67,6 +67,11 @@ export type RuleVerdict =
        *  such a request runs without a review (ADR 0064 amendment
        *  2026-10-10). */
       undoable?: true;
+      /** The directory the command runs in, absolute, where the rule knows
+       *  it: the persistent shell's own cwd for `bash`, the resolved `cwd`
+       *  for `run_command`. An automatic review reads relative paths against
+       *  it (ADR 0075); absent for every other tool. */
+      cwd?: string;
     }
   | {
       kind: "deny";
@@ -208,6 +213,7 @@ export class RulePermissionEngine implements PermissionEngine {
         ? { consequence: verdict.consequence }
         : {}),
       ...(verdict.undoable === true ? { undoable: true as const } : {}),
+      ...(verdict.cwd !== undefined ? { cwd: verdict.cwd } : {}),
     };
     const decision = this.ask.present(request, ctx.signal);
     return { kind: "ask", request, decision };

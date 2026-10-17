@@ -121,6 +121,7 @@ export function makeRunCommandRule(): PermissionRule {
       ...(verdict.consequence !== undefined
         ? { consequence: verdict.consequence }
         : {}),
+      cwd: safe.resolved,
     };
   };
 }

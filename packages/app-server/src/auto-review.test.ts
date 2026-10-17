@@ -111,7 +111,27 @@ describe("the table and the reply (ADR 0075)", () => {
     expect(m).toContain("command_ask_destructive");
     expect(m).toContain("1. @板砖 重新构建一下。");
     expect(m).toContain("Linux");
+    expect(m).toContain("当前目录：/w\n");
     expect(AUTO_REVIEW_SYSTEM).toContain("Reply with JSON only");
+  });
+});
+
+describe("the directory a review reads paths against", () => {
+  it("is the command's own cwd where the rule knows it, the root otherwise", async () => {
+    // Told the root always, a review read `rm -rf build` after 板砖's
+    // `cd packages/app` as the root's build (release review 2026-10-13).
+    const { model, sent } = scripted(reply("low", "high", "allow"));
+    const r = new AutoReviewer(model);
+    await r.review(
+      input("rm -rf build", { cwd: "C:\\work\\repo\\packages\\app" }),
+      signal(),
+    );
+    expect(sent[0]?.user).toContain("工作区：C:\\work\\repo\n");
+    expect(sent[0]?.user).toContain(
+      "当前目录：C:\\work\\repo\\packages\\app\n",
+    );
+    await r.review(input("rm -rf build"), signal());
+    expect(sent[1]?.user).toContain("当前目录：C:\\work\\repo\n");
   });
 });
 

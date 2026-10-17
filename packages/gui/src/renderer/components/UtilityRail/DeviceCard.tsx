@@ -176,6 +176,10 @@ export function DeviceCard(): JSX.Element {
   const [sceneState, setSceneState] = useState<SceneState>(() =>
     sceneExpected ? "pending" : "flat",
   );
+  // Each wait for a scene gets its own patience: the first build's, and
+  // each rebuild's after a lost context.
+  const [waits, setWaits] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `waits` restarts the patience
   useEffect(() => {
     if (!sceneExpected) {
       setSceneState("flat");
@@ -186,9 +190,14 @@ export function DeviceCard(): JSX.Element {
       setSceneState((s) => (s === "pending" ? "flat" : s));
     }, SCENE_PATIENCE_MS);
     return () => clearTimeout(patience);
-  }, [sceneExpected]);
+  }, [sceneExpected, waits]);
   const onSceneLive = useCallback((live: boolean) => {
     setSceneState(live ? "live" : "flat");
+  }, []);
+  // A lost scene being rebuilt: back behind the glass, not the flat art.
+  const onScenePending = useCallback(() => {
+    setSceneState("pending");
+    setWaits((n) => n + 1);
   }, []);
   // The frosted-glass picture is the scene's OWN last rendering, kept per
   // theme across launches (frost-store.ts), and the bundled rendering of
@@ -206,7 +215,10 @@ export function DeviceCard(): JSX.Element {
     writeFrost(themeRef.current, dataUrl);
     setFrost(dataUrl);
   }, []);
-  const frostShown = sceneState !== "flat";
+  // Mounted while a scene is expected, flat included: a card that falls
+  // back fades the glass out over the flat art (the CSS), where it used to
+  // cut from one to the other (release review 2026-10-13).
+  const frostShown = sceneExpected || sceneState !== "flat";
   // A workspace error belongs to the session it happened in — don't resurface
   // a stale one in the next session's menu. (This hand-written reset is what
   // `useSessionScoped` generalizes; migrated 2026-07-24.)
@@ -290,6 +302,7 @@ export function DeviceCard(): JSX.Element {
           paused={paused}
           liftPx={liftPx}
           onLive={onSceneLive}
+          onPending={onScenePending}
           onSnapshot={onSnapshot}
         />
       )}

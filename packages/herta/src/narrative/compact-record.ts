@@ -6,6 +6,12 @@ import type {
 } from "@herta/core";
 import { COMPACTION_TEXT } from "./compaction-text.js";
 import type { PromptLang } from "./prompt-lang.js";
+import {
+  foldedRunLine,
+  foldedStepLines,
+  isRememberedRow,
+  shownExcerptLine,
+} from "./record-voice.js";
 
 /**
  * Render a single system block into one digest line per the
@@ -38,7 +44,7 @@ export function digestSystemBlock(
   lang: PromptLang = "zh",
 ): string | null {
   if (block.digest !== undefined)
-    return renderStructuredDigest(block.digest, lang);
+    return renderStructuredDigest(block.digest, lang, block);
   const body = block.body;
 
   if (block.label === "差分协处理器") {
@@ -124,65 +130,11 @@ function fallbackDigest(body: string): string {
 function renderStructuredDigest(
   d: SystemBlockDigest,
   lang: PromptLang,
+  /** The row itself, for what its digest does not carry (an attachment's
+   *  head ran past what she was shown). */
+  block: SystemBlock,
 ): string | null {
   switch (d.kind) {
-    case "op": {
-      if (d.verb === "Planning") return null; // skip per spec §4.1
-      if (d.verb === "Running") return `Running \`${d.arg}\``;
-      return `${d.verb} ${d.arg}`.trim();
-    }
-    case "tests":
-      return d.status === "passed"
-        ? `Tests passed (${d.summary})`
-        : `Tests ${d.status} (${d.summary})`;
-    case "tool-fail":
-      return `${d.tool} failed (${d.code})`;
-    case "skip":
-      return null;
-    case "patch":
-      // Compaction keeps the MAGNITUDE, not the diff: after a compaction the
-      // patch body is gone, and "she changed 96 lines of spawn-git.ts" is the
-      // part worth carrying forward. Unmeasurable changes say so.
-      return d.add === undefined || d.del === undefined
-        ? `Patched ${d.files.join(", ")} (via a command, no line diff)`
-        : `Patched ${d.files.join(", ")} (+${d.add} -${d.del})`;
-    case "bg":
-      // One line per lifecycle row; the consecutive-state suppression in the
-      // bridge already keeps these sparse.
-      return `background ${d.id}: ${d.state}`;
-    case "todo":
-      // Legacy rows (nothing writes them since ADR 0073): the plan layout
-      // AND the "todo k/n" progress rows were working state, not operations
-      // — same skip rationale as the Planning op rows before them (spec §4.1).
-      return null;
-    case "excerpt":
-      // The CITATION survives compaction, the excerpt does not (ADR 0027):
-      // the content rode `evidenceDetail`, which this summary never carries,
-      // so a later turn keeps knowing she was shown that span without
-      // re-paying its tokens every turn thereafter.
-      //
-      // The elision is stated, not left implicit. Every other bullet here
-      // digests a block that never had a body to lose — `Reading foo.ts` is
-      // the WHOLE of what that block ever said. This one is the exception:
-      // Herta really did read those lines last turn, and a bare citation
-      // formatted exactly like its neighbours invites her to keep quoting
-      // from a span that is no longer in front of her — the same
-      // fabricated-receipt failure supervisor rule 9 exists to catch, except
-      // sourced from the harness rather than from her. Saying `正文已略去`
-      // costs four characters and makes "I was shown this" and "I can still
-      // read this" two distinguishable states.
-      return `Excerpt ${d.path}:${d.from}-${d.to} · ${COMPACTION_TEXT[lang].excerptElided}`;
-    case "finding":
-      // NOT elided (ADR 0039): the claim is the conclusion the brief was for,
-      // short by schema; dropping it would drop the one thing worth keeping.
-      // The cites travel so a later turn can send 板砖 back to them.
-      return `Finding: ${d.claim}${d.cites.length > 0 ? ` (${d.cites.join(", ")})` : ""}`;
-    case "search":
-      // Third member of the excerpt/attachment family (2026-08-17): the hit
-      // list rode `evidenceDetail` and is gone once this folds, so the
-      // citation says so — the counts stay, the lines do not. Same fabricated
-      // -quote hazard, same four-character remedy.
-      return `Search /${d.pattern}/ · ${d.matches} matches in ${d.files} files · ${COMPACTION_TEXT[lang].searchElided}`;
     case "attachment": {
       // Same two-state contract as `excerpt` above, and the same hazard for
       // the same reason: she really was shown the head of this document last
@@ -203,54 +155,26 @@ function renderStructuredDigest(
       // from precisely the timescales this design exists to reach: the
       // recap, the 废案 distillation, and the next session's few-shots.
       // This is why the caption rides the body rather than evidenceDetail.
-      const tail =
-        d.caption !== undefined
-          ? d.caption
-          : d.unreadable === undefined
-            ? COMPACTION_TEXT[lang].excerptElided
-            : COMPACTION_TEXT[lang].attachmentUnreadable[d.unreadable];
-      // The outline sidecar survives the fold by citation (2026-08-23) —
-      // path included, for the same reason the document's path is kept.
-      const outline =
-        d.outline !== undefined
-          ? ` · ${COMPACTION_TEXT[lang].attachmentOutline(d.outline.entries, d.outline.path)}`
-          : "";
-      return `Attachment ${d.name} (${d.path}) · ${tail}${outline}`;
+      //
+      // Since ADR 0079 (2026-10-16) the line is the attachment as she would
+      // remember it, the same as the fold's: the name and a plain aside, no
+      // path — 板砖 reaches the file through its own task line, which keeps
+      // the path, and a request naming the document is enough.
+      const text = COMPACTION_TEXT[lang];
+      if (d.caption !== undefined) {
+        return `附件 ${d.name}${lang === "en" ? ": " : "："}${d.caption}`;
+      }
+      const note =
+        d.unreadable !== undefined
+          ? text.attachmentUnreadable[d.unreadable]
+          : sawOpeningOnly(block)
+            ? text.attachmentOpeningNotAtHand
+            : text.attachmentNotAtHand;
+      return `附件 ${d.name}${lang === "en" ? ` (${note})` : `（${note}）`}`;
     }
-    case "digest":
-      // The overview rode evidenceDetail and is gone; the sidecar is not —
-      // keep its path so a later turn sends 板砖 to `cat` it rather than
-      // re-digest (ADR 0043).
-      return `Digest ${d.source} → ${d.path} · ${d.chunks} chunks · ${COMPACTION_TEXT[lang].excerptElided}`;
-    case "undo": {
-      // The 开拓者 took a turn's edits back (ADR 0074). What a later turn
-      // must keep is what is STILL changed — a file skipped or a command's
-      // edit is on disk, and "the edits were undone" alone would let her
-      // assume a clean tree.
-      const back = d.files
-        .filter((f) => f.result === "restored" || f.result === "deleted")
-        .map((f) => f.path);
-      const kept = d.files
-        .filter(
-          (f) =>
-            f.result !== "restored" &&
-            f.result !== "deleted" &&
-            f.result !== "unchanged",
-        )
-        .map((f) => `${f.path} (${f.result.replace("_", " ")})`);
-      const parts = [
-        `Undid the turn's edits: ${back.length > 0 ? back.join(", ") : "nothing to restore"}`,
-        ...(kept.length > 0 ? [`still changed: ${kept.join(", ")}`] : []),
-        ...(d.commands.length > 0
-          ? [`changed by commands, not undone: ${d.commands.join(", ")}`]
-          : d.commandsUnknown
-            ? ["commands ran; their changes, if any, not undone"]
-            : []),
-      ];
-      return parts.join(" · ");
-    }
-    case "text":
-      return fallbackDigest(d.text);
+    default:
+      // 板砖's rows fold into what was done, in her words (ADR 0079 §2).
+      return foldedRunLine(block, lang);
   }
 }
 
@@ -272,47 +196,90 @@ function renderStructuredDigest(
 export function buildCompactionBody(
   blocks: readonly SystemBlock[],
   lang: PromptLang = "zh",
+  /** The done-marker passed through after this run in her verdict turn
+   *  (State 1): an excerpt whose lines it shows folds to the read. */
+  shownBy?: SystemBlock,
 ): string {
-  // 1. Map blocks through the template; drop skipped entries.
+  // 1. Each row as a line of what was done (ADR 0079 §2); a failed command
+  //    names the command its result row answers. Rows written before the
+  //    structured digest keep the legacy templates — not a memory save's,
+  //    which is written without one and folds to what was remembered.
   const lines: string[] = [];
+  let lastCommand: string | undefined;
   for (const block of blocks) {
-    const digest = digestSystemBlock(block, lang);
-    if (digest !== null) lines.push(digest);
-  }
-  if (lines.length === 0) return "";
-
-  // 2. Consecutive-same-verb coalesce. Only Reading and Writing
-  //    coalesce (those are the verbs that commonly run in batches);
-  //    Running / Tests / failed entries stay one-per-bullet.
-  const coalesced: string[] = [];
-  for (const line of lines) {
-    const verb = matchCoalesceVerb(line);
-    const last = coalesced[coalesced.length - 1];
-    if (verb !== null && last !== undefined) {
-      const lastVerb = matchCoalesceVerb(last);
-      if (lastVerb !== null && lastVerb.verb === verb.verb) {
-        coalesced[coalesced.length - 1] =
-          `${lastVerb.verb} ${lastVerb.rest}, ${verb.rest}`;
-        continue;
-      }
+    if (block.digest?.kind === "op" && block.digest.verb === "Running") {
+      lastCommand = block.digest.arg;
     }
-    coalesced.push(line);
+    const structured =
+      block.digest !== undefined ||
+      block.markerSummary !== undefined ||
+      block.role === "noop-marker" ||
+      isRememberedRow(block);
+    const line =
+      shownBy !== undefined && markerShows(shownBy, block)
+        ? shownExcerptLine(block, lang)
+        : structured && block.digest?.kind !== "attachment"
+          ? foldedRunLine(block, lang, lastCommand)
+          : digestSystemBlock(block, lang);
+    if (line !== null) lines.push(line);
+  }
+  // A run with no outcome to report (板砖 only looked around) says what it
+  // ran, rather than nothing.
+  const outcomes = lines.length > 0 ? lines : foldedStepLines(blocks, lang);
+  if (outcomes.length === 0) return "";
+  // Legacy rows' `Reading` / `Writing` lines, consecutive, as one (records
+  // written before the structured digest still fold through the templates).
+  const raw: string[] = [];
+  for (const line of outcomes) {
+    const verb = /^(Reading|Writing)\s+(.+)$/.exec(line);
+    const last = raw[raw.length - 1];
+    const lastVerb =
+      last !== undefined ? /^(Reading|Writing)\s+(.+)$/.exec(last) : null;
+    if (verb !== null && lastVerb !== null && lastVerb[1] === verb[1]) {
+      raw[raw.length - 1] = `${last}, ${verb[2]}`;
+      continue;
+    }
+    raw.push(line);
+  }
+  // The same line again and again — tests rerun after each small fix — is
+  // one line with a count.
+  const kept: string[] = [];
+  let repeats = 1;
+  for (let k = 0; k < raw.length; k += 1) {
+    const line = raw[k] as string;
+    if (raw[k + 1] === line) {
+      repeats += 1;
+      continue;
+    }
+    kept.push(
+      repeats > 1
+        ? `${line}${lang === "en" ? ` (${repeats} times)` : `（${repeats} 次）`}`
+        : line,
+    );
+    repeats = 1;
   }
 
-  // 3. Assemble with header.
+  // 2. Assemble with header.
   const header = COMPACTION_TEXT[lang].header;
-  const bullets = coalesced.map((l) => `- ${l}`).join("\n");
-  return `${header}\n${bullets}`;
+  return `${header}\n${kept.map((l) => `- ${l}`).join("\n")}`;
 }
 
-function matchCoalesceVerb(
-  line: string,
-): { verb: "Reading" | "Writing"; rest: string } | null {
-  const m = line.match(/^(Reading|Writing)\s+(.+)$/);
-  if (m === null) return null;
-  const verb = m[1] as "Reading" | "Writing";
-  const rest = m[2] ?? "";
-  return { verb, rest };
+/**
+ * Whether `marker` shows this excerpt row's lines: its detail opens with the
+ * row's own, which is how the bridge builds it when the excerpt was the run's
+ * last row with a detail (`lastCommandTail`, `backend-bridge.ts`). The text,
+ * not the range: the same lines shown before an edit are not what it shows.
+ */
+function markerShows(marker: SystemBlock, block: SystemBlock): boolean {
+  const own = block.evidenceDetail;
+  const tail = marker.evidenceDetail;
+  return (
+    block.digest?.kind === "excerpt" &&
+    own !== undefined &&
+    own.length > 0 &&
+    tail !== undefined &&
+    (tail === own || tail.startsWith(`${own}\n`))
+  );
 }
 
 /**
@@ -381,12 +348,12 @@ function isAttachmentBlock(b: TerminalRecordBlock): b is SystemBlock {
 export const ATTACHMENT_VERBATIM_USER_TURNS = 3;
 
 /**
- * How many further user turns a freshly folded citation carries the re-read
- * hint (`attachmentRereadHint`). The user's follow-up may not name the file,
- * and Herta's only route back to the body is a 板砖 dispatch — for a few
- * turns after the fold the harness says so under the citation, then the
- * hint expires and the bare citation remains (owner 2026-08-11: "like the
- * meta-think parts — and completely remove the hint after N turns").
+ * How many further user turns a freshly folded citation stays in the
+ * `citation-hint` state. It carried a re-read hint (owner 2026-08-11: the
+ * user's follow-up may not name the file, and her route back to the body is
+ * a 板砖 dispatch); since ADR 0079 both folded states read
+ * 「读过，原文不在手边」 — "not at hand" says it can be fetched — and the
+ * state is kept for the fold's own bookkeeping.
  */
 export const ATTACHMENT_HINT_USER_TURNS = 3;
 
@@ -443,8 +410,8 @@ export const DIFF_REREAD_HINT_USER_TURNS = 3;
  *       recent user message whose text names the file (case-insensitive
  *       substring of the display name) — returning to the document re-opens
  *       the window, and the window can expire again after it.
- *   State 2 (both exhausted): the head is dropped and the body says so
- *   (`· 正文已略去`), leaving the citation. "I was shown this" and "I can
+ *   State 2 (both exhausted): the head is dropped and an aside says so
+ *   (`附件 hw.pdf（内容已不在眼前）`, ADR 0079), leaving the name. "I was shown this" and "I can
  *   still read this" stay two distinguishable states — the same
  *   fabricated-quote hazard the excerpt digest documents. For the first
  *   ATTACHMENT_HINT_USER_TURNS turns of this state the citation carries a
@@ -461,28 +428,121 @@ export const DIFF_REREAD_HINT_USER_TURNS = 3;
  *
  * An unreadable attachment has no detail to drop and its body already says
  * why; appending an elision note would claim a body that never existed, so it
- * passes through unchanged in both states.
+ * reads the same in every state.
+ *
+ * What she reads is the attachment as she would remember it, not the
+ * store's bookkeeping (ADR 0079, owner 2026-10-16: "the herta's context
+ * should be written like 自传"): `附件 <name>`, the document's opening
+ * text under it, and a plain aside once it is gone — never the stored
+ * path, the line and character counts, or a picture's file. 板砖 keeps all
+ * of that in its own task line (`attachmentTaskLine`), and the user's row
+ * reads the digest; only this projection changes.
  */
 function foldAttachmentForPrompt(
   block: SystemBlock,
   state: AttachmentFoldState,
   lang: PromptLang,
 ): SystemBlock {
-  if (state === "verbatim") return block;
-  // No detail means nothing was ever elided — unreadable and removed blocks
-  // pass through unchanged, and the hint stays away too: for `removed` the
-  // file is gone from disk, so inviting a re-read would be a lie.
-  if (block.evidenceDetail === undefined || block.evidenceDetail.length === 0) {
-    return block;
-  }
-  const { evidenceDetail: _dropped, ...rest } = block;
+  const d = block.digest;
+  if (d?.kind !== "attachment") return block;
   const text = COMPACTION_TEXT[lang];
-  const hint =
-    state === "citation-hint" ? `\n${text.attachmentRereadHint}` : "";
+  const aside = (note: string): string =>
+    lang === "en" ? ` (${note})` : `（${note}）`;
+  const named = `附件 ${d.name}`;
+  const { evidenceDetail: _detail, ...rest } = block;
+  // A picture's caption is the only text it ever had, kept in every state
+  // (ADR 0048 §1); an unreadable file says why, in every state.
+  if (d.caption !== undefined) {
+    return {
+      ...rest,
+      body: `${named}${lang === "en" ? ": " : "："}${d.caption}`,
+    };
+  }
+  const detail = attachmentDetailForHerta(block, d, lang);
+  if (d.unreadable !== undefined) {
+    // A document too long to take keeps its outline preview while fresh —
+    // for it, the one thing the row can say about what is inside.
+    const body = `${named}${aside(text.attachmentUnreadable[d.unreadable])}`;
+    return state === "verbatim" && detail !== null
+      ? { ...rest, body, evidenceDetail: detail }
+      : { ...rest, body };
+  }
+  if (detail === null) return { ...rest, body: named };
+  if (state === "verbatim") {
+    return { ...rest, body: named, evidenceDetail: detail };
+  }
+  // Folded, the hinted turns and the later ones read the same (owner,
+  // 2026-10-16: 「读过，原文不在手边」 — "not at hand" already says it can
+  // be fetched, and she knows 板砖 reads files). What she read was the
+  // opening only, when the document ran on: "读过" alone would claim more.
   return {
     ...rest,
-    body: `${block.body} · ${text.excerptElided}${hint}`,
+    body: `${named}${aside(
+      sawOpeningOnly(block)
+        ? text.attachmentOpeningNotAtHand
+        : text.attachmentNotAtHand,
+    )}`,
   };
+}
+
+/** Whether the head she was shown stopped before the document did. */
+function sawOpeningOnly(block: SystemBlock): boolean {
+  const head = block.evidence?.find((e) => e.kind === "attachment");
+  if (head?.kind === "attachment") return head.clipped;
+  // A row written before its evidence was structured carries the note.
+  return block.evidenceDetail?.includes("（仅开头部分，正文更长）") === true;
+}
+
+/** A transcribed picture's line in a PDF's text (`storePictures`): its
+ *  transcript is group 1. */
+const TRANSCRIBED_PICTURE_LINE =
+  /^\[(?:图|Image) \d+-\d+ · [^\]\n]*\] (?:自动转写：|transcribed: )(.*)$/gm;
+/** Every other form a picture's line takes: not transcribed, not stored. */
+const PICTURE_LINE = /^\[(?:图|Image) \d+-\d+(?:[ ·：:][^\n]*)?$/gm;
+
+/**
+ * The document's opening text and outline preview, as she reads them: no
+ * `↳ 附件` header, each picture's line its transcript (owner: "if the （图）
+ * is scanned, then it should be replaced by the transcript") or a plain
+ * `（图）`, the "runs longer" note and the outline's header in the session's
+ * language. Null when the row carried neither.
+ */
+function attachmentDetailForHerta(
+  block: SystemBlock,
+  d: Extract<SystemBlockDigest, { kind: "attachment" }>,
+  lang: PromptLang,
+): string | null {
+  const text = COMPACTION_TEXT[lang];
+  const sections: string[] = [];
+  const head = block.evidence?.find((e) => e.kind === "attachment");
+  const outline = block.evidence?.find((e) => e.kind === "outline");
+  if (head?.kind === "attachment") {
+    let body = head.text;
+    if (d.format === "pdf") {
+      body = body
+        .replace(TRANSCRIBED_PICTURE_LINE, "$1")
+        .replace(PICTURE_LINE, text.pictureMark);
+    }
+    sections.push(
+      head.clipped
+        ? `${body}\n${lang === "en" ? `(${text.attachmentHeadOnly})` : `（${text.attachmentHeadOnly}）`}`
+        : body,
+    );
+  }
+  if (outline?.kind === "outline") {
+    sections.push(
+      `${text.attachmentContents(outline.total, outline.items.length)}\n${outline.items.join("\n")}`,
+    );
+  }
+  if (sections.length > 0) return sections.join("\n");
+  // A row written before its evidence was structured: its detail as stored,
+  // less the `↳` header lines that were the store's.
+  const legacy = (block.evidenceDetail ?? "")
+    .split("\n")
+    .filter((l) => !l.startsWith("↳ "))
+    .join("\n")
+    .trim();
+  return legacy.length > 0 ? legacy : null;
 }
 
 /** Characters that can appear INSIDE a filename. A display-name match
@@ -797,6 +857,23 @@ export function compactRecordForPrompt(
       break;
     }
   }
+  // The pass-through marker's tail is the run's last detail (`backend-
+  // bridge.ts`), so it can show an excerpt the run before it folds — and a
+  // fold saying 「原文不在手边」 right above those lines is false (ADR 0079
+  // §2). An excerpt it shows folds to the read, in the runs of the dispatch
+  // it closes (after the message it answers — a steer is not one; a beat
+  // splits them): only there, so no older run's text changes with the
+  // verdict turn.
+  const passThrough =
+    passThroughIdx === -1 ? undefined : (record[passThroughIdx] as SystemBlock);
+  let dispatchStart = -1;
+  for (let k = passThroughIdx - 1; k >= 0; k--) {
+    const b = record[k];
+    if (b?.kind === "user" && b.steer !== true) {
+      dispatchStart = k;
+      break;
+    }
+  }
 
   // Diff re-read hint (E2E lab 2026-08-11). Patch previews are prompt-SKIPPED
   // once their run compacts, so "改了哪几行?" one turn after a dispatch found
@@ -865,7 +942,11 @@ export function compactRecordForPrompt(
       const hintInRun = diffHintIdx >= i && diffHintIdx < compactEnd;
       if (runLength >= minRunSize) {
         const runBlocks = record.slice(i, compactEnd) as readonly SystemBlock[];
-        const body = buildCompactionBody(runBlocks, lang);
+        const body = buildCompactionBody(
+          runBlocks,
+          lang,
+          i > dispatchStart && i < passThroughIdx ? passThrough : undefined,
+        );
         if (body.length > 0) {
           output.push({
             kind: "system",

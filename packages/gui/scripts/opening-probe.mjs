@@ -25,8 +25,9 @@
  *
  * The command is the app (or `xvfb-run … <AppImage>`); the debug-port switch
  * is appended to it. Prints `OPENING PROBE <label>: PASS`, `FAIL (…)`, or —
- * when the recording began only after the reveal, so no frame of the opening
- * exists to judge — `NOT OBSERVED (…)` with a CI warning (the marks are
+ * when the recording began only after the reveal, or in the last half-second
+ * before it with no glyph seen, so too little of the opening exists to
+ * judge — `NOT OBSERVED (…)` with a CI warning (the marks are
  * still judged, and it exits 0). Writes opening-<label>.json and .jpg, exits
  * 1 on FAIL. The app is closed
  * (SIGTERM to its process group, then SIGKILL) and its port waited out
@@ -52,6 +53,9 @@ if (!OUT || !LABEL || !EXPECT || COMMAND.length === 0) {
  *  surface too slow to screencast: Linux under Xvfb at scale 2 composited
  *  ONE frame per opening (2026-09-28) — nothing to judge a flash by. */
 const JUDGE_FRAMES = !OPTIONS.includes("--frames=report");
+/** A recording begun this close to the reveal saw too little of the hold to
+ *  judge (about the figure's own fade-in); see the judgement below. */
+const LATE_START_MS = 500;
 mkdirSync(OUT, { recursive: true });
 const PORT = 9223;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -433,17 +437,36 @@ if (painted !== undefined && revealed !== undefined && ended !== undefined) {
     }
     report.unjudged = [...(report.unjudged ?? []), why];
   };
-  if (hold.length === 0 && frames.length > 0 && firstFrame > revealed) {
-    // The recording began after the reveal: the opening was not seen, so
-    // it can be neither passed nor failed on its frames. Its marks — the
-    // worker, the sheet, the opening to its end — are still judged. A real
-    // missing figure shows as frames DURING the hold without ink, below.
-    const why = `the recording began at ${firstFrame} ms, after the reveal at ${revealed} ms`;
-    // Where frames are only reported (Linux under Xvfb at scale 2: about
-    // one per opening), not seeing the opening is that surface's known
-    // limit — noted with the rest, not raised as a warning on every build.
+  // The opening was not seen, so it can be neither passed nor failed on its
+  // frames. Its marks — the worker, the sheet, the opening to its end — are
+  // still judged. Where frames are only reported (Linux under Xvfb at scale
+  // 2: about one per opening), not seeing the opening is that surface's
+  // known limit — noted with the rest, not raised as a warning on every
+  // build.
+  const unseen = (why) => {
     if (JUDGE_FRAMES) notObserved = why;
     else report.unjudged = [...(report.unjudged ?? []), why];
+  };
+  if (hold.length === 0 && frames.length > 0 && firstFrame > revealed) {
+    // The recording began after the reveal. A real missing figure shows as
+    // frames DURING the hold without ink, below.
+    unseen(
+      `the recording began at ${firstFrame} ms, after the reveal at ${revealed} ms`,
+    );
+  } else if (
+    hold.length > 0 &&
+    level < 0.003 &&
+    firstFrame > revealed - LATE_START_MS
+  ) {
+    // Begun in the hold's last half-second, no glyph in it: too late to
+    // judge. 0.1.8's signed first launch on macOS began 11 ms before the
+    // reveal — three blank frames (a screencast's start repeats the surface
+    // as it stood before the opening drew), then the figure at full ink
+    // 200 ms on — and was failed for "no glyphs" (release check 2026-10-15).
+    // A recording begun earlier is judged as before.
+    unseen(
+      `the recording began at ${firstFrame} ms, ${revealed - firstFrame} ms before the reveal at ${revealed} ms`,
+    );
   } else if (hold.length === 0) {
     flag(
       frames.length === 0

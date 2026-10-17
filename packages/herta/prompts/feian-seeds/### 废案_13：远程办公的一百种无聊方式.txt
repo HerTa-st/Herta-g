@@ -15,21 +15,17 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `src/modules/parse.mjs`
-- Running `TZ=Asia/Shanghai node --test tests/parse.test.mjs`
-- ↳ exit 1 · 22 lines
-- Patched src/modules/parse.mjs (+6 −2)
-- Running `TZ=Asia/Shanghai node --test tests/parse.test.mjs`
-- ↳ exit 0 · 18 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `TZ=Asia/Shanghai node --test tests/parse.test.mjs`（退出码 1）
+- 改动 src/modules/parse.mjs（+6 −2）
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +6 −2 · 测试 17/17
-↳ 改动文件: src/modules/parse.mjs
-↳ 依据: ran `TZ=Asia/Shanghai node --test tests/parse.test.mjs` (exit 0, 1.4s) — 17 passed, 0 failed
+做完了：改了 1 个文件（+6 −2），测试 17/17 通过。
+改了：src/modules/parse.mjs
+依据：运行 `TZ=Asia/Shanghai node --test tests/parse.test.mjs`
 ```
 
 （开拓者 说）
@@ -93,19 +89,16 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Reading `modules/normalize.mjs`
-- Patched modules/normalize.mjs (+4 −1)
-- Running `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
-- ↳ exit 0 · 18 lines
+板砖之前做过的事（细节不在手边）：
+- 改动 modules/normalize.mjs（+4 −1）
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +4 −1 · 测试 17/17
-↳ 改动文件: modules/normalize.mjs
-↳ 依据: ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit 0, 1.3s) — 17 passed, 0 failed
+做完了：改了 1 个文件（+4 −1），测试 17/17 通过。
+改了：modules/normalize.mjs
+依据：运行 `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
 ```
 
 （我 想）
@@ -125,23 +118,21 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `find . -name normalize.mjs -not -path "./node_modules/*"`
-- ↳ exit 0 · 2 lines
-- Running `grep -n "import" tests/normalize.test.mjs`
-- ↳ exit 0 · 2 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `find . -name normalize.mjs -not -path "./node_modules/*"`
+- 运行 `grep -n "import" tests/normalize.test.mjs`
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 输出:
+做完了。
+输出：
 ./modules/normalize.mjs
 ./src/modules/normalize.mjs
 tests/normalize.test.mjs:1:import { normalize } from "../src/modules/normalize.mjs";
-↳ 结论: 仓库里有两份 normalize.mjs；测试引用的是 src/modules/ 下的那份，刚才的补丁打在了 modules/ 下的另一份上。（tests/normalize.test.mjs:1）
-↳ 依据: ran `find . -name normalize.mjs -not -path "./node_modules/*"` (exit 0, 0.1s) — 2 matches; ran `grep -n "import" tests/normalize.test.mjs` (exit 0, 0.1s)
+结论：仓库里有两份 normalize.mjs；测试引用的是 src/modules/ 下的那份，刚才的补丁打在了 modules/ 下的另一份上。（tests/normalize.test.mjs:1）
+依据：运行 `find . -name normalize.mjs -not -path "./node_modules/*"`；运行 `grep -n "import" tests/normalize.test.mjs`
 ```
 
 （我 想）
@@ -171,22 +162,17 @@ tests/normalize.test.mjs:1:import { normalize } from "../src/modules/normalize.m
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
-- ↳ exit 1 · 22 lines
-- Patched src/modules/normalize.mjs (+4 −1)
-- Running `git rm modules/normalize.mjs`
-- ↳ exit 0 · 1 lines
-- Running `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
-- ↳ exit 0 · 18 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`（退出码 1）
+- 改动 src/modules/normalize.mjs（+4 −1）
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 2 个文件 · +4 −5 · 测试 17/17
-↳ 改动文件: src/modules/normalize.mjs, modules/normalize.mjs
-↳ 依据: ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit 1, 1.3s) — 16 passed, 1 failed; ran `TZ=Asia/Shanghai node --test tests/normalize.test.mjs` (exit 0, 1.3s) — 17 passed, 0 failed
+做完了：改了 2 个文件（+4 −5），测试 17/17 通过。
+改了：src/modules/normalize.mjs、modules/normalize.mjs
+依据：运行 `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`（退出码 1）；运行 `TZ=Asia/Shanghai node --test tests/normalize.test.mjs`
 ```
 
 （我 想）
@@ -222,20 +208,19 @@ modules/ 那个目录……也不知道躺了多久了。
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules`
-- ↳ exit 0 · 2 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules`
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 输出:
+做完了。
+输出：
 ./src/modules/format.mjs
 ./src/modules/schedule.mjs
-↳ 结论: 剩下的模块各只有一份，都在 src/modules/ 下，没有旧副本。
-↳ 依据: ran `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules` (exit 0, 0.1s) — 2 matches
+结论：剩下的模块各只有一份，都在 src/modules/ 下，没有旧副本。
+依据：运行 `find . -name "format.mjs" -o -name "schedule.mjs" | grep -v node_modules`
 ```
 
 （我 说）

@@ -21,7 +21,7 @@
 → 差分协处理器
 
 ```text
-Reading fibonacci.ts
+读 fibonacci.ts
 ```
 
 （我 想）
@@ -37,7 +37,7 @@ Reading fibonacci.ts
 → 系统
 
 ````text
-patch preview: fibonacci.ts (+9 −4)
+改动 fibonacci.ts（+9 −4）
 
 ```diff
 --- a/fibonacci.ts
@@ -69,18 +69,16 @@ patch preview: fibonacci.ts (+9 −4)
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Patched fibonacci.ts (+9 −4)
-- Running `pnpm test tests/fibonacci.test.ts`
-- ↳ exit 0 · 12 lines
+板砖之前做过的事（细节不在手边）：
+- 改动 fibonacci.ts（+9 −4）
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +9 −4 · 测试 8/8
-↳ 改动文件: fibonacci.ts
-↳ 依据: ran `pnpm test tests/fibonacci.test.ts` (exit 0, 3.1s) — 8 passed, 0 failed
+做完了：改了 1 个文件（+9 −4），测试 8/8 通过。
+改了：fibonacci.ts
+依据：运行 `pnpm test tests/fibonacci.test.ts`
 ```
 
 （我 想）

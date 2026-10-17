@@ -68,14 +68,19 @@ export default defineConfig({
           "src/assets/herta-station-icon-night.webp",
         ),
       },
-      // No 3D on the site (owner 2026-09-10): the demo bridge has no scene
-      // surface, so the card never mounts the scene — but its import alone
+      // No 3D on the site (owner 2026-09-10): the real scene's import alone
       // emitted the three.js chunk and the Basis transcoder (~1.7 MB) into
-      // every deploy. A stub takes the import; the site shows PICTURES of
-      // the scene instead (src/assets/device-*.webp).
+      // every deploy. A stub takes the import and shows a PICTURE of the
+      // scene in the card (src/assets/device-*.webp, owner 2026-10-14: the
+      // flat device alone "lacks the background"); its GPU probe is stubbed
+      // too, since a picture needs none.
       {
         find: /^.*\/device-scene\/DeviceScene\.js$/,
         replacement: resolve(__dirname, "src/demo-device-scene.tsx"),
+      },
+      {
+        find: /^.*\/device-scene\/capability\.js$/,
+        replacement: resolve(__dirname, "src/demo-device-capability.ts"),
       },
       {
         find: "@gui",

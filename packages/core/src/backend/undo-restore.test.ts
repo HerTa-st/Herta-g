@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -139,6 +140,24 @@ describe("taking a turn's edits back (ADR 0074 §3)", () => {
       { path: outside, result: "outside_workspace" },
     ]);
     expect(readFileSync(outside, "utf8")).toBe("beta\n");
+  });
+
+  it("a path inside by name whose folder is now a link out of the workspace is refused, never written", async () => {
+    // Containment was judged by name only (release review 2026-10-13): a
+    // folder 板砖 wrote into, swapped for a junction since, carried the
+    // restore to wherever the junction points.
+    mkdirSync(join(ws, "sub"));
+    await (await run([{ file: "sub/a.ts", to: "beta\n" }])).close();
+    const outside = join(root, "elsewhere");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "a.ts"), "beta\n");
+    rmSync(join(ws, "sub"), { recursive: true });
+    symlinkSync(outside, join(ws, "sub"), "junction");
+    const outcome = await restoreUndo(dir, await views(), ws);
+    expect(outcome.files).toEqual([
+      { path: join(ws, "sub", "a.ts"), result: "outside_workspace" },
+    ]);
+    expect(readFileSync(join(outside, "a.ts"), "utf8")).toBe("beta\n");
   });
 
   it("several segments undo as one span: back to the earliest segment's first bytes", async () => {

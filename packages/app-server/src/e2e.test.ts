@@ -576,7 +576,11 @@ describe("@herta/app-server — taking the latest turn's edits back (ADR 0074 §
       try {
         await runScriptedTurn(session);
         const rewound = await session.rewindLastTurn();
-        expect(rewound).toMatchObject({ ok: true, undoable: true });
+        expect(rewound).toMatchObject({
+          ok: true,
+          undoable: true,
+          editedFiles: true,
+        });
         expect(existsSync(join(cfg.workspaceRoot, "a.ts"))).toBe(true);
         // The record has no turn left: no card, no card offer.
         expect(session.undoable).toBe(false);
@@ -594,6 +598,29 @@ describe("@herta/app-server — taking the latest turn's edits back (ADR 0074 §
         expect(existsSync(join(cfg.workspaceRoot, "a.ts"))).toBe(false);
         // The turn is out of the record already: nothing to say there.
         expect(session.record).toHaveLength(length);
+      } finally {
+        await cleanup();
+      }
+    },
+    SESSION_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "⟲ after 撤销 names no edits: the turn's own undo took them back (release review 2026-10-13)",
+    async () => {
+      const cfg = mkConfig();
+      const { session, cleanup } = await mkE2eSession(cfg);
+      try {
+        await runScriptedTurn(session);
+        expect(await session.undoLastTurnEdits("latest")).toMatchObject({
+          ok: true,
+        });
+        // The notice said 改动的文件未撤销 here, of a file already gone.
+        expect(await session.rewindLastTurn()).toMatchObject({
+          ok: true,
+          editedFiles: false,
+          undoable: false,
+        });
       } finally {
         await cleanup();
       }

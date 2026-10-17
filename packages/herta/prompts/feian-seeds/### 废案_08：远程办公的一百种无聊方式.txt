@@ -15,8 +15,7 @@
 → 系统
 
 ```text
-附件 观测笔记.txt · 12 行 · 486 字 · .herta/attachments/7f3a/观测笔记.txt
-↳ 附件 观测笔记.txt
+附件 观测笔记.txt
 第一行：虚数能级在停靠期间持续走低，均值 3.2→2.7。
 第二行：推测与列车减速有关，因为两者时间上同步。
 第三行：待确认：黑塔女士上次说的"基线漂移"是否指这个。
@@ -46,7 +45,12 @@
 → 系统
 
 ```text
-附件 引擎手册（第三卷）.pdf · PDF · 412 页 · 已提取文本 · 目录 37 条 · .herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt
+附件 引擎手册（第三卷）.pdf
+── 第 1 页 ──
+星穹列车 动力系统维护手册
+第三卷 传动·制动·能量管理
+共 412 页
+（仅开头部分，正文更长）
 ```
 
 （我 想）
@@ -58,28 +62,27 @@
 （我 说）
 412 页你从头翻？怪不得一晚上都没翻完！
 
-你要找的是「能量回收」，那就直接搜嘛。@板砖 去翻 .herta/attachments/9c1e/ 那份手册的提取文本，搜"能量回收""再生制动"，把命中的章节定位出来，摘录关键段，结论带行号。
+你要找的是「能量回收」，那就直接搜嘛。@板砖 去翻他刚发的那本引擎手册，搜"能量回收""再生制动"，把命中的章节定位出来，摘录关键段，结论带行号。
 （/我 说）
 
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `grep -n "能量回收\|再生制动" .herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt`
-- ↳ exit 0 · 9 lines
-- ↳ 摘录 .herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt:5211-5219
+板砖之前做过的事（细节不在手边）：
+- 运行 `grep -n "能量回收\|再生制动" .herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt`
+- 读 .herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt 第 5211–5219 行
 ```
 
 → 差分协处理器
 
 ```text
-完成
-↳ 输出:
+做完了。
+输出：
 第 214 页 · 7.3 节 再生制动与能量回收
 减速阶段，牵引电机反转为发电机，回收功率上限受母线电压钳制。
 回收效率典型值 61%–74%，随速度下降而衰减；低于临界速度后回收停止，转摩擦制动。
-↳ 结论: 能量回收内容在第三卷 7.3 节（原书第 214 页起）：减速时电机反发电回收，效率 61%–74%，低速段停止回收。（.herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt:5211-5219）
-↳ 依据: ran `grep -n "能量回收\|再生制动" .herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt` (exit 0, 0.3s) — 9 matches
+结论：能量回收内容在第三卷 7.3 节（原书第 214 页起）：减速时电机反发电回收，效率 61%–74%，低速段停止回收。（.herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt:5211-5219）
+依据：运行 `grep -n "能量回收\|再生制动" .herta/attachments/9c1e/引擎手册（第三卷）.pdf.txt`
 ```
 
 （我 想）
@@ -115,20 +118,16 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `grep -n "pageCount\|slice" src/paginator.mjs`
-- ↳ exit 0 · 6 lines
-- Patched src/paginator.mjs (+1 −1)
-- Running `node --test tests/paginator.test.mjs`
-- ↳ exit 0 · 14 lines
+板砖之前做过的事（细节不在手边）：
+- 改动 src/paginator.mjs（+1 −1）
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 1 个文件 · +1 −1 · 测试 9/9
-↳ 改动文件: src/paginator.mjs
-↳ 依据: ran `node --test tests/paginator.test.mjs` (exit 0, 1.8s) — 9 passed, 0 failed
+做完了：改了 1 个文件（+1 −1），测试 9/9 通过。
+改了：src/paginator.mjs
+依据：运行 `node --test tests/paginator.test.mjs`
 ```
 
 （我 想）
@@ -154,16 +153,15 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `npm test`
-- ↳ exit 0 · 88 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `npm test`
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 测试 142/142
-↳ 依据: ran `npm test` (exit 0, 41.2s) — 142 passed, 0 failed
+做完了：测试 142/142 通过。
+依据：运行 `npm test`
 ```
 
 （我 想）
@@ -195,21 +193,19 @@
 → 系统
 
 ```text
-[历史已压缩 · 板砖]
-- Running `git add src/paginator.mjs`
-- ↳ exit 0 · 0 lines
-- Running `git commit -m "fix(paginator): last page dropped one item (off-by-one)"`
-- ↳ exit 0 · 2 lines
+板砖之前做过的事（细节不在手边）：
+- 运行 `git add src/paginator.mjs`
+- 运行 `git commit -m "fix(paginator): last page dropped one item (off-by-one)"`
 ```
 
 → 差分协处理器
 
 ```text
-完成 · 提交 3f7d21a
-↳ 输出:
+做完了：提交 3f7d21a。
+输出：
 [main 3f7d21a] fix(paginator): last page dropped one item (off-by-one)
  1 file changed, 1 insertion(+), 1 deletion(-)
-↳ 依据: ran `git commit -m "fix(paginator): last page dropped one item (off-by-one)"` (exit 0, 0.2s)
+依据：运行 `git commit -m "fix(paginator): last page dropped one item (off-by-one)"`
 ```
 
 （我 想）

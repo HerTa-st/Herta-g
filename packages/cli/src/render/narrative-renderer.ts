@@ -12,6 +12,7 @@ import {
   type PacingMode,
   type PromptLang,
   type RevealDriver,
+  resolveMaxRevealMs,
   type SlowStreamController,
 } from "@herta/herta";
 import { aliasBanzhuanDisplay, aliasBanzhuanPlain } from "./banzhuan-alias.js";
@@ -253,8 +254,9 @@ export class NarrativeRenderer implements ActorStreamingSink {
   }
 
   /** Land a reveal still running — its tail at once, its newline, and the
-   *  rows held behind it — before anything else is written. */
-  private landReveal(): void {
+   *  rows held behind it — before anything else is written. The REPL calls
+   *  it on Ctrl+C while it waits on `settled()`. */
+  landReveal(): void {
     (this.beatReveal ?? this.revealing)?.flushTail();
   }
 
@@ -263,7 +265,10 @@ export class NarrativeRenderer implements ActorStreamingSink {
       mode: this.mode,
       baseMs: SLOW_STREAM_BASE_DELAY_MS,
       random: this.random,
-      maxRevealMs: Number.POSITIVE_INFINITY,
+      // The desktop's ceiling (release review 2026-10-13). With the
+      // supervisor off the whole reply rides this lane, and no verdict
+      // speeds its end: 1 500 characters took about 150 s.
+      maxRevealMs: resolveMaxRevealMs(),
       fences: false,
       completionTick: false,
       firstDelayMs: this.computeFirstDelay(),
@@ -502,8 +507,9 @@ export class NarrativeRenderer implements ActorStreamingSink {
     //   - fences: false — the CLI has never had the GUI's atomic fence
     //     emit; each write carries its own style wrap, so enabling it would
     //     change the zh byte stream.
-    //   - maxRevealMs: Infinity — the CLI has no reveal ceiling (and no
-    //     flushRemainder on its controller).
+    //   - maxRevealMs: Infinity — the supervised reveal has no ceiling (and
+    //     no flushRemainder on its controller); an OK verdict fast-forwards
+    //     it instead. The raw lane (makeBeatReveal) takes the desktop's.
     //   - firstDelayMs: the humanized first delay, computed HERE so the
     //     construction-time `random` draw order is preserved.
 

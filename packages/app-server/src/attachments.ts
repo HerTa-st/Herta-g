@@ -23,10 +23,10 @@ import {
 } from "@herta/tools";
 import {
   type DocumentFormat,
-  extractDocumentText,
   type OutlineEntry,
   sniffDocumentFormat,
 } from "./document-text.js";
+import { extractDocument } from "./document-worker.js";
 import { type ImageInfo, imageMimeType, sniffImage } from "./image.js";
 import { type PdfPicture, PICTURE_TOKEN } from "./pdf-pictures.js";
 
@@ -558,7 +558,8 @@ async function ingestDocument(opts: {
     bytes: opts.bytes,
   });
   const onProgress = opts.onProgress;
-  const extracted = await extractDocumentText(format, opts.bytes, {
+  // The host's reader — a worker thread in the desktop app — or in-process.
+  const extracted = await extractDocument(format, opts.bytes, {
     lang: opts.lang,
     pictures: format === "pdf",
     ...(onProgress !== undefined

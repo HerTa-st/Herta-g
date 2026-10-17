@@ -575,7 +575,7 @@ export async function runDreamPass(
         dreamedKeys.add(`${ep.sessionId}\u0000${ep.episodeHash}`);
         try {
           res.considered++;
-          const digest = buildEpisodeDigest(ep.blocks);
+          const digest = buildEpisodeDigest(ep.blocks, lang);
 
           // ── 0. Retrieval-echo reinforcement (ADR 0023) ────────────────────
           // Use strengthens (docs/what-is-memory.md §7): when this episode's

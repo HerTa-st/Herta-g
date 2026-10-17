@@ -2106,6 +2106,29 @@ button,
   visibility: hidden;
   transition: none;
 }
+/* Back behind the glass while a lost scene is rebuilt (release review
+   2026-10-13): visible at once and fading in over the dead canvas fading
+   out — the base rule's delayed visibility would pop it in at 700 ms. */
+.device-card[data-scene="pending"] .device-frost {
+  transition:
+    filter 700ms ease,
+    opacity 700ms ease,
+    visibility 0s;
+}
+/* A scene that will not come (patience, a failure, past the rebuild
+   limit): the glass fades out over the flat art coming into focus, where
+   it used to cut from one drawing to the other. */
+.device-card.has-frost:not([data-scene]) .device-frost {
+  opacity: 0;
+  visibility: hidden;
+}
+.device-card.has-frost:not([data-scene]) .agent-lift-group,
+.device-card.has-frost:not([data-scene]) .agent-shadow {
+  transition:
+    transform 300ms ease-out,
+    filter 700ms ease,
+    opacity 700ms ease;
+}
 
 /* Slice 3 addition — reset UA button styles on .agent-preview (Task 13
    changed the element from <div> to <button> for a11y; UA defaults

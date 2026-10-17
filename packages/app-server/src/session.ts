@@ -149,6 +149,32 @@ export function spanEditedFiles(blocks: TerminalRecord): boolean {
   );
 }
 
+/**
+ * Whether a withdrawn span leaves edits on disk for the rewind notice to
+ * name: its file edits, less what the turn's own undo line already took
+ * back. After 撤销 then 回到此处 the notice said 改动的文件未撤销 of files
+ * that were back as they were (release review 2026-10-13). What that undo
+ * left alone, what commands changed, and edits after it still count.
+ */
+export function spanEditsLeft(blocks: TerminalRecord): boolean {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b?.kind !== "system" || b.digest?.kind !== "undo") continue;
+    const d = b.digest;
+    const leftByUndo =
+      d.files.some(
+        (f) =>
+          f.result !== "restored" &&
+          f.result !== "deleted" &&
+          f.result !== "unchanged",
+      ) ||
+      d.commands.length > 0 ||
+      d.commandsUnknown;
+    return leftByUndo || spanEditedFiles(blocks.slice(i + 1));
+  }
+  return spanEditedFiles(blocks);
+}
+
 // The title machinery — tuning constants, the recent-window input, the
 // provider, the sidecar load and the titler itself — lives in
 // session-titler.ts (2026-09-03). `buildRecentTitleInput` is re-exported
@@ -1470,7 +1496,7 @@ export class SessionImpl implements Session {
     return {
       ok: true,
       userText: result.userText,
-      editedFiles: spanEditedFiles(result.withdrawn),
+      editedFiles: spanEditsLeft(result.withdrawn),
       ...(images.length > 0 ? { images } : {}),
       undoable,
     };

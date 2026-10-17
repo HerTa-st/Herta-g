@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithLocale } from "../../i18n/test-util.js";
 import type { ComposerQuote } from "../../lib/quote-format.js";
 import {
+  MASK_FADE_MS,
   type MaskPiece,
   PIECE_REST_MS,
   quotesFromRuns,
@@ -140,6 +141,23 @@ describe("piece quoting — the mask over the code view (ADR 0078 §3)", () => {
     expect(mask().classList.contains("is-shown")).toBe(true);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(mask().classList.contains("is-shown")).toBe(false);
+  });
+
+  it("a hidden mask lets its pieces go once the fade is over, and the next rest lays them again (release review 2026-10-13)", () => {
+    const { container, host } = render(true);
+    const pieces = () => container.querySelectorAll(".piece-mask__piece");
+    fireEvent.pointerMove(host);
+    act(() => vi.advanceTimersByTime(PIECE_REST_MS));
+    expect(pieces()).toHaveLength(2);
+    fireEvent.pointerLeave(host);
+    // Still there while the mask fades out.
+    act(() => vi.advanceTimersByTime(MASK_FADE_MS - 1));
+    expect(pieces()).toHaveLength(2);
+    act(() => vi.advanceTimersByTime(1));
+    expect(pieces()).toHaveLength(0);
+    fireEvent.pointerMove(host);
+    act(() => vi.advanceTimersByTime(PIECE_REST_MS));
+    expect(pieces()).toHaveLength(2);
   });
 
   it("with the switch off, resting does nothing", () => {

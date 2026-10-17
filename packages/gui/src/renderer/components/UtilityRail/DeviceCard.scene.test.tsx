@@ -18,14 +18,17 @@ import { IDLE_MOUNT_SETTLE_MS } from "./device-scene/use-idle-mount.js";
 const latest: {
   onLive: ((live: boolean) => void) | null;
   onSnapshot: ((dataUrl: string) => void) | null;
-} = { onLive: null, onSnapshot: null };
+  onPending: (() => void) | null;
+} = { onLive: null, onSnapshot: null, onPending: null };
 vi.mock("./device-scene/DeviceScene.js", () => ({
   DeviceScene: (props: {
     onLive: (live: boolean) => void;
     onSnapshot?: (dataUrl: string) => void;
+    onPending?: () => void;
   }) => {
     latest.onLive = props.onLive;
     latest.onSnapshot = props.onSnapshot ?? null;
+    latest.onPending = props.onPending ?? null;
     return <canvas className="device-scene-canvas" />;
   },
 }));
@@ -50,6 +53,7 @@ describe("DeviceCard — what shows while the 3D scene builds (ADR 0057 §2.13)"
     vi.useFakeTimers();
     latest.onLive = null;
     latest.onSnapshot = null;
+    latest.onPending = null;
     gpu.backend = "webgpu";
     clearFrostForTest();
   });
@@ -198,6 +202,49 @@ describe("DeviceCard — what shows while the 3D scene builds (ADR 0057 §2.13)"
       latest.onLive?.(true);
     });
     expect(sceneAttr(again.container)).toBe("live");
+  });
+
+  it("a lost scene being rebuilt goes back behind the glass, with its own patience; a fallback keeps the glass to fade it out (release review 2026-10-13)", async () => {
+    const mock = createMockHertaBridge({ deviceSceneResult: true });
+    const { container } = renderWithLocale(
+      <HertaBridgeProvider bridge={mock.bridge}>
+        <DeviceCard />
+      </HertaBridgeProvider>,
+    );
+    await act(async () => {
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(IDLE_MOUNT_SETTLE_MS);
+    });
+    act(() => {
+      latest.onLive?.(true);
+    });
+    expect(sceneAttr(container)).toBe("live");
+    // Lost, and rebuilding: the glass, never the flat art between.
+    act(() => {
+      latest.onPending?.();
+    });
+    expect(sceneAttr(container)).toBe("pending");
+    expect(container.querySelector("img.device-frost")).not.toBeNull();
+    act(() => {
+      latest.onLive?.(true);
+    });
+    expect(sceneAttr(container)).toBe("live");
+    // A rebuild that never reports gets the same patience as the first.
+    act(() => {
+      latest.onPending?.();
+    });
+    act(() => {
+      vi.advanceTimersByTime(SCENE_PATIENCE_MS - 1);
+    });
+    expect(sceneAttr(container)).toBe("pending");
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(sceneAttr(container)).toBeNull();
+    // Flat, the glass stays mounted: the CSS fades it out.
+    expect(container.querySelector("img.device-frost")).not.toBeNull();
   });
 
   it("no GPU path: flat as soon as the probe answers, never the glass and then a cut (2026-09-10)", async () => {
